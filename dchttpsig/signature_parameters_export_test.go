@@ -1,0 +1,5 @@
+package dchttpsig
+
+var ExportForTesting_parseSignatureParameters = parseSignatureParameters
+
+type ExportForTesting_signaturesParameters = signaturesParameters

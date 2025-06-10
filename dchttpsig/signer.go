@@ -98,7 +98,7 @@ func (s *signer) SignRequest(req *http.Request, signOptions *SignOptions) error 
 	}
 
 	sp := signaturesParameters{
-		KeyId:             signOptions.SignerURI,
+		KeyId:             signOptions.KeyId,
 		Signature:         base64.StdEncoding.EncodeToString(signedTarget),
 		Algorithm:         algorithmString,
 		Created:           created,
@@ -193,7 +193,7 @@ func (s *signer) SignResponse(res *http.Response, signOptions *SignOptions) erro
 	}
 
 	sp := signaturesParameters{
-		KeyId:             signOptions.SignerURI,
+		KeyId:             signOptions.KeyId,
 		Signature:         base64.StdEncoding.EncodeToString(signedTarget),
 		Algorithm:         algorithmString,
 		Created:           created,

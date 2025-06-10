@@ -6,7 +6,7 @@ import (
 )
 
 type SignOptions struct {
-	SignerURI         string
+	KeyId             string
 	PrivateKey        crypto.PrivateKey // For asymmetric algorithms
 	SharedSecret      []byte            // For HMAC
 	SignTargetHeaders []string          // Headers to include in the signature string

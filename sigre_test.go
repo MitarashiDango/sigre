@@ -228,7 +228,7 @@ func TestSignAndVerify(t *testing.T) {
 
 			// --- 署名 ---
 			signOptions := &sigre.SignOptions{
-				SignerURI:         "test-key-id",
+				KeyId:             "test-key-id",
 				PrivateKey:        tc.signOpts.privateKey,
 				SharedSecret:      tc.signOpts.secret,
 				SignTargetHeaders: tc.signOpts.headers,

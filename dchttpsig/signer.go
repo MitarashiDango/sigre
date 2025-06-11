@@ -27,13 +27,7 @@ var (
 
 type SignOptions = common.SignOptions
 
-type signer struct{}
-
-func NewSigner() *signer {
-	return &signer{}
-}
-
-func (s *signer) SignRequest(req *http.Request, signOptions *SignOptions) error {
+func SignRequest(req *http.Request, signOptions *SignOptions) error {
 	if signOptions == nil {
 		return fmt.Errorf("signOptions is nil")
 	}
@@ -53,7 +47,6 @@ func (s *signer) SignRequest(req *http.Request, signOptions *SignOptions) error 
 			switch {
 			case headerName == RequestTarget || headerName == Created || headerName == Expires || headerName == "host":
 				userSignTargetNames = append(userSignTargetNames, headerName)
-				break
 			default:
 				if _, ok := req.Header[http.CanonicalHeaderKey(headerName)]; ok {
 					userSignTargetNames = append(userSignTargetNames, headerName)
@@ -70,7 +63,7 @@ func (s *signer) SignRequest(req *http.Request, signOptions *SignOptions) error 
 
 	hashForAlgo := signOptions.HashAlgorithm
 
-	signTargetBuf, created, expires, err := s.createSignString(req.Host, req.Method, req.URL, req.Header, normalizedSignTargetNames, signOptions)
+	signTargetBuf, created, expires, err := createSignString(req.Host, req.Method, req.URL, req.Header, normalizedSignTargetNames, signOptions)
 	if err != nil {
 		return fmt.Errorf("failed to create sign string: %w", err)
 	}
@@ -84,13 +77,13 @@ func (s *signer) SignRequest(req *http.Request, signOptions *SignOptions) error 
 	if keyType == "ed25519" {
 		algorithmString = "ed25519"
 	} else if keyType == "hmac" {
-		hashName, errHmacHash := s.getHashName(hashForAlgo)
+		hashName, errHmacHash := getHashName(hashForAlgo)
 		if errHmacHash != nil {
 			return fmt.Errorf("HMAC requires a valid hash algorithm: %w", errHmacHash)
 		}
 		algorithmString = keyType + "-" + hashName
 	} else {
-		hashName, errKeyHash := s.getHashName(hashForAlgo)
+		hashName, errKeyHash := getHashName(hashForAlgo)
 		if errKeyHash != nil {
 			return fmt.Errorf("failed to get hash name for algorithm: %w", errKeyHash)
 		}
@@ -120,7 +113,7 @@ func (s *signer) SignRequest(req *http.Request, signOptions *SignOptions) error 
 	return nil
 }
 
-func (s *signer) SignResponse(res *http.Response, signOptions *SignOptions) error {
+func SignResponse(res *http.Response, signOptions *SignOptions) error {
 	if signOptions == nil {
 		return fmt.Errorf("signOptions is nil")
 	}
@@ -140,7 +133,6 @@ func (s *signer) SignResponse(res *http.Response, signOptions *SignOptions) erro
 			switch {
 			case headerName == RequestTarget || headerName == Created || headerName == Expires || headerName == "host":
 				userSignTargetNames = append(userSignTargetNames, headerName)
-				break
 			default:
 				if _, ok := res.Header[http.CanonicalHeaderKey(headerName)]; ok {
 					userSignTargetNames = append(userSignTargetNames, headerName)
@@ -165,7 +157,7 @@ func (s *signer) SignResponse(res *http.Response, signOptions *SignOptions) erro
 		reqURLVal = res.Request.URL
 	}
 
-	signTargetBuf, created, expires, err := s.createSignString(reqHost, reqMethodHttp, reqURLVal, res.Header, normalizedSignTargetNames, signOptions)
+	signTargetBuf, created, expires, err := createSignString(reqHost, reqMethodHttp, reqURLVal, res.Header, normalizedSignTargetNames, signOptions)
 	if err != nil {
 		return fmt.Errorf("failed to create sign string for response: %w", err)
 	}
@@ -179,13 +171,13 @@ func (s *signer) SignResponse(res *http.Response, signOptions *SignOptions) erro
 	if keyType == "ed25519" {
 		algorithmString = "ed25519"
 	} else if keyType == "hmac" {
-		hashName, errHmacHash := s.getHashName(hashForAlgo)
+		hashName, errHmacHash := getHashName(hashForAlgo)
 		if errHmacHash != nil {
 			return fmt.Errorf("HMAC requires a valid hash algorithm for response: %w", errHmacHash)
 		}
 		algorithmString = keyType + "-" + hashName
 	} else {
-		hashName, errKeyHash := s.getHashName(hashForAlgo)
+		hashName, errKeyHash := getHashName(hashForAlgo)
 		if errKeyHash != nil {
 			return fmt.Errorf("failed to get hash name for algorithm for response: %w", errKeyHash)
 		}
@@ -215,7 +207,7 @@ func (s *signer) SignResponse(res *http.Response, signOptions *SignOptions) erro
 	return nil
 }
 
-func (s *signer) createSignString(host string, methodFromReq string, requestURL *url.URL, header http.Header, signTargetNames []string, signOptions *SignOptions) (buf *bytes.Buffer, createdString, expiresString string, err error) {
+func createSignString(host string, methodFromReq string, requestURL *url.URL, header http.Header, signTargetNames []string, signOptions *SignOptions) (buf *bytes.Buffer, createdString, expiresString string, err error) {
 	var startedAt int64
 	if signOptions.NowFunc == nil {
 		startedAt = time.Now().UTC().Unix()
@@ -251,7 +243,7 @@ func (s *signer) createSignString(host string, methodFromReq string, requestURL 
 	return stringToSignBuf, createdString, expiresString, nil
 }
 
-func (s *signer) getHashName(hash crypto.Hash) (string, error) {
+func getHashName(hash crypto.Hash) (string, error) {
 	switch hash {
 	case crypto.SHA256:
 		return "sha256", nil

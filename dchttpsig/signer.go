@@ -229,7 +229,7 @@ func (s *signer) createSignString(host string, methodFromReq string, requestURL 
 	}
 
 	if slices.Contains(signTargetNames, Expires) {
-		expiresString = strconv.FormatUint(uint64(startedAt)+signOptions.Expiry, 10)
+		expiresString = strconv.FormatInt(startedAt+signOptions.Expiry, 10)
 	}
 
 	var reqPath, reqQuery string

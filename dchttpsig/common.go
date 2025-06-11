@@ -16,7 +16,7 @@ const (
 
 	HS2019 = "hs2019" // Special algorithm value
 
-	DefaultExpiryTime = uint64(60) // seconds
+	DefaultExpiryTime = 60 // seconds
 )
 
 func getHash(hashAlgorithm string) (crypto.Hash, error) {
@@ -31,7 +31,7 @@ func getHash(hashAlgorithm string) (crypto.Hash, error) {
 }
 
 func isValidUnixTime(s string) error {
-	_, err := strconv.ParseUint(s, 10, 64)
+	_, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid integer format: %w", err)
 	}

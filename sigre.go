@@ -31,9 +31,7 @@ type Verifier interface {
 
 func SignRequest(req *http.Request, signOption *SignOptions) error {
 	if signOption.SignType == CavageHTTPSignatures {
-		signer := dchttpsig.NewSigner()
-
-		err := signer.SignRequest(req, signOption)
+		err := dchttpsig.SignRequest(req, signOption)
 		if err != nil {
 			return &SigreError{Err: err}
 		}
@@ -50,9 +48,7 @@ func SignRequest(req *http.Request, signOption *SignOptions) error {
 
 func SignResponse(res *http.Response, signOption *SignOptions) error {
 	if signOption.SignType == CavageHTTPSignatures {
-		signer := dchttpsig.NewSigner()
-
-		err := signer.SignResponse(res, signOption)
+		err := dchttpsig.SignResponse(res, signOption)
 		if err != nil {
 			return &SigreError{Err: err}
 		}

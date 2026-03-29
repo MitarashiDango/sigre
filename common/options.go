@@ -10,7 +10,7 @@ type SignOptions struct {
 	PrivateKey        crypto.PrivateKey // For asymmetric algorithms
 	SharedSecret      []byte            // For HMAC
 	SignTargetHeaders []string          // Headers to include in the signature string
-	SignType          SignType
+	SignatureType     SignatureType
 	HashAlgorithm     crypto.Hash      // Hash algorithm (e.g., crypto.SHA256), ignored for Ed25519 signing
 	Expiry            int64            // Expiration time in seconds from creation
 	SignatureHeader   string           // Header name for the signature (e.g., "Signature" or "Authorization")

@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/MitarashiDango/sigre"
-	"github.com/MitarashiDango/sigre/common"
 )
 
 // Sign and Verify E2E Tests
@@ -232,7 +231,7 @@ func TestSignAndVerify(t *testing.T) {
 				PrivateKey:        tc.signOpts.privateKey,
 				SharedSecret:      tc.signOpts.secret,
 				SignTargetHeaders: tc.signOpts.headers,
-				SignType:          sigre.CavageHTTPSignatures,
+				SignatureType:     sigre.CavageHTTPSignatures,
 				HashAlgorithm:     tc.signOpts.hash,
 				SignatureHeader:   sigre.Signature,
 				NowFunc:           testingNowFunc,
@@ -294,88 +293,6 @@ func TestSignAndVerify(t *testing.T) {
 				if err != nil {
 					t.Errorf("verification failed unexpectedly: %v", err)
 				}
-			}
-		})
-	}
-}
-
-func TestGetSignTypeAndParams(t *testing.T) {
-	t.Helper()
-
-	testCases := []struct {
-		name                 string
-		headers              http.Header
-		expectedType         common.SignType
-		expectedParamsString string
-		expectedInputString  string
-	}{
-		{
-			name: "正常系: RFC9421 (SignatureとSignature-Inputヘッダ)",
-			headers: http.Header{
-				"Signature":       []string{`sig1=:abasd...:`},
-				"Signature-Input": []string{`sig1=("@method" ...)`},
-			},
-			expectedType:         sigre.RFC9421,
-			expectedParamsString: `sig1=:abasd...:`,
-			expectedInputString:  `sig1=("@method" ...)`,
-		},
-		{
-			name: "正常系: HTTPSignatures (Signatureヘッダ)",
-			headers: http.Header{
-				"Signature": []string{`keyId="a",signature="b"`},
-			},
-			expectedType:         sigre.CavageHTTPSignatures,
-			expectedParamsString: `keyId="a",signature="b"`,
-			expectedInputString:  "",
-		},
-		{
-			name: "正常系: HTTPSignatures (Authorizationヘッダ)",
-			headers: http.Header{
-				"Authorization": []string{`Signature keyId="a",signature="b"`},
-			},
-			expectedType:         sigre.CavageHTTPSignatures,
-			expectedParamsString: `keyId="a",signature="b"`,
-			expectedInputString:  "",
-		},
-		{
-			name: "正常系: HTTPSignatures (Authorizationヘッダ、先頭にスペース)",
-			headers: http.Header{
-				"Authorization": []string{`Signature  keyId="a",signature="b"`},
-			},
-			expectedType:         sigre.CavageHTTPSignatures,
-			expectedParamsString: `keyId="a",signature="b"`,
-			expectedInputString:  "",
-		},
-		{
-			name: "異常系: Authorizationヘッダだが 'Signature' スキームではない",
-			headers: http.Header{
-				"Authorization": []string{`Bearer some-token`},
-			},
-			expectedType:         sigre.Unsigned,
-			expectedParamsString: "",
-			expectedInputString:  "",
-		},
-		{
-			name:                 "異常系: ヘッダなし",
-			headers:              http.Header{},
-			expectedType:         sigre.Unsigned,
-			expectedParamsString: "",
-			expectedInputString:  "",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			actualType, actualParams, actualInput := sigre.ExportForTesting_getSignTypeAndParams(tc.headers)
-
-			if actualType != tc.expectedType {
-				t.Errorf("expected type %v, got %v", tc.expectedType, actualType)
-			}
-			if actualParams != tc.expectedParamsString {
-				t.Errorf("expected params string '%s', got '%s'", tc.expectedParamsString, actualParams)
-			}
-			if actualInput != tc.expectedInputString {
-				t.Errorf("expected input string '%s', got '%s'", tc.expectedInputString, actualInput)
 			}
 		})
 	}

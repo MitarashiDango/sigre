@@ -3,22 +3,22 @@ package sigre
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/MitarashiDango/sigre/common"
 	"github.com/MitarashiDango/sigre/dchttpsig"
 )
 
 const (
-	Unsigned             common.SignType = iota
-	CavageHTTPSignatures                 // draft-cavage-http-signatures-12
-	RFC9421                              // TODO そのうち実装する
+	Unsigned             common.SignatureType = iota
+	CavageHTTPSignatures                      // draft-cavage-http-signatures-12
+	RFC9421                                   // TODO そのうち実装する
 )
 
 const (
-	Authorization  = common.Authorization
-	Signature      = common.Signature
-	SignatureInput = common.SignatureInput
+	Authorization   = common.Authorization
+	Signature       = common.Signature
+	SignatureInput  = common.SignatureInput
+	AcceptSignature = "Accept-Signature"
 )
 
 type SignOptions = common.SignOptions
@@ -30,7 +30,7 @@ type Verifier interface {
 }
 
 func SignRequest(req *http.Request, signOption *SignOptions) error {
-	if signOption.SignType == CavageHTTPSignatures {
+	if signOption.SignatureType == CavageHTTPSignatures {
 		err := dchttpsig.SignRequest(req, signOption)
 		if err != nil {
 			return &SigreError{Err: err}
@@ -39,15 +39,15 @@ func SignRequest(req *http.Request, signOption *SignOptions) error {
 	}
 
 	// RFC9421 not implemented
-	if signOption.SignType == RFC9421 {
+	if signOption.SignatureType == RFC9421 {
 		return &SigreError{Err: fmt.Errorf("RFC9421 signer not implemented")}
 	}
 
-	return &SigreError{Err: fmt.Errorf("unsupported sign type: %v", signOption.SignType)}
+	return &SigreError{Err: fmt.Errorf("unsupported sign type: %v", signOption.SignatureType)}
 }
 
 func SignResponse(res *http.Response, signOption *SignOptions) error {
-	if signOption.SignType == CavageHTTPSignatures {
+	if signOption.SignatureType == CavageHTTPSignatures {
 		err := dchttpsig.SignResponse(res, signOption)
 		if err != nil {
 			return &SigreError{Err: err}
@@ -56,18 +56,19 @@ func SignResponse(res *http.Response, signOption *SignOptions) error {
 	}
 
 	// RFC9421 not implemented
-	if signOption.SignType == RFC9421 {
+	if signOption.SignatureType == RFC9421 {
 		return &SigreError{Err: fmt.Errorf("RFC9421 signer not implemented")}
 	}
 
-	return &SigreError{Err: fmt.Errorf("unsupported sign type for response: %v", signOption.SignType)}
+	return &SigreError{Err: fmt.Errorf("unsupported sign type for response: %v", signOption.SignatureType)}
 }
 
 func NewRequestVerifier(req *http.Request) (Verifier, error) {
-	signType, signatureParamString, _ := getSignTypeAndParams(req.Header)
+	hf := GetSignatureHeaderFields(req.Header)
+	signatureType := hf.GetSignatureType()
 
-	if signType == CavageHTTPSignatures {
-		verifier, err := dchttpsig.NewRequestVerifier(req, signatureParamString)
+	if signatureType == CavageHTTPSignatures {
+		verifier, err := dchttpsig.NewRequestVerifier(req, hf.Signature)
 		if err != nil {
 			return nil, &SigreError{Err: err}
 		}
@@ -76,7 +77,7 @@ func NewRequestVerifier(req *http.Request) (Verifier, error) {
 	}
 
 	// RFC9421 not implemented
-	if signType == RFC9421 {
+	if signatureType == RFC9421 {
 		return nil, &SigreError{Err: fmt.Errorf("RFC9421 verifier not implemented")}
 	}
 
@@ -84,10 +85,11 @@ func NewRequestVerifier(req *http.Request) (Verifier, error) {
 }
 
 func NewResponseVerifier(res *http.Response) (Verifier, error) {
-	signType, signatureParamString, _ := getSignTypeAndParams(res.Header)
+	hf := GetSignatureHeaderFields(res.Header)
+	signatureType := hf.GetSignatureType()
 
-	if signType == CavageHTTPSignatures {
-		verifier, err := dchttpsig.NewResponseVerifier(res, signatureParamString)
+	if signatureType == CavageHTTPSignatures {
+		verifier, err := dchttpsig.NewResponseVerifier(res, hf.Signature)
 		if err != nil {
 			return nil, &SigreError{Err: err}
 		}
@@ -96,31 +98,9 @@ func NewResponseVerifier(res *http.Response) (Verifier, error) {
 	}
 
 	// RFC9421 not implemented
-	if signType == RFC9421 {
+	if signatureType == RFC9421 {
 		return nil, &SigreError{Err: fmt.Errorf("RFC9421 verifier not implemented")}
 	}
 
 	return nil, &SigreError{Err: ErrMissingSignature}
-}
-
-func getSignTypeAndParams(header http.Header) (signType common.SignType, params string, input string) {
-	signatureString := header.Get(common.Signature)
-	signatureInputString := header.Get(common.SignatureInput)
-
-	// RFC9421 uses both Signature and Signature-Input
-	if signatureInputString != "" && signatureString != "" {
-		return RFC9421, signatureString, signatureInputString
-	}
-
-	if signatureString != "" {
-		return CavageHTTPSignatures, signatureString, ""
-	}
-
-	authorizationHeaderValue := header.Get(common.Authorization)
-	if strings.HasPrefix(authorizationHeaderValue, "Signature ") {
-		trimmedParams := strings.TrimPrefix(authorizationHeaderValue, "Signature ")
-		return CavageHTTPSignatures, strings.TrimSpace(trimmedParams), ""
-	}
-
-	return Unsigned, "", ""
 }

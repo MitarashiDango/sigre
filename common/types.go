@@ -1,3 +1,3 @@
 package common
 
-type SignType int
+type SignatureType int

@@ -97,6 +97,9 @@ func (v *CavageVerifier) KeyId() string {
 // Returns an error if the signature was created with HMAC; use [CavageVerifier.VerifyHMAC] instead.
 // Passing nil opts is equivalent to passing a zero-value [VerifyOptions].
 func (v *CavageVerifier) Verify(key crypto.PublicKey, opts *VerifyOptions) error {
+	if key == nil {
+		return ErrMissingPublicKey
+	}
 	if opts == nil {
 		opts = &VerifyOptions{}
 	}
@@ -117,6 +120,9 @@ func (v *CavageVerifier) Verify(key crypto.PublicKey, opts *VerifyOptions) error
 // Returns an error if the signature was created with an asymmetric algorithm; use [CavageVerifier.Verify] instead.
 // Passing nil opts is equivalent to passing a zero-value [VerifyOptions].
 func (v *CavageVerifier) VerifyHMAC(secret []byte, opts *VerifyOptions) error {
+	if len(secret) == 0 {
+		return ErrMissingSharedSecret
+	}
 	if opts == nil {
 		opts = &VerifyOptions{}
 	}

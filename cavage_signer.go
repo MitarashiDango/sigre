@@ -63,9 +63,13 @@ func NewCavageSigner() *CavageSigner {
 
 // SignRequest signs req using privateKey and appends the Cavage signature header.
 // keyId identifies the signing key in the signature parameters.
+// Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateKey, keyId string, opts *CavageSignOptions) error {
 	if privateKey == nil {
 		return ErrMissingPrivateKey
+	}
+	if opts == nil {
+		opts = &CavageSignOptions{}
 	}
 
 	expiry := opts.Expiry
@@ -84,7 +88,7 @@ func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateK
 		return err
 	}
 
-	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, req.URL, req.Header, headers, expiry, opts)
+	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, req.URL, req.Header, headers, expiry)
 	if err != nil {
 		return fmt.Errorf("failed to create sign string: %w", err)
 	}
@@ -111,9 +115,13 @@ func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateK
 }
 
 // SignRequestWithHMAC signs req using a shared HMAC secret and appends the Cavage signature header.
+// Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, keyId string, opts *CavageSignOptions) error {
-	if secret == nil {
-		return ErrMissingPrivateKey
+	if len(secret) == 0 {
+		return ErrMissingSharedSecret
+	}
+	if opts == nil {
+		opts = &CavageSignOptions{}
 	}
 
 	expiry := opts.Expiry
@@ -132,7 +140,7 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 		return err
 	}
 
-	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, req.URL, req.Header, headers, expiry, opts)
+	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, req.URL, req.Header, headers, expiry)
 	if err != nil {
 		return fmt.Errorf("failed to create sign string: %w", err)
 	}
@@ -159,9 +167,13 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 }
 
 // SignResponse signs res using privateKey and appends the Cavage signature header.
+// Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.PrivateKey, keyId string, opts *CavageSignOptions) error {
 	if privateKey == nil {
 		return ErrMissingPrivateKey
+	}
+	if opts == nil {
+		opts = &CavageSignOptions{}
 	}
 
 	expiry := opts.Expiry
@@ -188,7 +200,7 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 		reqURL = res.Request.URL
 	}
 
-	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, reqURL, res.Header, headers, expiry, opts)
+	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, reqURL, res.Header, headers, expiry)
 	if err != nil {
 		return fmt.Errorf("failed to create sign string for response: %w", err)
 	}
@@ -215,9 +227,13 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 }
 
 // SignResponseWithHMAC signs res using a shared HMAC secret and appends the Cavage signature header.
+// Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, keyId string, opts *CavageSignOptions) error {
-	if secret == nil {
-		return ErrMissingPrivateKey
+	if len(secret) == 0 {
+		return ErrMissingSharedSecret
+	}
+	if opts == nil {
+		opts = &CavageSignOptions{}
 	}
 
 	expiry := opts.Expiry
@@ -244,11 +260,7 @@ func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, k
 		reqURL = res.Request.URL
 	}
 
-	if opts.HashAlgorithm == 0 {
-		return fmt.Errorf("hash algorithm must be specified for HMAC")
-	}
-
-	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, reqURL, res.Header, headers, expiry, opts)
+	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, reqURL, res.Header, headers, expiry)
 	if err != nil {
 		return fmt.Errorf("failed to create sign string for response: %w", err)
 	}
@@ -314,7 +326,6 @@ func (s *CavageSigner) buildSigningString(
 	header http.Header,
 	headers []string,
 	expiry int64,
-	opts *CavageSignOptions,
 ) (buf *bytes.Buffer, created, expires string, err error) {
 	var now int64
 	if s.Now == nil {

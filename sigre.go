@@ -22,7 +22,7 @@ type SignatureType int
 const (
 	Unsigned             SignatureType = iota
 	CavageHTTPSignatures               // draft-cavage-http-signatures-12
-	RFC9421                            // TODO: RFC9421のサポートは未実装
+	RFC9421                            // TODO: not yet implemented
 )
 
 // HTTP header name constants used in signature processing.

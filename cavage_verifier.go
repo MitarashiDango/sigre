@@ -104,7 +104,7 @@ func (v *CavageVerifier) Verify(key crypto.PublicKey, opts *VerifyOptions) error
 		opts = &VerifyOptions{}
 	}
 
-	sigBytes, decoded, keyType, hashesToTry, err := v.prepare(opts)
+	message, signature, keyType, hashesToTry, err := v.prepare(opts)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func (v *CavageVerifier) Verify(key crypto.PublicKey, opts *VerifyOptions) error
 		return fmt.Errorf("%w: signature algorithm is HMAC; use VerifyHMAC instead", ErrAlgorithmMismatch)
 	}
 
-	return verifyAsymmetric(key, keyType, decoded, sigBytes, hashesToTry, v.params.Algorithm)
+	return verifyAsymmetric(key, keyType, signature, message, hashesToTry, v.params.Algorithm)
 }
 
 // VerifyHMAC checks an HMAC signature against secret.
@@ -127,7 +127,7 @@ func (v *CavageVerifier) VerifyHMAC(secret []byte, opts *VerifyOptions) error {
 		opts = &VerifyOptions{}
 	}
 
-	sigBytes, decoded, keyType, hashes, err := v.prepare(opts)
+	message, signature, keyType, hashes, err := v.prepare(opts)
 	if err != nil {
 		return err
 	}
@@ -141,7 +141,7 @@ func (v *CavageVerifier) VerifyHMAC(secret []byte, opts *VerifyOptions) error {
 		if err != nil {
 			return fmt.Errorf("unsupported hash '%s' for HMAC: %w", hashes[0], err)
 		}
-		return verifyHMAC(secret, decoded, sigBytes, h)
+		return verifyHMAC(secret, signature, message, h)
 	case hs2019:
 		// algorithm="hs2019" or absent: try all supported hashes.
 		for _, name := range hashes {
@@ -149,7 +149,7 @@ func (v *CavageVerifier) VerifyHMAC(secret []byte, opts *VerifyOptions) error {
 			if err != nil {
 				continue
 			}
-			if verifyHMAC(secret, decoded, sigBytes, h) == nil {
+			if verifyHMAC(secret, signature, message, h) == nil {
 				return nil
 			}
 		}
@@ -162,7 +162,7 @@ func (v *CavageVerifier) VerifyHMAC(secret []byte, opts *VerifyOptions) error {
 // prepare performs the common pre-verification steps:
 // clock checks, required-header check, builds the verification string,
 // decodes the base64 signature, and resolves the algorithm.
-func (v *CavageVerifier) prepare(opts *VerifyOptions) (sigBytes, decoded []byte, keyType string, hashesToTry []string, err error) {
+func (v *CavageVerifier) prepare(opts *VerifyOptions) (message, signature []byte, keyType string, hashesToTry []string, err error) {
 	if v.params == nil {
 		return nil, nil, "", nil, fmt.Errorf("signature parameters not available for verification")
 	}
@@ -194,12 +194,12 @@ func (v *CavageVerifier) prepare(opts *VerifyOptions) (sigBytes, decoded []byte,
 		return nil, nil, "", nil, err
 	}
 
-	sigBytes, err = v.buildVerificationString()
+	message, err = v.buildVerificationString()
 	if err != nil {
 		return nil, nil, "", nil, fmt.Errorf("failed to create verification string: %w", err)
 	}
 
-	decoded, err = base64.StdEncoding.DecodeString(v.params.Signature)
+	signature, err = base64.StdEncoding.DecodeString(v.params.Signature)
 	if err != nil {
 		return nil, nil, "", nil, fmt.Errorf("failed to decode signature: %w", err)
 	}
@@ -215,7 +215,7 @@ func (v *CavageVerifier) prepare(opts *VerifyOptions) (sigBytes, decoded []byte,
 		}
 	}
 
-	return sigBytes, decoded, keyType, hashesToTry, nil
+	return message, signature, keyType, hashesToTry, nil
 }
 
 func (v *CavageVerifier) checkCreated(nowUnix, skew int64, skewEnabled bool) error {

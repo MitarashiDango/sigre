@@ -1,4 +1,4 @@
-package dchttpsig
+package sigre
 
 import (
 	"fmt"

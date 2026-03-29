@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/MitarashiDango/sigre"
-	"github.com/MitarashiDango/sigre/common"
 )
 
 func TestGetSignatureHeaderFields(t *testing.T) {
@@ -137,7 +136,7 @@ func TestSignatureHeaderFields_GetSignatureType(t *testing.T) {
 	tests := []struct {
 		name     string
 		hf       *sigre.SignatureHeaderFields
-		wantType common.SignatureType
+		wantType sigre.SignatureType
 	}{
 		{
 			name:     "SignatureもSignatureInputも空の場合はUnsigned",

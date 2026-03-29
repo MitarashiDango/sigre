@@ -3,8 +3,6 @@ package sigre
 import (
 	"net/http"
 	"strings"
-
-	"github.com/MitarashiDango/sigre/common"
 )
 
 type SignatureHeaderFields struct {
@@ -33,7 +31,7 @@ func GetSignatureHeaderFields(header http.Header) *SignatureHeaderFields {
 	return hf
 }
 
-func (hf *SignatureHeaderFields) GetSignatureType() common.SignatureType {
+func (hf *SignatureHeaderFields) GetSignatureType() SignatureType {
 	// RFC9421 uses both Signature and Signature-Input
 	if hf.SignatureInput != "" && hf.Signature != "" {
 		return RFC9421

@@ -1,4 +1,4 @@
-package dchttpsig
+package sigre
 
 var ExportForTesting_parseSignatureParameters = parseSignatureParameters
 

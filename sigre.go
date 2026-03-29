@@ -1,28 +1,46 @@
 package sigre
 
 import (
+	"crypto"
 	"fmt"
 	"net/http"
+	"time"
+)
 
-	"github.com/MitarashiDango/sigre/common"
-	"github.com/MitarashiDango/sigre/dchttpsig"
+type SignatureType int
+
+const (
+	Unsigned             SignatureType = iota
+	CavageHTTPSignatures               // draft-cavage-http-signatures-12
+	RFC9421                            // TODO そのうち実装する
 )
 
 const (
-	Unsigned             common.SignatureType = iota
-	CavageHTTPSignatures                      // draft-cavage-http-signatures-12
-	RFC9421                                   // TODO そのうち実装する
-)
-
-const (
-	Authorization   = common.Authorization
-	Signature       = common.Signature
-	SignatureInput  = common.SignatureInput
+	Authorization   = "Authorization"
+	Signature       = "Signature"
+	SignatureInput  = "Signature-Input"
 	AcceptSignature = "Accept-Signature"
 )
 
-type SignOptions = common.SignOptions
-type VerifyOptions = common.VerifyOptions
+type SignOptions struct {
+	KeyId             string
+	PrivateKey        crypto.PrivateKey // For asymmetric algorithms
+	SharedSecret      []byte            // For HMAC
+	SignTargetHeaders []string          // Headers to include in the signature string
+	SignatureType     SignatureType
+	HashAlgorithm     crypto.Hash      // Hash algorithm (e.g., crypto.SHA256), ignored for Ed25519 signing
+	Expiry            int64            // Expiration time in seconds from creation
+	SignatureHeader   string           // Header name for the signature (e.g., "Signature" or "Authorization")
+	NowFunc           func() time.Time // For debugging and testing
+}
+
+type VerifyOptions struct {
+	PublicKey        crypto.PublicKey // For asymmetric algorithms
+	SharedSecret     []byte           // For HMAC
+	AllowedClockSkew time.Duration    // For validating (created) and (expires)
+	RequiredHeaders  []string         // To enforce presence of certain headers in the signature parameters
+	NowFunc          func() time.Time // For debugging and testing
+}
 
 type Verifier interface {
 	Verify(verifyOption *VerifyOptions) error
@@ -31,7 +49,7 @@ type Verifier interface {
 
 func SignRequest(req *http.Request, signOption *SignOptions) error {
 	if signOption.SignatureType == CavageHTTPSignatures {
-		err := dchttpsig.SignRequest(req, signOption)
+		err := SignRequestWithCavageHTTPSignatures(req, signOption)
 		if err != nil {
 			return &SigreError{Err: err}
 		}
@@ -48,7 +66,7 @@ func SignRequest(req *http.Request, signOption *SignOptions) error {
 
 func SignResponse(res *http.Response, signOption *SignOptions) error {
 	if signOption.SignatureType == CavageHTTPSignatures {
-		err := dchttpsig.SignResponse(res, signOption)
+		err := SignResponseWithCavageHTTPSignatures(res, signOption)
 		if err != nil {
 			return &SigreError{Err: err}
 		}
@@ -68,7 +86,7 @@ func NewRequestVerifier(req *http.Request) (Verifier, error) {
 	signatureType := hf.GetSignatureType()
 
 	if signatureType == CavageHTTPSignatures {
-		verifier, err := dchttpsig.NewRequestVerifier(req, hf.Signature)
+		verifier, err := NewCavageHTTPSignaturesVerifierFromRequest(req, hf.Signature)
 		if err != nil {
 			return nil, &SigreError{Err: err}
 		}
@@ -89,7 +107,7 @@ func NewResponseVerifier(res *http.Response) (Verifier, error) {
 	signatureType := hf.GetSignatureType()
 
 	if signatureType == CavageHTTPSignatures {
-		verifier, err := dchttpsig.NewResponseVerifier(res, hf.Signature)
+		verifier, err := NewCavageHTTPSignaturesVerifierFromResponse(res, hf.Signature)
 		if err != nil {
 			return nil, &SigreError{Err: err}
 		}

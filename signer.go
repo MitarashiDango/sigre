@@ -1,4 +1,4 @@
-package dchttpsig
+package sigre
 
 import (
 	"bytes"
@@ -16,8 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/MitarashiDango/sigre/common"
 )
 
 var (
@@ -25,9 +23,7 @@ var (
 	DefaultResponseHeaderNames = []string{"date", "digest"}
 )
 
-type SignOptions = common.SignOptions
-
-func SignRequest(req *http.Request, signOptions *SignOptions) error {
+func SignRequestWithCavageHTTPSignatures(req *http.Request, signOptions *SignOptions) error {
 	if signOptions == nil {
 		return fmt.Errorf("signOptions is nil")
 	}
@@ -99,13 +95,13 @@ func SignRequest(req *http.Request, signOptions *SignOptions) error {
 		SignTargetHeaders: normalizedSignTargetNames,
 	}
 
-	signatureHeader := common.Signature
+	signatureHeader := Signature
 	if signOptions.SignatureHeader != "" {
 		signatureHeader = signOptions.SignatureHeader
 	}
 
-	if http.CanonicalHeaderKey(signatureHeader) == common.Authorization {
-		req.Header.Set(common.Authorization, "Signature "+sp.String())
+	if http.CanonicalHeaderKey(signatureHeader) == Authorization {
+		req.Header.Set(Authorization, "Signature "+sp.String())
 	} else {
 		req.Header.Set(signatureHeader, sp.String())
 	}
@@ -113,7 +109,7 @@ func SignRequest(req *http.Request, signOptions *SignOptions) error {
 	return nil
 }
 
-func SignResponse(res *http.Response, signOptions *SignOptions) error {
+func SignResponseWithCavageHTTPSignatures(res *http.Response, signOptions *SignOptions) error {
 	if signOptions == nil {
 		return fmt.Errorf("signOptions is nil")
 	}
@@ -193,13 +189,13 @@ func SignResponse(res *http.Response, signOptions *SignOptions) error {
 		SignTargetHeaders: normalizedSignTargetNames,
 	}
 
-	signatureHeader := common.Signature
+	signatureHeader := Signature
 	if signOptions.SignatureHeader != "" {
 		signatureHeader = signOptions.SignatureHeader
 	}
 
-	if http.CanonicalHeaderKey(signatureHeader) == common.Authorization {
-		res.Header.Set(common.Authorization, "Signature "+sp.String())
+	if http.CanonicalHeaderKey(signatureHeader) == Authorization {
+		res.Header.Set(Authorization, "Signature "+sp.String())
 	} else {
 		res.Header.Set(signatureHeader, sp.String())
 	}

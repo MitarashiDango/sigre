@@ -1,11 +1,11 @@
-package dchttpsig_test
+package sigre_test
 
 import (
 	"crypto"
 	"errors"
 	"testing"
 
-	"github.com/MitarashiDango/sigre/dchttpsig"
+	"github.com/MitarashiDango/sigre"
 )
 
 func TestGetHash(t *testing.T) {
@@ -33,19 +33,19 @@ func TestGetHash(t *testing.T) {
 			name:          "異常系: サポートされていないアルゴリズム",
 			input:         "sha1",
 			expectedHash:  0,
-			expectedError: dchttpsig.ErrUnsupportedHashAlgorithm,
+			expectedError: sigre.ErrUnsupportedHashAlgorithm,
 		},
 		{
 			name:          "異常系: 不正なアルゴリズム名",
 			input:         "invalid-algorithm",
 			expectedHash:  0,
-			expectedError: dchttpsig.ErrUnsupportedHashAlgorithm,
+			expectedError: sigre.ErrUnsupportedHashAlgorithm,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			actualHash, actualErr := dchttpsig.ExportForTesting_getHash(tc.input)
+			actualHash, actualErr := sigre.ExportForTesting_getHash(tc.input)
 
 			// エラーの比較
 			if !errors.Is(actualErr, tc.expectedError) {

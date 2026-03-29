@@ -1,4 +1,4 @@
-package dchttpsig
+package sigre
 
 import (
 	"crypto"
@@ -15,8 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/MitarashiDango/sigre/common"
 )
 
 var (
@@ -33,9 +31,7 @@ var (
 	}
 )
 
-type VerifyOptions = common.VerifyOptions
-
-type verifier struct {
+type cavageHTTPSignaturesVerifier struct {
 	host   string
 	method string
 	url    *url.URL
@@ -43,13 +39,13 @@ type verifier struct {
 	sp     *signaturesParameters
 }
 
-func NewRequestVerifier(req *http.Request, signatureParametersString string) (*verifier, error) {
+func NewCavageHTTPSignaturesVerifierFromRequest(req *http.Request, signatureParametersString string) (*cavageHTTPSignaturesVerifier, error) {
 	sp, err := parseSignatureParameters(signatureParametersString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HTTP signature parameters from request: %w", err)
 	}
 
-	return &verifier{
+	return &cavageHTTPSignaturesVerifier{
 		host:   req.Host,
 		method: strings.ToLower(req.Method),
 		url:    req.URL,
@@ -58,7 +54,7 @@ func NewRequestVerifier(req *http.Request, signatureParametersString string) (*v
 	}, nil
 }
 
-func NewResponseVerifier(res *http.Response, signatureParametersString string) (*verifier, error) {
+func NewCavageHTTPSignaturesVerifierFromResponse(res *http.Response, signatureParametersString string) (*cavageHTTPSignaturesVerifier, error) {
 	sp, err := parseSignatureParameters(signatureParametersString)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse HTTP signature parameters from response: %w", err)
@@ -72,7 +68,7 @@ func NewResponseVerifier(res *http.Response, signatureParametersString string) (
 		reqURL = res.Request.URL
 	}
 
-	return &verifier{
+	return &cavageHTTPSignaturesVerifier{
 		host:   host,
 		method: method,
 		url:    reqURL,
@@ -81,7 +77,7 @@ func NewResponseVerifier(res *http.Response, signatureParametersString string) (
 	}, nil
 }
 
-func (v *verifier) Verify(verifyOptions *VerifyOptions) error {
+func (v *cavageHTTPSignaturesVerifier) Verify(verifyOptions *VerifyOptions) error {
 	if verifyOptions == nil {
 		return fmt.Errorf("verifyOptions cannot be nil")
 	}
@@ -175,7 +171,7 @@ func (v *verifier) Verify(verifyOptions *VerifyOptions) error {
 	return v.verifyDecodedSignature(verifyOptions, keyTypeFromAlgoParam, decodedSignature, verificationStringBytes, hashAlgosToTry)
 }
 
-func (v *verifier) verifyDecodedSignature(verifyOpts *VerifyOptions, keyTypeFromAlgoParam string, decodedSignature []byte, verificationStringBytes []byte, hashAlgosToTry []string) error {
+func (v *cavageHTTPSignaturesVerifier) verifyDecodedSignature(verifyOpts *VerifyOptions, keyTypeFromAlgoParam string, decodedSignature []byte, verificationStringBytes []byte, hashAlgosToTry []string) error {
 	if keyTypeFromAlgoParam == "hmac" {
 		if verifyOpts.SharedSecret == nil {
 			return ErrMissingSharedSecret
@@ -228,7 +224,7 @@ func (v *verifier) verifyDecodedSignature(verifyOpts *VerifyOptions, keyTypeFrom
 	}
 }
 
-func (v *verifier) KeyId() string {
+func (v *cavageHTTPSignaturesVerifier) KeyId() string {
 	if v.sp == nil {
 		return ""
 	}
@@ -240,7 +236,7 @@ func (v *verifier) KeyId() string {
 // For "hs2019" or missing algorithm param, it returns "hs2019" as keyType and a list of available hashes to try.
 // For specific algorithms like "rsa-sha256", it returns "rsa" and ["sha256"].
 // For "ed25519", it returns "ed25519" and an empty list (hash is implicit).
-func (v *verifier) determineVerificationAlgorithms() (keyType string, hashAlgosToTry []string, err error) {
+func (v *cavageHTTPSignaturesVerifier) determineVerificationAlgorithms() (keyType string, hashAlgosToTry []string, err error) {
 	algoParam := v.sp.Algorithm
 	if algoParam == "" || algoParam == HS2019 {
 		return HS2019, availableHashAlgorithms, nil
@@ -273,7 +269,7 @@ func (v *verifier) determineVerificationAlgorithms() (keyType string, hashAlgosT
 	return keyType, []string{hashStr}, nil
 }
 
-func (v *verifier) createVerificationStringBytes() ([]byte, error) {
+func (v *cavageHTTPSignaturesVerifier) createVerificationStringBytes() ([]byte, error) {
 	if v.sp == nil {
 		return nil, fmt.Errorf("signature parameters (sp) are nil in verifier context")
 	}

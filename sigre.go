@@ -1,3 +1,12 @@
+// Package sigre provides HTTP message signing and verification.
+//
+// It currently implements draft-cavage-http-signatures-12 via [CavageSigner].
+// RFC9421 (https://datatracker.ietf.org/doc/html/rfc9421) support is planned.
+//
+// To verify a signed HTTP request or response, call [NewRequestVerifier] or
+// [NewResponseVerifier]; the returned [Verifier] detects the scheme automatically.
+// For Cavage-specific features such as a custom time source, use
+// [NewCavageRequestVerifier] or [NewCavageResponseVerifier] directly.
 package sigre
 
 import (
@@ -7,14 +16,16 @@ import (
 	"time"
 )
 
+// SignatureType identifies the HTTP signature scheme present in a message.
 type SignatureType int
 
 const (
 	Unsigned             SignatureType = iota
 	CavageHTTPSignatures               // draft-cavage-http-signatures-12
-	RFC9421                            // TODO そのうち実装する
+	RFC9421                            // TODO: RFC9421のサポートは未実装
 )
 
+// HTTP header name constants used in signature processing.
 const (
 	Authorization   = "Authorization"
 	Signature       = "Signature"
@@ -22,103 +33,60 @@ const (
 	AcceptSignature = "Accept-Signature"
 )
 
-type SignOptions struct {
-	KeyId             string
-	PrivateKey        crypto.PrivateKey // For asymmetric algorithms
-	SharedSecret      []byte            // For HMAC
-	SignTargetHeaders []string          // Headers to include in the signature string
-	SignatureType     SignatureType
-	HashAlgorithm     crypto.Hash      // Hash algorithm (e.g., crypto.SHA256), ignored for Ed25519 signing
-	Expiry            int64            // Expiration time in seconds from creation
-	SignatureHeader   string           // Header name for the signature (e.g., "Signature" or "Authorization")
-	NowFunc           func() time.Time // For debugging and testing
-}
-
+// VerifyOptions configures signature verification behaviour.
+// Passing nil is equivalent to passing a zero-value VerifyOptions.
 type VerifyOptions struct {
-	PublicKey        crypto.PublicKey // For asymmetric algorithms
-	SharedSecret     []byte           // For HMAC
-	AllowedClockSkew time.Duration    // For validating (created) and (expires)
-	RequiredHeaders  []string         // To enforce presence of certain headers in the signature parameters
-	NowFunc          func() time.Time // For debugging and testing
+	// AllowedClockSkew sets the tolerance window for (created) and (expires) checks.
+	// A zero value disables the "too old" check while still rejecting future (created) timestamps.
+	AllowedClockSkew time.Duration
+	// RequiredHeaders lists header names that must appear in the signature's headers parameter.
+	RequiredHeaders []string
 }
 
+// Verifier verifies an HTTP message signature.
 type Verifier interface {
-	Verify(verifyOption *VerifyOptions) error
+	// KeyId returns the key identifier from the signature parameters.
 	KeyId() string
+	// Verify checks an asymmetric signature (RSA, ECDSA, Ed25519) against key.
+	// Returns an error if the signature was created with HMAC; use [Verifier.VerifyHMAC] instead.
+	Verify(key crypto.PublicKey, opts *VerifyOptions) error
+	// VerifyHMAC checks an HMAC signature against secret.
+	// Returns an error if the signature was created with an asymmetric algorithm; use [Verifier.Verify] instead.
+	VerifyHMAC(secret []byte, opts *VerifyOptions) error
 }
 
-func SignRequest(req *http.Request, signOption *SignOptions) error {
-	if signOption.SignatureType == CavageHTTPSignatures {
-		err := SignRequestWithCavageHTTPSignatures(req, signOption)
-		if err != nil {
-			return &SigreError{Err: err}
-		}
-		return nil
-	}
-
-	// RFC9421 not implemented
-	if signOption.SignatureType == RFC9421 {
-		return &SigreError{Err: fmt.Errorf("RFC9421 signer not implemented")}
-	}
-
-	return &SigreError{Err: fmt.Errorf("unsupported sign type: %v", signOption.SignatureType)}
-}
-
-func SignResponse(res *http.Response, signOption *SignOptions) error {
-	if signOption.SignatureType == CavageHTTPSignatures {
-		err := SignResponseWithCavageHTTPSignatures(res, signOption)
-		if err != nil {
-			return &SigreError{Err: err}
-		}
-		return nil
-	}
-
-	// RFC9421 not implemented
-	if signOption.SignatureType == RFC9421 {
-		return &SigreError{Err: fmt.Errorf("RFC9421 signer not implemented")}
-	}
-
-	return &SigreError{Err: fmt.Errorf("unsupported sign type for response: %v", signOption.SignatureType)}
-}
-
+// NewRequestVerifier creates a [Verifier] for req.
+// It detects the signature scheme automatically from the request headers.
+// Returns an error if no recognisable signature is present.
+//
+// To access Cavage-specific fields such as [CavageVerifier.Now], use
+// [NewCavageRequestVerifier] instead.
 func NewRequestVerifier(req *http.Request) (Verifier, error) {
 	hf := GetSignatureHeaderFields(req.Header)
-	signatureType := hf.GetSignatureType()
-
-	if signatureType == CavageHTTPSignatures {
-		verifier, err := NewCavageHTTPSignaturesVerifierFromRequest(req, hf.Signature)
-		if err != nil {
-			return nil, &SigreError{Err: err}
-		}
-
-		return verifier, nil
-	}
-
-	// RFC9421 not implemented
-	if signatureType == RFC9421 {
+	switch hf.GetSignatureType() {
+	case CavageHTTPSignatures:
+		return NewCavageRequestVerifier(req)
+	case RFC9421:
 		return nil, &SigreError{Err: fmt.Errorf("RFC9421 verifier not implemented")}
+	default:
+		return nil, &SigreError{Err: ErrMissingSignature}
 	}
-
-	return nil, &SigreError{Err: ErrMissingSignature}
 }
 
+// NewResponseVerifier creates a [Verifier] for res.
+// It detects the signature scheme automatically from the response headers.
+// Returns an error if no recognisable signature is present.
+//
+// To access Cavage-specific fields such as [CavageVerifier.Now], use
+// [NewCavageResponseVerifier] instead.
 func NewResponseVerifier(res *http.Response) (Verifier, error) {
 	hf := GetSignatureHeaderFields(res.Header)
-	signatureType := hf.GetSignatureType()
-
-	if signatureType == CavageHTTPSignatures {
-		verifier, err := NewCavageHTTPSignaturesVerifierFromResponse(res, hf.Signature)
-		if err != nil {
-			return nil, &SigreError{Err: err}
-		}
-
-		return verifier, nil
-	}
-
-	// RFC9421 not implemented
-	if signatureType == RFC9421 {
+	switch hf.GetSignatureType() {
+	case CavageHTTPSignatures:
+		return NewCavageResponseVerifier(res)
+	case RFC9421:
 		return nil, &SigreError{Err: fmt.Errorf("RFC9421 verifier not implemented")}
+	default:
+		return nil, &SigreError{Err: ErrMissingSignature}
 	}
-
-	return nil, &SigreError{Err: ErrMissingSignature}
 }

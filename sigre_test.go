@@ -110,9 +110,9 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
-			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256, headers: []string{"(created)", "date"}},
+			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(created)", "date"}},
 			verifyOpts: verifyOptsPartial{
-				publicKey: rsaPubKey,
+				publicKey: ed25519PubKey,
 				clockSkew: 1 * time.Minute,
 				// now を 30秒 進めて検証。skew(60秒)の範囲内なので成功するはず。
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 30, 30, 0, time.UTC) },
@@ -133,9 +133,9 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
-			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256, headers: []string{"(created)", "date"}},
+			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(created)", "date"}},
 			verifyOpts: verifyOptsPartial{
-				publicKey: rsaPubKey,
+				publicKey: ed25519PubKey,
 				clockSkew: 1 * time.Minute,
 				// now を 61秒 進めて検証。skew(60秒)を超えるため失敗するはず。
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 31, 1, 0, time.UTC) },
@@ -226,23 +226,37 @@ func TestSignAndVerify(t *testing.T) {
 			t.Log(targetHeader)
 
 			// --- 署名 ---
-			signOptions := &sigre.SignOptions{
-				KeyId:             "test-key-id",
-				PrivateKey:        tc.signOpts.privateKey,
-				SharedSecret:      tc.signOpts.secret,
-				SignTargetHeaders: tc.signOpts.headers,
-				SignatureType:     sigre.CavageHTTPSignatures,
-				HashAlgorithm:     tc.signOpts.hash,
-				SignatureHeader:   sigre.Signature,
-				NowFunc:           testingNowFunc,
+			signOptions := &sigre.CavageSignOptions{
+				Headers:         tc.signOpts.headers,
+				HashAlgorithm:   tc.signOpts.hash,
+				SignatureHeader: sigre.Signature,
 			}
+
+			keyId := "test-key-id"
+
+			signer := &sigre.CavageSigner{
+				Now: testingNowFunc,
+			}
+
 			if tc.isRequest {
-				if err := sigre.SignRequest(req, signOptions); err != nil {
-					t.Fatalf("SignRequest failed: %v", err)
+				if len(tc.signOpts.secret) != 0 {
+					if err := signer.SignRequestWithHMAC(req, tc.signOpts.secret, keyId, signOptions); err != nil {
+						t.Fatalf("SignRequest failed: %v", err)
+					}
+				} else {
+					if err := signer.SignRequest(req, tc.signOpts.privateKey, keyId, signOptions); err != nil {
+						t.Fatalf("SignRequest failed: %v", err)
+					}
 				}
 			} else {
-				if err := sigre.SignResponse(res, signOptions); err != nil {
-					t.Fatalf("SignResponse failed: %v", err)
+				if len(tc.signOpts.secret) != 0 {
+					if err := signer.SignResponseWithHMAC(res, tc.signOpts.secret, keyId, signOptions); err != nil {
+						t.Fatalf("SignResponse failed: %v", err)
+					}
+				} else {
+					if err := signer.SignResponse(res, tc.signOpts.privateKey, keyId, signOptions); err != nil {
+						t.Fatalf("SignResponse failed: %v", err)
+					}
 				}
 			}
 
@@ -259,30 +273,31 @@ func TestSignAndVerify(t *testing.T) {
 			}
 
 			// --- 検証 ---
-			var verifier sigre.Verifier
+			var verifier *sigre.CavageVerifier
 			if tc.isRequest {
-				verifier, err = sigre.NewRequestVerifier(req)
+				verifier, err = sigre.NewCavageRequestVerifier(req)
 			} else {
-				verifier, err = sigre.NewResponseVerifier(res)
+				verifier, err = sigre.NewCavageResponseVerifier(res)
 			}
 			if err != nil {
-				// 署名があるのに Verifier の作成に失敗した場合
 				if !tc.expectError {
 					t.Fatalf("NewVerifier failed: %v", err)
 				}
-				// エラーが期待されるテストで、ここでのエラーは許容される場合がある
 				return
 			}
 
+			verifier.Now = testingNowFunc
+
 			verifyOptions := &sigre.VerifyOptions{
-				PublicKey:        tc.verifyOpts.publicKey,
-				SharedSecret:     tc.verifyOpts.secret,
 				AllowedClockSkew: tc.verifyOpts.clockSkew,
 				RequiredHeaders:  tc.verifyOpts.requiredHeaders,
-				NowFunc:          testingNowFunc,
 			}
 
-			err = verifier.Verify(verifyOptions)
+			if len(tc.verifyOpts.secret) != 0 {
+				err = verifier.VerifyHMAC(tc.verifyOpts.secret, verifyOptions)
+			} else {
+				err = verifier.Verify(tc.verifyOpts.publicKey, verifyOptions)
+			}
 
 			// --- 結果の確認 ---
 			if tc.expectError {

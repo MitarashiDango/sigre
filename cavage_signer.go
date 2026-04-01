@@ -66,7 +66,7 @@ func NewCavageSigner() *CavageSigner {
 // Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateKey, keyId string, opts *CavageSignOptions) error {
 	if privateKey == nil {
-		return ErrMissingPrivateKey
+		return wrapSigreError(ErrMissingPrivateKey)
 	}
 	if opts == nil {
 		opts = &CavageSignOptions{}
@@ -85,22 +85,22 @@ func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateK
 		effectiveKeyType = hs2019
 	}
 	if err := validateCreatedExpiresWithAlgorithm(headers, effectiveKeyType); err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, req.URL, req.Header, headers, expiry)
 	if err != nil {
-		return fmt.Errorf("failed to create sign string: %w", err)
+		return wrapSigreError(fmt.Errorf("failed to create sign string: %w", err))
 	}
 
 	sig, keyType, err := s.signBytes(privateKey, opts, buf.Bytes())
 	if err != nil {
-		return fmt.Errorf("failed to create signature: %w", err)
+		return wrapSigreError(fmt.Errorf("failed to create signature: %w", err))
 	}
 
 	algoStr, err := s.algorithmString(opts.UseHS2019, keyType, opts.HashAlgorithm)
 	if err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	s.setSignatureHeader(req.Header, opts.SignatureHeader, cavageParams{
@@ -118,7 +118,7 @@ func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateK
 // Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, keyId string, opts *CavageSignOptions) error {
 	if len(secret) == 0 {
-		return ErrMissingSharedSecret
+		return wrapSigreError(ErrMissingSharedSecret)
 	}
 	if opts == nil {
 		opts = &CavageSignOptions{}
@@ -137,22 +137,22 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 		hmacKeyType = hs2019
 	}
 	if err := validateCreatedExpiresWithAlgorithm(headers, hmacKeyType); err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, req.URL, req.Header, headers, expiry)
 	if err != nil {
-		return fmt.Errorf("failed to create sign string: %w", err)
+		return wrapSigreError(fmt.Errorf("failed to create sign string: %w", err))
 	}
 
 	sig, err := s.signHMAC(secret, buf.Bytes(), opts.HashAlgorithm)
 	if err != nil {
-		return fmt.Errorf("failed to create signature: %w", err)
+		return wrapSigreError(fmt.Errorf("failed to create signature: %w", err))
 	}
 
 	algoStr, err := s.hmacAlgorithmString(opts.UseHS2019, opts.HashAlgorithm)
 	if err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	s.setSignatureHeader(req.Header, opts.SignatureHeader, cavageParams{
@@ -170,7 +170,7 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 // Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.PrivateKey, keyId string, opts *CavageSignOptions) error {
 	if privateKey == nil {
-		return ErrMissingPrivateKey
+		return wrapSigreError(ErrMissingPrivateKey)
 	}
 	if opts == nil {
 		opts = &CavageSignOptions{}
@@ -189,7 +189,7 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 		effectiveKeyType = hs2019
 	}
 	if err := validateCreatedExpiresWithAlgorithm(headers, effectiveKeyType); err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	var reqHost, reqMethod string
@@ -202,17 +202,17 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 
 	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, reqURL, res.Header, headers, expiry)
 	if err != nil {
-		return fmt.Errorf("failed to create sign string for response: %w", err)
+		return wrapSigreError(fmt.Errorf("failed to create sign string for response: %w", err))
 	}
 
 	sig, keyType, err := s.signBytes(privateKey, opts, buf.Bytes())
 	if err != nil {
-		return fmt.Errorf("failed to create signature for response: %w", err)
+		return wrapSigreError(fmt.Errorf("failed to create signature for response: %w", err))
 	}
 
 	algoStr, err := s.algorithmString(opts.UseHS2019, keyType, opts.HashAlgorithm)
 	if err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	s.setSignatureHeader(res.Header, opts.SignatureHeader, cavageParams{
@@ -230,7 +230,7 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 // Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, keyId string, opts *CavageSignOptions) error {
 	if len(secret) == 0 {
-		return ErrMissingSharedSecret
+		return wrapSigreError(ErrMissingSharedSecret)
 	}
 	if opts == nil {
 		opts = &CavageSignOptions{}
@@ -249,7 +249,7 @@ func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, k
 		hmacKeyType = hs2019
 	}
 	if err := validateCreatedExpiresWithAlgorithm(headers, hmacKeyType); err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	var reqHost, reqMethod string
@@ -262,17 +262,17 @@ func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, k
 
 	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, reqURL, res.Header, headers, expiry)
 	if err != nil {
-		return fmt.Errorf("failed to create sign string for response: %w", err)
+		return wrapSigreError(fmt.Errorf("failed to create sign string for response: %w", err))
 	}
 
 	sig, err := s.signHMAC(secret, buf.Bytes(), opts.HashAlgorithm)
 	if err != nil {
-		return fmt.Errorf("failed to create signature for response: %w", err)
+		return wrapSigreError(fmt.Errorf("failed to create signature for response: %w", err))
 	}
 
 	algoStr, err := s.hmacAlgorithmString(opts.UseHS2019, opts.HashAlgorithm)
 	if err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	s.setSignatureHeader(res.Header, opts.SignatureHeader, cavageParams{

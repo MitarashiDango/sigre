@@ -18,9 +18,9 @@ func TestParseCavageParams(t *testing.T) {
 		expectError   bool
 		errorContains string
 	}{
-		// 正常系テストケース
+		// Success cases
 		{
-			name:  "正常系: 全てのパラメータを含む",
+			name:  "Success: all parameters present",
 			input: `keyId="test-key-1",algorithm="rsa-sha256",created=1618952679,expires=1618952739,headers="(created) (expires) host date digest",signature="Base64SignatureHere"`,
 			expected: &sigre.ExportForTesting_cavageParams{
 				KeyId:     "test-key-1",
@@ -39,7 +39,7 @@ func TestParseCavageParams(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:  "正常系: createdとexpiresがない",
+			name:  "Success: without created and expires",
 			input: `keyId="test-key-2",algorithm="hmac-sha512",headers="host date",signature="AnotherBase64Signature"`,
 			expected: &sigre.ExportForTesting_cavageParams{
 				KeyId:     "test-key-2",
@@ -50,7 +50,7 @@ func TestParseCavageParams(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:  "正常系: headers内のヘッダー名が大文字（小文字に変換されることを期待）",
+			name:  "Success: uppercase header names in headers param are lowercased",
 			input: `keyId="test-key-3",headers="Host Date Content-Type",signature="sig"`,
 			expected: &sigre.ExportForTesting_cavageParams{
 				KeyId:     "test-key-3",
@@ -60,7 +60,7 @@ func TestParseCavageParams(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:  "正常系: パラメータの順序が異なる",
+			name:  "Success: different parameter order",
 			input: `signature="sig",headers="date",keyId="test-key-4"`,
 			expected: &sigre.ExportForTesting_cavageParams{
 				KeyId:     "test-key-4",
@@ -70,7 +70,7 @@ func TestParseCavageParams(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:  "正常系: 未知のパラメータは無視される",
+			name:  "Success: unknown parameters are ignored",
 			input: `keyId="test-key-5",signature="sig",custom="some-value"`,
 			expected: &sigre.ExportForTesting_cavageParams{
 				KeyId:     "test-key-5",
@@ -79,51 +79,51 @@ func TestParseCavageParams(t *testing.T) {
 			expectError: false,
 		},
 
-		// 異常系テストケース
+		// Failure cases
 		{
-			name:          "異常系: 必須パラメータ keyId がない",
+			name:          "Failure: missing required parameter keyId",
 			input:         `algorithm="rsa-sha256",signature="sig"`,
 			expectError:   true,
 			errorContains: "missing required parameter: keyId",
 		},
 		{
-			name:          "異常系: 必須パラメータ signature がない",
+			name:          "Failure: missing required parameter signature",
 			input:         `keyId="test-key-1"`,
 			expectError:   true,
 			errorContains: "missing required parameter: signature",
 		},
 		{
-			name:          "異常系: 不正なフォーマット (クォートなし)",
+			name:          "Failure: invalid format (no quotes)",
 			input:         `keyId=test-key-1`,
 			expectError:   true,
 			errorContains: "expected '\"'",
 		},
 		{
-			name:          "異常系: 不正なフォーマット (最後のクォートが閉じていない)",
+			name:          "Failure: invalid format (unclosed quote)",
 			input:         `keyId="test-key-1`,
 			expectError:   true,
 			errorContains: "unclosed parameter value",
 		},
 		{
-			name:          "異常系: 不正なフォーマット (最後のパラメータの後に余計な文字)",
+			name:          "Failure: invalid format (extra characters after last parameter)",
 			input:         `keyId="test-key-1"a`,
 			expectError:   true,
 			errorContains: "unexpected character",
 		},
 		{
-			name:          "異常系: パラメータの重複",
+			name:          "Failure: duplicate parameter",
 			input:         `keyId="key1",keyId="key2",signature="sig"`,
 			expectError:   true,
 			errorContains: "duplicate parameter name",
 		},
 		{
-			name:          "異常系: created の値が不正",
+			name:          "Failure: invalid created value",
 			input:         `keyId="k",signature="s",created="not-a-number"`,
 			expectError:   true,
 			errorContains: "invalid 'created' value",
 		},
 		{
-			name:          "異常系: expires の値が不正",
+			name:          "Failure: invalid expires value",
 			input:         `keyId="k",signature="s",expires="not-a-number"`,
 			expectError:   true,
 			errorContains: "invalid 'expires' value",

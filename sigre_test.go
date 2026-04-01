@@ -20,7 +20,7 @@ import (
 
 // Sign and Verify E2E Tests
 func TestSignAndVerify(t *testing.T) {
-	// テストで使用する鍵ペアの生成
+	// Generate key pairs used in tests
 	rsaKeys := generateRSAKeys(t)
 	rsaPrivateKey, rsaPubKey := rsaKeys.private, rsaKeys.public
 
@@ -32,17 +32,17 @@ func TestSignAndVerify(t *testing.T) {
 
 	hmacSecret := []byte("this-is-a-super-secret-key-for-hmac")
 
-	// テストケースの定義
+	// Test case definitions
 	testCases := []struct {
-		name string // テストケース名
+		name string // test case name
 
-		// 署名オプション
+		// sign options
 		signOpts signOptsPartial
 
-		// 検証オプション
+		// verify options
 		verifyOpts verifyOptsPartial
 
-		// HTTPリクエスト/レスポンス
+		// HTTP request/response
 		isRequest   bool
 		method      string
 		url         string
@@ -50,9 +50,9 @@ func TestSignAndVerify(t *testing.T) {
 		headers     http.Header
 		expectError bool
 	}{
-		// --- 正常系: 各アルゴリズムのテスト ---
+		// --- Success cases: algorithm tests ---
 		{
-			name:       "正常系: RSA-SHA256 (Request)",
+			name:       "Success: RSA-SHA256 (Request)",
 			isRequest:  true,
 			method:     "POST",
 			url:        "https://example.com/foo?param=value&pet=dog",
@@ -61,7 +61,7 @@ func TestSignAndVerify(t *testing.T) {
 			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey},
 		},
 		{
-			name:       "正常系: RSA-SHA512 (Response)",
+			name:       "Success: RSA-SHA512 (Response)",
 			isRequest:  false,
 			method:     "GET",
 			url:        "https://example.com/bar",
@@ -70,7 +70,7 @@ func TestSignAndVerify(t *testing.T) {
 			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey},
 		},
 		{
-			name:       "正常系: ECDSA-SHA256",
+			name:       "Success: ECDSA-SHA256",
 			isRequest:  true,
 			method:     "PUT",
 			url:        "https://example.com/baz",
@@ -79,16 +79,16 @@ func TestSignAndVerify(t *testing.T) {
 			verifyOpts: verifyOptsPartial{publicKey: ecdsaPubKey},
 		},
 		{
-			name:       "正常系: Ed25519",
+			name:       "Success: Ed25519",
 			isRequest:  true,
 			method:     "GET",
 			url:        "https://example.com/",
-			body:       "", // ボディなし
+			body:       "", // no body
 			signOpts:   signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(request-target)", "host", "date"}},
 			verifyOpts: verifyOptsPartial{publicKey: ed25519PubKey},
 		},
 		{
-			name:       "正常系: HMAC-SHA256",
+			name:       "Success: HMAC-SHA256",
 			isRequest:  true,
 			method:     "DELETE",
 			url:        "https://example.com/resource/123",
@@ -96,9 +96,9 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:   signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{secret: hmacSecret},
 		},
-		// --- 正常系: VerifyOptions のテスト ---
+		// --- Success cases: VerifyOptions tests ---
 		{
-			name:       "正常系: RequiredHeaders が満たされている",
+			name:       "Success: RequiredHeaders satisfied",
 			isRequest:  true,
 			method:     "POST",
 			url:        "https://example.com/",
@@ -106,7 +106,7 @@ func TestSignAndVerify(t *testing.T) {
 			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"date", "host"}},
 		},
 		{
-			name:      "正常系: AllowedClockSkew (未来)",
+			name:      "Success: AllowedClockSkew (future)",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -114,13 +114,13 @@ func TestSignAndVerify(t *testing.T) {
 			verifyOpts: verifyOptsPartial{
 				publicKey: ed25519PubKey,
 				clockSkew: 1 * time.Minute,
-				// now を 30秒 進めて検証。skew(60秒)の範囲内なので成功するはず。
+				// Verify 30 seconds later; should succeed within skew (60s)
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 30, 30, 0, time.UTC) },
 			},
 		},
-		// --- 正常系: AllowedHashAlgorithms のテスト ---
+		// --- Success cases: AllowedHashAlgorithms tests ---
 		{
-			name:      "正常系: AllowedHashAlgorithms に署名アルゴリズムが含まれている (RSA-SHA256)",
+			name:      "Success: AllowedHashAlgorithms includes signing algorithm (RSA-SHA256)",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -132,7 +132,7 @@ func TestSignAndVerify(t *testing.T) {
 			},
 		},
 		{
-			name:      "正常系: AllowedHashAlgorithms に複数のハッシュが含まれている (RSA-SHA512)",
+			name:      "Success: AllowedHashAlgorithms includes multiple hashes (RSA-SHA512)",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -144,7 +144,7 @@ func TestSignAndVerify(t *testing.T) {
 			},
 		},
 		{
-			name:      "正常系: AllowedHashAlgorithms が未指定 (デフォルト許可リスト使用)",
+			name:      "Success: AllowedHashAlgorithms unspecified (uses default allow list)",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -152,22 +152,22 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
 			verifyOpts: verifyOptsPartial{
 				publicKey: rsaPubKey,
-				// allowedHashes 未指定 → DefaultAllowedHashAlgorithms (SHA-512, SHA-256)
+				// allowedHashes not set -> DefaultAllowedHashAlgorithms (SHA-512, SHA-256)
 			},
 		},
 		{
-			name:      "正常系: AllowedHashAlgorithms に Ed25519 (ハッシュ不要) は影響しない",
+			name:      "Success: AllowedHashAlgorithms does not affect Ed25519 (no hash required)",
 			isRequest: true,
 			method:    "GET",
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(request-target)", "host", "date"}},
 			verifyOpts: verifyOptsPartial{
 				publicKey:     ed25519PubKey,
-				allowedHashes: []crypto.Hash{crypto.SHA512}, // Ed25519 はハッシュ不使用のため影響なし
+				allowedHashes: []crypto.Hash{crypto.SHA512}, // Ed25519 does not use hash, so no effect
 			},
 		},
 		{
-			name:      "正常系: AllowedHashAlgorithms で HMAC-SHA256 を許可",
+			name:      "Success: AllowedHashAlgorithms permits HMAC-SHA256",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -177,9 +177,9 @@ func TestSignAndVerify(t *testing.T) {
 				allowedHashes: []crypto.Hash{crypto.SHA256},
 			},
 		},
-		// --- 異常系テスト ---
+		// --- Failure cases ---
 		{
-			name:      "異常系: AllowedHashAlgorithms に署名アルゴリズムが含まれていない",
+			name:      "Failure: AllowedHashAlgorithms does not include signing algorithm",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -187,33 +187,33 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
 			verifyOpts: verifyOptsPartial{
 				publicKey:     rsaPubKey,
-				allowedHashes: []crypto.Hash{crypto.SHA512}, // SHA-256 で署名されたが SHA-512 のみ許可
+				allowedHashes: []crypto.Hash{crypto.SHA512}, // signed with SHA-256 but only SHA-512 allowed
 			},
 			expectError: true,
 		},
 		{
-			name:      "異常系: AllowedHashAlgorithms で HMAC のハッシュが不許可",
+			name:      "Failure: AllowedHashAlgorithms rejects HMAC hash",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				secret:        hmacSecret,
-				allowedHashes: []crypto.Hash{crypto.SHA512}, // SHA-256 で署名されたが SHA-512 のみ許可
+				allowedHashes: []crypto.Hash{crypto.SHA512}, // signed with SHA-256 but only SHA-512 allowed
 			},
 			expectError: true,
 		},
 		{
-			name:        "異常系: RequiredHeaders が満たされていない",
+			name:        "Failure: RequiredHeaders not satisfied",
 			isRequest:   true,
 			method:      "POST",
 			url:         "https://example.com/",
 			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256, headers: []string{"host", "date"}},
 			verifyOpts:  verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"digest"}},
-			expectError: true, // `digest` が署名対象に含まれていないためエラー
+			expectError: true, // error because `digest` is not in signed headers
 		},
 		{
-			name:      "異常系: AllowedClockSkew 超過 (古すぎる)",
+			name:      "Failure: AllowedClockSkew exceeded (too old)",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -221,13 +221,13 @@ func TestSignAndVerify(t *testing.T) {
 			verifyOpts: verifyOptsPartial{
 				publicKey: ed25519PubKey,
 				clockSkew: 1 * time.Minute,
-				// now を 61秒 進めて検証。skew(60秒)を超えるため失敗するはず。
+				// Verify 61 seconds later; exceeds skew (60s) so should fail
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 31, 1, 0, time.UTC) },
 			},
 			expectError: true,
 		},
 		{
-			name:        "異常系: 署名後にリクエストヘッダを改ざん",
+			name:        "Failure: request header tampered after signing",
 			isRequest:   true,
 			method:      "POST",
 			url:         "https://example.com/",
@@ -236,27 +236,27 @@ func TestSignAndVerify(t *testing.T) {
 			expectError: true,
 		},
 		{
-			name:        "異常系: 間違った公開鍵で検証",
+			name:        "Failure: verification with wrong public key",
 			isRequest:   true,
 			method:      "POST",
 			url:         "https://example.com/",
 			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
-			verifyOpts:  verifyOptsPartial{publicKey: generateRSAKeys(t).public}, // 別の鍵ペア
+			verifyOpts:  verifyOptsPartial{publicKey: generateRSAKeys(t).public}, // different key pair
 			expectError: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// --- テストのセットアップ ---
+			// --- Test setup ---
 
-			// 時刻を固定して、署名結果が常に同じになるようにする
+			// Fix the time so signature results are always the same
 			testingNowFunc := func() time.Time {
 				// 2024-06-08 10:30:00 UTC
 				return time.Date(2024, 6, 8, 10, 30, 0, 0, time.UTC)
 			}
 
-			// リクエスト/レスポンスオブジェクトの作成
+			// Create request/response objects
 			var req *http.Request
 			var res *http.Response
 			var err error
@@ -266,17 +266,17 @@ func TestSignAndVerify(t *testing.T) {
 					t.Fatalf("failed to create request: %v", err)
 				}
 			} else {
-				// レスポンスのテストではダミーのリクエストが必要
+				// Response tests require a dummy request
 				dummyReq, _ := http.NewRequest(tc.method, tc.url, nil)
 				res = &http.Response{
 					Request: dummyReq,
 					Header:  make(http.Header),
 					Body:    io.NopCloser(strings.NewReader(tc.body)),
 				}
-				req = dummyReq // レスポンス署名でも host などはリクエストから取るため
+				req = dummyReq // host etc. are taken from the request even for response signing
 			}
 
-			// ヘッダーの準備
+			// Prepare headers
 			targetHeader := req.Header
 			if !tc.isRequest {
 				targetHeader = res.Header
@@ -287,12 +287,12 @@ func TestSignAndVerify(t *testing.T) {
 				}
 			}
 
-			// デフォルトで必要なヘッダーを追加
+			// Add default required headers
 			if targetHeader.Get("Date") == "" {
 				targetHeader.Set("Date", time.Now().UTC().Format(time.RFC1123))
 			}
 
-			if req.Host == "" { // http.NewRequest は URL から Host を設定する
+			if req.Host == "" { // http.NewRequest sets Host from URL
 				req.Host = req.URL.Host
 			}
 
@@ -309,7 +309,7 @@ func TestSignAndVerify(t *testing.T) {
 
 			t.Log(targetHeader)
 
-			// --- 署名 ---
+			// --- Sign ---
 			signOptions := &sigre.CavageSignOptions{
 				Headers:         tc.signOpts.headers,
 				HashAlgorithm:   tc.signOpts.hash,
@@ -344,7 +344,7 @@ func TestSignAndVerify(t *testing.T) {
 				}
 			}
 
-			// --- 検証の準備 (改ざん、時刻の上書きなど) ---
+			// --- Prepare verification (tampering, time override, etc.) ---
 			if tc.verifyOpts.tamperHeader != nil {
 				tamperTarget := req.Header
 				if !tc.isRequest {
@@ -356,7 +356,7 @@ func TestSignAndVerify(t *testing.T) {
 				testingNowFunc = tc.verifyOpts.overrideNowFunc
 			}
 
-			// --- 検証 ---
+			// --- Verify ---
 			var verifier *sigre.CavageVerifier
 			if tc.isRequest {
 				verifier, err = sigre.NewCavageRequestVerifier(req)
@@ -384,7 +384,7 @@ func TestSignAndVerify(t *testing.T) {
 				err = verifier.Verify(tc.verifyOpts.publicKey, verifyOptions)
 			}
 
-			// --- 結果の確認 ---
+			// --- Check results ---
 			if tc.expectError {
 				if err == nil {
 					t.Error("expected an error, but verification succeeded")
@@ -400,7 +400,7 @@ func TestSignAndVerify(t *testing.T) {
 
 // ===== Helper Structs for Tests =====
 
-// signOptsPartial は、テストケースごとに異なる署名オプションの一部を保持します。
+// signOptsPartial holds partial sign options that differ per test case.
 type signOptsPartial struct {
 	privateKey crypto.PrivateKey
 	secret     []byte
@@ -408,7 +408,7 @@ type signOptsPartial struct {
 	headers    []string
 }
 
-// verifyOptsPartial は、テストケースごとに異なる検証オプションの一部を保持します。
+// verifyOptsPartial holds partial verify options that differ per test case.
 type verifyOptsPartial struct {
 	publicKey       crypto.PublicKey
 	secret          []byte
@@ -419,7 +419,7 @@ type verifyOptsPartial struct {
 	overrideNowFunc func() time.Time
 }
 
-// tamperAction は、検証前にヘッダーを改ざんするアクションを定義します。
+// tamperAction defines a header tampering action before verification.
 type tamperAction struct {
 	key   string
 	value string
@@ -427,13 +427,13 @@ type tamperAction struct {
 
 // ===== Helper Functions for Key Generation =====
 
-// rsaKeyPair は、テスト用のRSA鍵ペアを保持します。
+// rsaKeyPair holds an RSA key pair for tests.
 type rsaKeyPair struct {
 	private *rsa.PrivateKey
 	public  *rsa.PublicKey
 }
 
-// generateRSAKeys は、テスト用のRSA鍵ペアを生成します。
+// generateRSAKeys generates an RSA key pair for tests.
 func generateRSAKeys(t *testing.T) rsaKeyPair {
 	t.Helper()
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -443,13 +443,13 @@ func generateRSAKeys(t *testing.T) rsaKeyPair {
 	return rsaKeyPair{private: privateKey, public: &privateKey.PublicKey}
 }
 
-// ecdsaKeyPair は、テスト用のECDSA鍵ペアを保持します。
+// ecdsaKeyPair holds an ECDSA key pair for tests.
 type ecdsaKeyPair struct {
 	private *ecdsa.PrivateKey
 	public  *ecdsa.PublicKey
 }
 
-// generateECDSAKeys は、テスト用のECDSA鍵ペア(P-256)を生成します。
+// generateECDSAKeys generates an ECDSA key pair (P-256) for tests.
 func generateECDSAKeys(t *testing.T) ecdsaKeyPair {
 	t.Helper()
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -459,13 +459,13 @@ func generateECDSAKeys(t *testing.T) ecdsaKeyPair {
 	return ecdsaKeyPair{private: privateKey, public: &privateKey.PublicKey}
 }
 
-// ed25519KeyPair は、テスト用のEd25519鍵ペアを保持します。
+// ed25519KeyPair holds an Ed25519 key pair for tests.
 type ed25519KeyPair struct {
 	private ed25519.PrivateKey
 	public  ed25519.PublicKey
 }
 
-// generateEd25519Keys は、テスト用のEd25519鍵ペアを生成します。
+// generateEd25519Keys generates an Ed25519 key pair for tests.
 func generateEd25519Keys(t *testing.T) ed25519KeyPair {
 	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)

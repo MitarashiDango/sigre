@@ -209,6 +209,11 @@ func (v *CavageVerifier) prepare(opts *VerifyOptions) (message, signature []byte
 		return nil, nil, "", nil, err
 	}
 
+	hashesToTry, err = filterAllowedHashes(hashesToTry, opts.AllowedHashAlgorithms)
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+
 	if keyType != hs2019 {
 		if err = validateCreatedExpiresWithAlgorithm(v.params.Headers, keyType); err != nil {
 			return nil, nil, "", nil, err
@@ -437,4 +442,32 @@ func verifyHMAC(secret, sig, data []byte, hash crypto.Hash) error {
 		return nil
 	}
 	return fmt.Errorf("%w: HMAC verification failed", ErrVerification)
+}
+
+// filterAllowedHashes filters hashesToTry against the allowed hash algorithm list.
+// When allowed is empty, [DefaultAllowedHashAlgorithms] is used.
+// Returns an error if no hashes remain after filtering.
+// For algorithms that do not use a separate hash (e.g. Ed25519), hashesToTry is nil
+// and is returned unchanged.
+func filterAllowedHashes(hashesToTry []string, allowed []crypto.Hash) ([]string, error) {
+	if len(hashesToTry) == 0 {
+		return hashesToTry, nil
+	}
+	if len(allowed) == 0 {
+		allowed = DefaultAllowedHashAlgorithms
+	}
+	filtered := make([]string, 0, len(hashesToTry))
+	for _, name := range hashesToTry {
+		h, err := getHash(name)
+		if err != nil {
+			continue
+		}
+		if slices.Contains(allowed, h) {
+			filtered = append(filtered, name)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil, fmt.Errorf("%w: none of the resolved hash algorithms are permitted by AllowedHashAlgorithms", ErrUnsupportedHashAlgorithm)
+	}
+	return filtered, nil
 }

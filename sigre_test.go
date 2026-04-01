@@ -118,7 +118,91 @@ func TestSignAndVerify(t *testing.T) {
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 30, 30, 0, time.UTC) },
 			},
 		},
+		// --- 正常系: AllowedHashAlgorithms のテスト ---
+		{
+			name:      "正常系: AllowedHashAlgorithms に署名アルゴリズムが含まれている (RSA-SHA256)",
+			isRequest: true,
+			method:    "POST",
+			url:       "https://example.com/",
+			body:      `{"hello": "world"}`,
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			verifyOpts: verifyOptsPartial{
+				publicKey:     rsaPubKey,
+				allowedHashes: []crypto.Hash{crypto.SHA256},
+			},
+		},
+		{
+			name:      "正常系: AllowedHashAlgorithms に複数のハッシュが含まれている (RSA-SHA512)",
+			isRequest: true,
+			method:    "POST",
+			url:       "https://example.com/",
+			body:      `{"hello": "world"}`,
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA512},
+			verifyOpts: verifyOptsPartial{
+				publicKey:     rsaPubKey,
+				allowedHashes: []crypto.Hash{crypto.SHA512, crypto.SHA256},
+			},
+		},
+		{
+			name:      "正常系: AllowedHashAlgorithms が未指定 (デフォルト許可リスト使用)",
+			isRequest: true,
+			method:    "POST",
+			url:       "https://example.com/",
+			body:      `{"hello": "world"}`,
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			verifyOpts: verifyOptsPartial{
+				publicKey: rsaPubKey,
+				// allowedHashes 未指定 → DefaultAllowedHashAlgorithms (SHA-512, SHA-256)
+			},
+		},
+		{
+			name:      "正常系: AllowedHashAlgorithms に Ed25519 (ハッシュ不要) は影響しない",
+			isRequest: true,
+			method:    "GET",
+			url:       "https://example.com/",
+			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(request-target)", "host", "date"}},
+			verifyOpts: verifyOptsPartial{
+				publicKey:     ed25519PubKey,
+				allowedHashes: []crypto.Hash{crypto.SHA512}, // Ed25519 はハッシュ不使用のため影響なし
+			},
+		},
+		{
+			name:      "正常系: AllowedHashAlgorithms で HMAC-SHA256 を許可",
+			isRequest: true,
+			method:    "POST",
+			url:       "https://example.com/",
+			signOpts:  signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
+			verifyOpts: verifyOptsPartial{
+				secret:        hmacSecret,
+				allowedHashes: []crypto.Hash{crypto.SHA256},
+			},
+		},
 		// --- 異常系テスト ---
+		{
+			name:      "異常系: AllowedHashAlgorithms に署名アルゴリズムが含まれていない",
+			isRequest: true,
+			method:    "POST",
+			url:       "https://example.com/",
+			body:      `{"hello": "world"}`,
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			verifyOpts: verifyOptsPartial{
+				publicKey:     rsaPubKey,
+				allowedHashes: []crypto.Hash{crypto.SHA512}, // SHA-256 で署名されたが SHA-512 のみ許可
+			},
+			expectError: true,
+		},
+		{
+			name:      "異常系: AllowedHashAlgorithms で HMAC のハッシュが不許可",
+			isRequest: true,
+			method:    "POST",
+			url:       "https://example.com/",
+			signOpts:  signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
+			verifyOpts: verifyOptsPartial{
+				secret:        hmacSecret,
+				allowedHashes: []crypto.Hash{crypto.SHA512}, // SHA-256 で署名されたが SHA-512 のみ許可
+			},
+			expectError: true,
+		},
 		{
 			name:        "異常系: RequiredHeaders が満たされていない",
 			isRequest:   true,
@@ -289,8 +373,9 @@ func TestSignAndVerify(t *testing.T) {
 			verifier.Now = testingNowFunc
 
 			verifyOptions := &sigre.VerifyOptions{
-				AllowedClockSkew: tc.verifyOpts.clockSkew,
-				RequiredHeaders:  tc.verifyOpts.requiredHeaders,
+				AllowedClockSkew:      tc.verifyOpts.clockSkew,
+				RequiredHeaders:       tc.verifyOpts.requiredHeaders,
+				AllowedHashAlgorithms: tc.verifyOpts.allowedHashes,
 			}
 
 			if len(tc.verifyOpts.secret) != 0 {
@@ -329,6 +414,7 @@ type verifyOptsPartial struct {
 	secret          []byte
 	clockSkew       time.Duration
 	requiredHeaders []string
+	allowedHashes   []crypto.Hash
 	tamperHeader    *tamperAction
 	overrideNowFunc func() time.Time
 }

@@ -33,6 +33,10 @@ const (
 	AcceptSignature = "Accept-Signature"
 )
 
+// DefaultAllowedHashAlgorithms is the default set of hash algorithms permitted
+// during signature verification, used when [VerifyOptions].AllowedHashAlgorithms is empty.
+var DefaultAllowedHashAlgorithms = []crypto.Hash{crypto.SHA512, crypto.SHA256}
+
 // VerifyOptions configures signature verification behaviour.
 // Passing nil is equivalent to passing a zero-value VerifyOptions.
 type VerifyOptions struct {
@@ -41,6 +45,11 @@ type VerifyOptions struct {
 	AllowedClockSkew time.Duration
 	// RequiredHeaders lists header names that must appear in the signature's headers parameter.
 	RequiredHeaders []string
+	// AllowedHashAlgorithms restricts which hash algorithms are permitted during verification.
+	// When empty or nil, [DefaultAllowedHashAlgorithms] (SHA-512, SHA-256) is used.
+	// This prevents algorithm substitution attacks where an attacker alters the algorithm
+	// parameter to force a weaker hash.
+	AllowedHashAlgorithms []crypto.Hash
 }
 
 // Verifier verifies an HTTP message signature.

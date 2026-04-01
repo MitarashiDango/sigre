@@ -12,31 +12,31 @@ func TestGetHash(t *testing.T) {
 	t.Helper()
 
 	testCases := []struct {
-		name          string      // テストケース名
-		input         string      // getHashへの入力
-		expectedHash  crypto.Hash // 期待されるハッシュ値
-		expectedError error       // 期待されるエラー
+		name          string      // test case name
+		input         string      // input to getHash
+		expectedHash  crypto.Hash // expected hash value
+		expectedError error       // expected error
 	}{
 		{
-			name:          "正常系: SHA256",
+			name:          "Success: SHA256",
 			input:         "sha256",
 			expectedHash:  crypto.SHA256,
 			expectedError: nil,
 		},
 		{
-			name:          "正常系: SHA512",
+			name:          "Success: SHA512",
 			input:         "sha512",
 			expectedHash:  crypto.SHA512,
 			expectedError: nil,
 		},
 		{
-			name:          "異常系: サポートされていないアルゴリズム",
+			name:          "Failure: unsupported algorithm",
 			input:         "sha1",
 			expectedHash:  0,
 			expectedError: sigre.ErrUnsupportedHashAlgorithm,
 		},
 		{
-			name:          "異常系: 不正なアルゴリズム名",
+			name:          "Failure: invalid algorithm name",
 			input:         "invalid-algorithm",
 			expectedHash:  0,
 			expectedError: sigre.ErrUnsupportedHashAlgorithm,
@@ -47,12 +47,12 @@ func TestGetHash(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actualHash, actualErr := sigre.ExportForTesting_getHash(tc.input)
 
-			// エラーの比較
+			// Compare errors
 			if !errors.Is(actualErr, tc.expectedError) {
 				t.Errorf("expected error: %v, got: %v", tc.expectedError, actualErr)
 			}
 
-			// 戻り値の比較
+			// Compare return values
 			if actualHash != tc.expectedHash {
 				t.Errorf("expected hash: %v, got: %v", tc.expectedHash, actualHash)
 			}

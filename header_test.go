@@ -17,26 +17,26 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 		wantAcceptSig string
 	}{
 		{
-			name:   "空のヘッダー",
+			name:   "empty headers",
 			header: http.Header{},
 		},
 		// --- Signature ---
 		{
-			name: "Signatureヘッダーのみ存在する場合",
+			name: "Signature header only",
 			header: http.Header{
 				"Signature": []string{"sig1=:abc123:"},
 			},
 			wantSignature: "sig1=:abc123:",
 		},
 		{
-			name: "AuthorizationヘッダーにSignatureプレフィックスがある場合",
+			name: "Authorization header with Signature prefix",
 			header: http.Header{
 				"Authorization": []string{"Signature sig1=:abc123:"},
 			},
 			wantSignature: "sig1=:abc123:",
 		},
 		{
-			name: "SignatureヘッダーがAuthorizationより優先される",
+			name: "Signature header takes priority over Authorization",
 			header: http.Header{
 				"Signature":     []string{"sig1=:direct:"},
 				"Authorization": []string{"Signature sig1=:fromauth:"},
@@ -44,21 +44,21 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 			wantSignature: "sig1=:direct:",
 		},
 		{
-			name: "AuthorizationのプレフィックスがSignatureでない場合は無視される",
+			name: "Authorization without Signature prefix is ignored",
 			header: http.Header{
 				"Authorization": []string{"Bearer some-token"},
 			},
 			wantSignature: "",
 		},
 		{
-			name: "AuthorizationがSignatureで始まるがスペースがない場合は無視される",
+			name: "Authorization starting with Signature but no space is ignored",
 			header: http.Header{
 				"Authorization": []string{"Signaturesig1=:abc123:"},
 			},
 			wantSignature: "",
 		},
 		{
-			name: "Authorizationのプレフィックス除去後にTrimSpaceが適用される",
+			name: "TrimSpace is applied after removing Authorization prefix",
 			header: http.Header{
 				"Authorization": []string{"Signature   sig1=:abc123:  "},
 			},
@@ -66,14 +66,14 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 		},
 		// --- Signature-Input ---
 		{
-			name: "Signature-Inputヘッダーのみ存在する場合",
+			name: "Signature-Input header only",
 			header: http.Header{
 				"Signature-Input": []string{`sig1=("@method" "@path");created=1618884473`},
 			},
 			wantSigInput: `sig1=("@method" "@path");created=1618884473`,
 		},
 		{
-			name: "SignatureとSignature-Inputが両方存在する場合",
+			name: "both Signature and Signature-Input present",
 			header: http.Header{
 				"Signature":       []string{"sig1=:abc123:"},
 				"Signature-Input": []string{`sig1=("@method");created=1618884473`},
@@ -83,14 +83,14 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 		},
 		// --- Accept-Signature ---
 		{
-			name: "Accept-Signatureヘッダーのみ存在する場合",
+			name: "Accept-Signature header only",
 			header: http.Header{
 				"Accept-Signature": []string{`sig1=("@method" "@path")`},
 			},
 			wantAcceptSig: `sig1=("@method" "@path")`,
 		},
 		{
-			name: "Accept-SignatureとSignatureが両方存在する場合",
+			name: "both Accept-Signature and Signature present",
 			header: http.Header{
 				"Signature":        []string{"sig1=:abc123:"},
 				"Accept-Signature": []string{`sig1=("@method")`},
@@ -98,9 +98,9 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 			wantSignature: "sig1=:abc123:",
 			wantAcceptSig: `sig1=("@method")`,
 		},
-		// --- 全フィールド ---
+		// --- All fields ---
 		{
-			name: "全ヘッダーが揃っている場合",
+			name: "all headers present",
 			header: http.Header{
 				"Signature":        []string{"sig1=:abc123:"},
 				"Signature-Input":  []string{`sig1=("@method" "@path");created=1618884473`},
@@ -117,7 +117,7 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 			got := sigre.GetSignatureHeaderFields(tt.header)
 
 			if got == nil {
-				t.Fatal("GetSignatureHeaderFields() が nil を返しました")
+				t.Fatal("GetSignatureHeaderFields() returned nil")
 			}
 			if got.Signature != tt.wantSignature {
 				t.Errorf("Signature = %q, want %q", got.Signature, tt.wantSignature)
@@ -139,26 +139,26 @@ func TestSignatureHeaderFields_GetSignatureType(t *testing.T) {
 		wantType sigre.SignatureType
 	}{
 		{
-			name:     "SignatureもSignatureInputも空の場合はUnsigned",
+			name:     "Unsigned when both Signature and SignatureInput are empty",
 			hf:       &sigre.SignatureHeaderFields{},
 			wantType: sigre.Unsigned,
 		},
 		{
-			name: "Signatureのみセットされている場合はCavageHTTPSignatures",
+			name: "CavageHTTPSignatures when only Signature is set",
 			hf: &sigre.SignatureHeaderFields{
 				Signature: "sig1=:abc123:",
 			},
 			wantType: sigre.CavageHTTPSignatures,
 		},
 		{
-			name: "SignatureInputのみセットされている場合はUnsigned",
+			name: "Unsigned when only SignatureInput is set",
 			hf: &sigre.SignatureHeaderFields{
 				SignatureInput: `sig1=("@method");created=1618884473`,
 			},
 			wantType: sigre.Unsigned,
 		},
 		{
-			name: "SignatureとSignatureInputが両方セットされている場合はRFC9421",
+			name: "RFC9421 when both Signature and SignatureInput are set",
 			hf: &sigre.SignatureHeaderFields{
 				Signature:      "sig1=:abc123:",
 				SignatureInput: `sig1=("@method");created=1618884473`,
@@ -166,7 +166,7 @@ func TestSignatureHeaderFields_GetSignatureType(t *testing.T) {
 			wantType: sigre.RFC9421,
 		},
 		{
-			name: "AcceptSignatureのみセットされている場合はUnsigned",
+			name: "Unsigned when only AcceptSignature is set",
 			hf: &sigre.SignatureHeaderFields{
 				AcceptSignature: `sig1=("@method")`,
 			},

@@ -76,9 +76,9 @@ func NewRequestVerifier(req *http.Request) (Verifier, error) {
 	case CavageHTTPSignatures:
 		return NewCavageRequestVerifier(req)
 	case RFC9421:
-		return nil, &SigreError{Err: fmt.Errorf("RFC9421 verifier not implemented")}
+		return nil, wrapSigreError(fmt.Errorf("RFC9421 verifier not implemented"))
 	default:
-		return nil, &SigreError{Err: ErrMissingSignature}
+		return nil, wrapSigreError(ErrMissingSignature)
 	}
 }
 
@@ -94,8 +94,8 @@ func NewResponseVerifier(res *http.Response) (Verifier, error) {
 	case CavageHTTPSignatures:
 		return NewCavageResponseVerifier(res)
 	case RFC9421:
-		return nil, &SigreError{Err: fmt.Errorf("RFC9421 verifier not implemented")}
+		return nil, wrapSigreError(fmt.Errorf("RFC9421 verifier not implemented"))
 	default:
-		return nil, &SigreError{Err: ErrMissingSignature}
+		return nil, wrapSigreError(ErrMissingSignature)
 	}
 }

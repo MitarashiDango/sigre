@@ -41,11 +41,11 @@ type CavageVerifier struct {
 func NewCavageRequestVerifier(req *http.Request) (*CavageVerifier, error) {
 	hf := GetSignatureHeaderFields(req.Header)
 	if hf.Signature == "" {
-		return nil, &SigreError{Err: ErrMissingSignature}
+		return nil, wrapSigreError(ErrMissingSignature)
 	}
 	p, err := parseCavageParams(hf.Signature)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTTP signature parameters from request: %w", err)
+		return nil, wrapSigreError(fmt.Errorf("failed to parse HTTP signature parameters from request: %w", err))
 	}
 	return &CavageVerifier{
 		host:   req.Host,
@@ -61,11 +61,11 @@ func NewCavageRequestVerifier(req *http.Request) (*CavageVerifier, error) {
 func NewCavageResponseVerifier(res *http.Response) (*CavageVerifier, error) {
 	hf := GetSignatureHeaderFields(res.Header)
 	if hf.Signature == "" {
-		return nil, &SigreError{Err: ErrMissingSignature}
+		return nil, wrapSigreError(ErrMissingSignature)
 	}
 	p, err := parseCavageParams(hf.Signature)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse HTTP signature parameters from response: %w", err)
+		return nil, wrapSigreError(fmt.Errorf("failed to parse HTTP signature parameters from response: %w", err))
 	}
 
 	var host, method string
@@ -98,7 +98,7 @@ func (v *CavageVerifier) KeyId() string {
 // Passing nil opts is equivalent to passing a zero-value [VerifyOptions].
 func (v *CavageVerifier) Verify(key crypto.PublicKey, opts *VerifyOptions) error {
 	if key == nil {
-		return ErrMissingPublicKey
+		return wrapSigreError(ErrMissingPublicKey)
 	}
 	if opts == nil {
 		opts = &VerifyOptions{}
@@ -106,14 +106,14 @@ func (v *CavageVerifier) Verify(key crypto.PublicKey, opts *VerifyOptions) error
 
 	message, signature, keyType, hashesToTry, err := v.prepare(opts)
 	if err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	if keyType == "hmac" {
-		return fmt.Errorf("%w: signature algorithm is HMAC; use VerifyHMAC instead", ErrAlgorithmMismatch)
+		return wrapSigreError(fmt.Errorf("%w: signature algorithm is HMAC; use VerifyHMAC instead", ErrAlgorithmMismatch))
 	}
 
-	return verifyAsymmetric(key, keyType, signature, message, hashesToTry, v.params.Algorithm)
+	return wrapSigreError(verifyAsymmetric(key, keyType, signature, message, hashesToTry, v.params.Algorithm))
 }
 
 // VerifyHMAC checks an HMAC signature against secret.
@@ -121,7 +121,7 @@ func (v *CavageVerifier) Verify(key crypto.PublicKey, opts *VerifyOptions) error
 // Passing nil opts is equivalent to passing a zero-value [VerifyOptions].
 func (v *CavageVerifier) VerifyHMAC(secret []byte, opts *VerifyOptions) error {
 	if len(secret) == 0 {
-		return ErrMissingSharedSecret
+		return wrapSigreError(ErrMissingSharedSecret)
 	}
 	if opts == nil {
 		opts = &VerifyOptions{}
@@ -129,19 +129,19 @@ func (v *CavageVerifier) VerifyHMAC(secret []byte, opts *VerifyOptions) error {
 
 	message, signature, keyType, hashes, err := v.prepare(opts)
 	if err != nil {
-		return err
+		return wrapSigreError(err)
 	}
 
 	switch keyType {
 	case "hmac":
 		if len(hashes) != 1 {
-			return fmt.Errorf("HMAC verification requires exactly one hash algorithm, got %d from algorithm parameter '%s'", len(hashes), v.params.Algorithm)
+			return wrapSigreError(fmt.Errorf("HMAC verification requires exactly one hash algorithm, got %d from algorithm parameter '%s'", len(hashes), v.params.Algorithm))
 		}
 		h, err := getHash(hashes[0])
 		if err != nil {
-			return fmt.Errorf("unsupported hash '%s' for HMAC: %w", hashes[0], err)
+			return wrapSigreError(fmt.Errorf("unsupported hash '%s' for HMAC: %w", hashes[0], err))
 		}
-		return verifyHMAC(secret, signature, message, h)
+		return wrapSigreError(verifyHMAC(secret, signature, message, h))
 	case hs2019:
 		// algorithm="hs2019" or absent: try all supported hashes.
 		for _, name := range hashes {
@@ -153,9 +153,9 @@ func (v *CavageVerifier) VerifyHMAC(secret []byte, opts *VerifyOptions) error {
 				return nil
 			}
 		}
-		return fmt.Errorf("%w: HMAC verification failed for all hash algorithms", ErrVerification)
+		return wrapSigreError(fmt.Errorf("%w: HMAC verification failed for all hash algorithms", ErrVerification))
 	default:
-		return fmt.Errorf("%w: signature algorithm is '%s'; use Verify for asymmetric keys", ErrAlgorithmMismatch, keyType)
+		return wrapSigreError(fmt.Errorf("%w: signature algorithm is '%s'; use Verify for asymmetric keys", ErrAlgorithmMismatch, keyType))
 	}
 }
 

@@ -39,6 +39,17 @@ type SigreError struct {
 	Err error
 }
 
+func wrapSigreError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var se *SigreError
+	if errors.As(err, &se) {
+		return err
+	}
+	return &SigreError{Err: err}
+}
+
 func (e *SigreError) Unwrap() error {
 	return e.Err
 }

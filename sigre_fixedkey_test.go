@@ -18,9 +18,7 @@ import (
 	"github.com/MitarashiDango/sigre"
 )
 
-// ===== Fixed test keys (PEM) =====
-// These keys are for testing only and are used to ensure reproducibility of test vectors.
-
+// Static test keys keep signature vectors reproducible.
 const testRSAPrivateKeyPEM = `-----BEGIN RSA PRIVATE KEY-----
 MIIEowIBAAKCAQEAz5wcFrzkXvQgvbXngC32au35pwT0zHYbcrFe/OSm5G1UJlyh
 M6+trtaPH9uQBziFE6EmUbDlums2qJpmS1vn4rmVb2YgfrnKmMPzHMeM3sshp0Z+
@@ -80,11 +78,7 @@ MCowBQYDK2VwAyEAXqAc1ePYsErSWb5ZhyRLjUQXx4nbWvLJqAPlnLGuLq8=
 
 const testHMACSecret = "test-hmac-secret-key-for-sigre-testing"
 
-// testFixedTime is the fixed time used in signing tests (2024-06-08 10:30:00 UTC).
-// Unix timestamp: 1717839000
 var testFixedTime = time.Date(2024, 6, 8, 10, 30, 0, 0, time.UTC)
-
-// ===== PEM key parse helpers =====
 
 func parseRSAPrivateKey(t *testing.T, pemStr string) *rsa.PrivateKey {
 	t.Helper()
@@ -180,12 +174,9 @@ func parseEd25519PublicKey(t *testing.T, pemStr string) ed25519.PublicKey {
 	return edPub
 }
 
-// ===== Test HTTP request/response construction helpers =====
-
 const testDateHeader = "Sat, 08 Jun 2024 10:30:00 UTC"
 const testBodyJSON = `{"hello": "world"}`
 
-// testBodyDigest is the SHA-256 digest of testBodyJSON in "SHA-256=..." format.
 var testBodyDigest = func() string {
 	h := sha256.Sum256([]byte(testBodyJSON))
 	return "SHA-256=" + base64.StdEncoding.EncodeToString(h[:])
@@ -200,7 +191,6 @@ func newTestRequest(t *testing.T, method, urlStr, body string) *http.Request {
 	return req
 }
 
-// setStandardHeaders sets standard headers for tests.
 func setStandardHeaders(t *testing.T, header http.Header, host string, includeDigest bool) {
 	t.Helper()
 	header.Set("Date", testDateHeader)
@@ -210,11 +200,6 @@ func setStandardHeaders(t *testing.T, header http.Header, host string, includeDi
 	}
 }
 
-// ===================================================================
-// Sign and verify tests using fixed key pairs
-// ===================================================================
-
-// TestFixedKeySignAndVerify runs E2E sign and verify tests using fixed PEM key pairs.
 func TestFixedKeySignAndVerify(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
@@ -376,7 +361,6 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 				}
 			},
 			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				// Attempt verification with a different random RSA key
 				wrongKey := generateRSAKeys(t).public
 				err := verifier.Verify(wrongKey, &sigre.VerifyOptions{})
 				if err == nil {
@@ -512,15 +496,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 	}
 }
 
-// ===================================================================
-// Verification tests using precomputed signature values
-// These tests verify manually constructed Signature headers without using the library's signer.
-// Signature values are precomputed from the test keys and fixed.
-// ===================================================================
-
-// TestVerifyPrecomputedSignatures verifies precomputed signatures directly.
-// RSA and Ed25519 are deterministic signature algorithms, so they always produce
-// the same signature for the same input.
+// Precomputed signature values verify compatibility without using the signer.
 func TestVerifyPrecomputedSignatures(t *testing.T) {
 	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
 	edPub := parseEd25519PublicKey(t, testEd25519PublicKeyPEM)
@@ -541,7 +517,6 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 				req.Header.Set("Date", testDateHeader)
 				req.Header.Set("Host", "example.com")
 				req.Header.Set("Digest", testBodyDigest)
-				// Set precomputed Signature header directly
 				req.Header.Set("Signature",
 					`keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`)
 				return req
@@ -604,7 +579,6 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 				req.Header.Set("Date", testDateHeader)
 				req.Header.Set("Host", "example.com")
 				req.Header.Set("Digest", testBodyDigest)
-				// Tamper the beginning of signature value
 				req.Header.Set("Signature",
 					`keyId="test-key-rsa",signature="AAAAALN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`)
 				return req
@@ -621,7 +595,6 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 				req := newTestRequest(t, "GET", "https://example.com/", "")
 				req.Header.Set("Date", testDateHeader)
 				req.Header.Set("Host", "example.com")
-				// Tamper the beginning of signature value
 				req.Header.Set("Signature",
 					`keyId="test-key-ed25519",signature="AAAAAAAAAABWJ9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`)
 				return req
@@ -638,7 +611,6 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 				req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
 				req.Header.Set("Date", testDateHeader)
 				req.Header.Set("Host", "example.com")
-				// Tamper the signature value
 				req.Header.Set("Signature",
 					`keyId="test-key-hmac",signature="AAAAAAAAAAAAAAAYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`)
 				return req
@@ -653,7 +625,7 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			name: "RSA-SHA256: verification fails with tampered header",
 			setup: func(t *testing.T) *http.Request {
 				req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
-				req.Header.Set("Date", "Sat, 08 Jun 2024 11:00:00 UTC") // tampered date
+				req.Header.Set("Date", "Sat, 08 Jun 2024 11:00:00 UTC")
 				req.Header.Set("Host", "example.com")
 				req.Header.Set("Digest", testBodyDigest)
 				req.Header.Set("Signature",
@@ -696,12 +668,6 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 	}
 }
 
-// ===================================================================
-// Deterministic signature tests (RSA-PKCS1v15 and Ed25519)
-// ===================================================================
-
-// TestDeterministicSignatures verifies that deterministic algorithms produce
-// the same signature value every time for the same input.
 func TestDeterministicSignatures(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	edPriv := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
@@ -758,12 +724,6 @@ func TestDeterministicSignatures(t *testing.T) {
 	})
 }
 
-// ===================================================================
-// Key type mismatch tests
-// ===================================================================
-
-// TestKeyTypeMismatch verifies that verification fails when the signature algorithm
-// does not match the key type.
 func TestKeyTypeMismatch(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	ecPub := parseECDSAPublicKey(t, testECDSAPublicKeyPEM)
@@ -817,12 +777,6 @@ func TestKeyTypeMismatch(t *testing.T) {
 	}
 }
 
-// ===================================================================
-// Verification tests via NewRequestVerifier / NewResponseVerifier
-// ===================================================================
-
-// TestFixedKeyWithGenericVerifier verifies fixed-key signatures via
-// NewRequestVerifier / NewResponseVerifier.
 func TestFixedKeyWithGenericVerifier(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
@@ -883,11 +837,6 @@ func TestFixedKeyWithGenericVerifier(t *testing.T) {
 	})
 }
 
-// ===================================================================
-// Response signing tests (fixed keys)
-// ===================================================================
-
-// TestFixedKeyResponseSignAndVerify tests response signing and verification with fixed keys.
 func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
@@ -958,11 +907,6 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 	})
 }
 
-// ===================================================================
-// VerifyOptions detail tests (fixed keys)
-// ===================================================================
-
-// TestFixedKeyVerifyOptions tests each VerifyOptions field with fixed keys.
 func TestFixedKeyVerifyOptions(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
@@ -1020,7 +964,7 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		verifier.Now = nowFunc
 
 		err = verifier.Verify(rsaPub, &sigre.VerifyOptions{
-			RequiredHeaders: []string{"digest"}, // digest is not in signed headers
+			RequiredHeaders: []string{"digest"},
 		})
 		if err == nil {
 			t.Error("verification succeeded despite missing required header")
@@ -1047,7 +991,6 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create verifier: %v", err)
 		}
-		// Verify 30 seconds later (within 60s skew)
 		verifier.Now = func() time.Time { return testFixedTime.Add(30 * time.Second) }
 
 		err = verifier.Verify(edPub, &sigre.VerifyOptions{
@@ -1075,7 +1018,6 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to create verifier: %v", err)
 		}
-		// Verify 61 seconds later (exceeds 60s skew)
 		verifier.Now = func() time.Time { return testFixedTime.Add(61 * time.Second) }
 
 		err = verifier.Verify(edPub, &sigre.VerifyOptions{
@@ -1138,7 +1080,7 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		verifier.Now = nowFunc
 
 		err = verifier.Verify(rsaPub, &sigre.VerifyOptions{
-			AllowedHashAlgorithms: []crypto.Hash{crypto.SHA512}, // SHA-256 is not permitted
+			AllowedHashAlgorithms: []crypto.Hash{crypto.SHA512},
 		})
 		if err == nil {
 			t.Error("verification succeeded with non-permitted hash algorithm")

@@ -12,10 +12,10 @@ func TestGetHash(t *testing.T) {
 	t.Helper()
 
 	testCases := []struct {
-		name          string      // test case name
-		input         string      // input to getHash
-		expectedHash  crypto.Hash // expected hash value
-		expectedError error       // expected error
+		name          string
+		input         string
+		expectedHash  crypto.Hash
+		expectedError error
 	}{
 		{
 			name:          "Success: SHA256",
@@ -47,12 +47,10 @@ func TestGetHash(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			actualHash, actualErr := sigre.ExportForTesting_getHash(tc.input)
 
-			// Compare errors
 			if !errors.Is(actualErr, tc.expectedError) {
 				t.Errorf("expected error: %v, got: %v", tc.expectedError, actualErr)
 			}
 
-			// Compare return values
 			if actualHash != tc.expectedHash {
 				t.Errorf("expected hash: %v, got: %v", tc.expectedHash, actualHash)
 			}

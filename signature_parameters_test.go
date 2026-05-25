@@ -18,7 +18,6 @@ func TestParseCavageParams(t *testing.T) {
 		expectError   bool
 		errorContains string
 	}{
-		// Success cases
 		{
 			name:  "Success: all parameters present",
 			input: `keyId="test-key-1",algorithm="rsa-sha256",created=1618952679,expires=1618952739,headers="(created) (expires) host date digest",signature="Base64SignatureHere"`,
@@ -78,8 +77,6 @@ func TestParseCavageParams(t *testing.T) {
 			},
 			expectError: false,
 		},
-
-		// Failure cases
 		{
 			name:          "Failure: missing required parameter keyId",
 			input:         `algorithm="rsa-sha256",signature="sig"`,

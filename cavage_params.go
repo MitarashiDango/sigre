@@ -19,7 +19,7 @@ const (
 // HTTP Signature Algorithms Registry (Appendix E.2).
 const hs2019 = "hs2019"
 
-// defaultExpirySeconds is the fallback signature lifetime when Expiry is unset.
+// defaultExpirySeconds is used for (expires) when Expiry is unset.
 const defaultExpirySeconds int64 = 60
 
 // cavageParams holds the parsed fields of a Cavage HTTP Signature header.
@@ -189,7 +189,7 @@ func parseCavageParams(input string) (*cavageParams, error) {
 		return nil, fmt.Errorf("missing required parameter: signature")
 	}
 	if len(p.Headers) == 0 && hasHeaders {
-		return nil, fmt.Errorf("'header' parameter must specify a non-empty value")
+		return nil, fmt.Errorf("'headers' parameter must specify a non-empty value")
 	}
 
 	return p, nil

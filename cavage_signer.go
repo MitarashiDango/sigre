@@ -18,14 +18,14 @@ import (
 	"time"
 )
 
-// Default header lists used when CavageSignOptions.Headers is empty.
+// Header list presets for Cavage signatures.
 var (
-	// CavageLegacyDefaultHeaders applies to rsa, hmac, and ecdsa algorithms.
+	// CavageLegacyDefaultHeaders applies to rsa, hmac, and ecdsa algorithm identifiers.
 	CavageLegacyDefaultHeaders = []string{RequestTarget, "date", "digest", "host"}
-	// CavageNonLegacyDefaultHeaders applies to non-legacy algorithms (ed25519, hs2019).
+	// CavageNonLegacyDefaultHeaders applies to ed25519 and hs2019 signatures.
 	// Uses (created) instead of date per draft-cavage-http-signatures-12 Section 2.3.
 	CavageNonLegacyDefaultHeaders = []string{RequestTarget, Created, "digest", "host"}
-	// CavageDefaultResponseHeaders is the default list for response signing.
+	// CavageDefaultResponseHeaders is a conventional header list for response signatures.
 	CavageDefaultResponseHeaders = []string{"date", "digest"}
 )
 
@@ -36,11 +36,11 @@ type CavageSignOptions struct {
 	Headers []string
 	// HashAlgorithm is the hash function for RSA, ECDSA, and HMAC. Ignored for Ed25519.
 	HashAlgorithm crypto.Hash
-	// Expiry is the signature lifetime in seconds from creation.
-	// Uses defaultExpirySeconds when zero or negative.
+	// Expiry sets the (expires) value in seconds from creation when (expires) is signed.
+	// Uses 60 seconds when zero or negative.
 	Expiry int64
 	// UseHS2019 emits algorithm="hs2019" in the signature parameters instead of the
-	// key-type specific identifier (e.g. "rsa-sha256"), and lifts the restriction on
+	// key-type specific identifier (e.g. "rsa-sha256"), and allows
 	// (created)/(expires) pseudo-headers for rsa/hmac/ecdsa keys.
 	UseHS2019 bool
 	// SignatureHeader is the header name where the signature is written.
@@ -61,7 +61,7 @@ func NewCavageSigner() *CavageSigner {
 	}
 }
 
-// SignRequest signs req using privateKey and appends the Cavage signature header.
+// SignRequest signs req using privateKey and writes the Cavage signature header.
 // keyId identifies the signing key in the signature parameters.
 // Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateKey, keyId string, opts *CavageSignOptions) error {
@@ -114,7 +114,7 @@ func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateK
 	return nil
 }
 
-// SignRequestWithHMAC signs req using a shared HMAC secret and appends the Cavage signature header.
+// SignRequestWithHMAC signs req using a shared HMAC secret and writes the Cavage signature header.
 // Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, keyId string, opts *CavageSignOptions) error {
 	if len(secret) == 0 {
@@ -166,7 +166,7 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 	return nil
 }
 
-// SignResponse signs res using privateKey and appends the Cavage signature header.
+// SignResponse signs res using privateKey and writes the Cavage signature header.
 // Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.PrivateKey, keyId string, opts *CavageSignOptions) error {
 	if privateKey == nil {
@@ -226,7 +226,7 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 	return nil
 }
 
-// SignResponseWithHMAC signs res using a shared HMAC secret and appends the Cavage signature header.
+// SignResponseWithHMAC signs res using a shared HMAC secret and writes the Cavage signature header.
 // Passing nil opts is equivalent to passing a zero-value [CavageSignOptions].
 func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, keyId string, opts *CavageSignOptions) error {
 	if len(secret) == 0 {

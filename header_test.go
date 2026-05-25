@@ -1,4 +1,3 @@
-// header_test.go
 package sigre_test
 
 import (
@@ -20,7 +19,6 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 			name:   "empty headers",
 			header: http.Header{},
 		},
-		// --- Signature ---
 		{
 			name: "Signature header only",
 			header: http.Header{
@@ -64,7 +62,6 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 			},
 			wantSignature: "sig1=:abc123:",
 		},
-		// --- Signature-Input ---
 		{
 			name: "Signature-Input header only",
 			header: http.Header{
@@ -81,7 +78,6 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 			wantSignature: "sig1=:abc123:",
 			wantSigInput:  `sig1=("@method");created=1618884473`,
 		},
-		// --- Accept-Signature ---
 		{
 			name: "Accept-Signature header only",
 			header: http.Header{
@@ -98,7 +94,6 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 			wantSignature: "sig1=:abc123:",
 			wantAcceptSig: `sig1=("@method")`,
 		},
-		// --- All fields ---
 		{
 			name: "all headers present",
 			header: http.Header{

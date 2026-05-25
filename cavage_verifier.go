@@ -23,8 +23,6 @@ var (
 )
 
 // CavageVerifier verifies a Cavage HTTP signature (draft-cavage-http-signatures-12).
-// Set Now to override the time source used for (created) and (expires) checks;
-// this is primarily useful in tests.
 type CavageVerifier struct {
 	// Now overrides the clock used for created/expires validation. Uses time.Now when nil.
 	Now func() time.Time
@@ -37,7 +35,7 @@ type CavageVerifier struct {
 }
 
 // NewCavageRequestVerifier creates a [CavageVerifier] from req.
-// Returns an error if the Signature header is absent or malformed.
+// Returns an error if the Cavage signature is absent or malformed.
 func NewCavageRequestVerifier(req *http.Request) (*CavageVerifier, error) {
 	hf := GetSignatureHeaderFields(req.Header)
 	if hf.Signature == "" {
@@ -57,7 +55,7 @@ func NewCavageRequestVerifier(req *http.Request) (*CavageVerifier, error) {
 }
 
 // NewCavageResponseVerifier creates a [CavageVerifier] from res.
-// Returns an error if the Signature header is absent or malformed.
+// Returns an error if the Cavage signature is absent or malformed.
 func NewCavageResponseVerifier(res *http.Response) (*CavageVerifier, error) {
 	hf := GetSignatureHeaderFields(res.Header)
 	if hf.Signature == "" {

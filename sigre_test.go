@@ -18,9 +18,7 @@ import (
 	"github.com/MitarashiDango/sigre"
 )
 
-// Sign and Verify E2E Tests
 func TestSignAndVerify(t *testing.T) {
-	// Generate key pairs used in tests
 	rsaKeys := generateRSAKeys(t)
 	rsaPrivateKey, rsaPubKey := rsaKeys.private, rsaKeys.public
 
@@ -32,17 +30,11 @@ func TestSignAndVerify(t *testing.T) {
 
 	hmacSecret := []byte("this-is-a-super-secret-key-for-hmac")
 
-	// Test case definitions
 	testCases := []struct {
-		name string // test case name
-
-		// sign options
-		signOpts signOptsPartial
-
-		// verify options
+		name       string
+		signOpts   signOptsPartial
 		verifyOpts verifyOptsPartial
 
-		// HTTP request/response
 		isRequest   bool
 		method      string
 		url         string
@@ -50,7 +42,6 @@ func TestSignAndVerify(t *testing.T) {
 		headers     http.Header
 		expectError bool
 	}{
-		// --- Success cases: algorithm tests ---
 		{
 			name:       "Success: RSA-SHA256 (Request)",
 			isRequest:  true,
@@ -83,7 +74,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest:  true,
 			method:     "GET",
 			url:        "https://example.com/",
-			body:       "", // no body
+			body:       "",
 			signOpts:   signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(request-target)", "host", "date"}},
 			verifyOpts: verifyOptsPartial{publicKey: ed25519PubKey},
 		},
@@ -96,7 +87,6 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:   signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{secret: hmacSecret},
 		},
-		// --- Success cases: VerifyOptions tests ---
 		{
 			name:       "Success: RequiredHeaders satisfied",
 			isRequest:  true,
@@ -112,13 +102,11 @@ func TestSignAndVerify(t *testing.T) {
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(created)", "date"}},
 			verifyOpts: verifyOptsPartial{
-				publicKey: ed25519PubKey,
-				clockSkew: 1 * time.Minute,
-				// Verify 30 seconds later; should succeed within skew (60s)
+				publicKey:       ed25519PubKey,
+				clockSkew:       1 * time.Minute,
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 30, 30, 0, time.UTC) },
 			},
 		},
-		// --- Success cases: AllowedHashAlgorithms tests ---
 		{
 			name:      "Success: AllowedHashAlgorithms includes signing algorithm (RSA-SHA256)",
 			isRequest: true,
@@ -152,7 +140,6 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
 			verifyOpts: verifyOptsPartial{
 				publicKey: rsaPubKey,
-				// allowedHashes not set -> DefaultAllowedHashAlgorithms (SHA-512, SHA-256)
 			},
 		},
 		{
@@ -163,7 +150,7 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(request-target)", "host", "date"}},
 			verifyOpts: verifyOptsPartial{
 				publicKey:     ed25519PubKey,
-				allowedHashes: []crypto.Hash{crypto.SHA512}, // Ed25519 does not use hash, so no effect
+				allowedHashes: []crypto.Hash{crypto.SHA512},
 			},
 		},
 		{
@@ -177,7 +164,6 @@ func TestSignAndVerify(t *testing.T) {
 				allowedHashes: []crypto.Hash{crypto.SHA256},
 			},
 		},
-		// --- Failure cases ---
 		{
 			name:      "Failure: AllowedHashAlgorithms does not include signing algorithm",
 			isRequest: true,
@@ -187,7 +173,7 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
 			verifyOpts: verifyOptsPartial{
 				publicKey:     rsaPubKey,
-				allowedHashes: []crypto.Hash{crypto.SHA512}, // signed with SHA-256 but only SHA-512 allowed
+				allowedHashes: []crypto.Hash{crypto.SHA512},
 			},
 			expectError: true,
 		},
@@ -199,7 +185,7 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:  signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				secret:        hmacSecret,
-				allowedHashes: []crypto.Hash{crypto.SHA512}, // signed with SHA-256 but only SHA-512 allowed
+				allowedHashes: []crypto.Hash{crypto.SHA512},
 			},
 			expectError: true,
 		},
@@ -210,7 +196,7 @@ func TestSignAndVerify(t *testing.T) {
 			url:         "https://example.com/",
 			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256, headers: []string{"host", "date"}},
 			verifyOpts:  verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"digest"}},
-			expectError: true, // error because `digest` is not in signed headers
+			expectError: true,
 		},
 		{
 			name:      "Failure: AllowedClockSkew exceeded (too old)",
@@ -219,9 +205,8 @@ func TestSignAndVerify(t *testing.T) {
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(created)", "date"}},
 			verifyOpts: verifyOptsPartial{
-				publicKey: ed25519PubKey,
-				clockSkew: 1 * time.Minute,
-				// Verify 61 seconds later; exceeds skew (60s) so should fail
+				publicKey:       ed25519PubKey,
+				clockSkew:       1 * time.Minute,
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 31, 1, 0, time.UTC) },
 			},
 			expectError: true,
@@ -241,22 +226,17 @@ func TestSignAndVerify(t *testing.T) {
 			method:      "POST",
 			url:         "https://example.com/",
 			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
-			verifyOpts:  verifyOptsPartial{publicKey: generateRSAKeys(t).public}, // different key pair
+			verifyOpts:  verifyOptsPartial{publicKey: generateRSAKeys(t).public},
 			expectError: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			// --- Test setup ---
-
-			// Fix the time so signature results are always the same
 			testingNowFunc := func() time.Time {
-				// 2024-06-08 10:30:00 UTC
 				return time.Date(2024, 6, 8, 10, 30, 0, 0, time.UTC)
 			}
 
-			// Create request/response objects
 			var req *http.Request
 			var res *http.Response
 			var err error
@@ -266,17 +246,15 @@ func TestSignAndVerify(t *testing.T) {
 					t.Fatalf("failed to create request: %v", err)
 				}
 			} else {
-				// Response tests require a dummy request
 				dummyReq, _ := http.NewRequest(tc.method, tc.url, nil)
 				res = &http.Response{
 					Request: dummyReq,
 					Header:  make(http.Header),
 					Body:    io.NopCloser(strings.NewReader(tc.body)),
 				}
-				req = dummyReq // host etc. are taken from the request even for response signing
+				req = dummyReq
 			}
 
-			// Prepare headers
 			targetHeader := req.Header
 			if !tc.isRequest {
 				targetHeader = res.Header
@@ -287,12 +265,11 @@ func TestSignAndVerify(t *testing.T) {
 				}
 			}
 
-			// Add default required headers
 			if targetHeader.Get("Date") == "" {
 				targetHeader.Set("Date", time.Now().UTC().Format(time.RFC1123))
 			}
 
-			if req.Host == "" { // http.NewRequest sets Host from URL
+			if req.Host == "" {
 				req.Host = req.URL.Host
 			}
 
@@ -309,7 +286,6 @@ func TestSignAndVerify(t *testing.T) {
 
 			t.Log(targetHeader)
 
-			// --- Sign ---
 			signOptions := &sigre.CavageSignOptions{
 				Headers:         tc.signOpts.headers,
 				HashAlgorithm:   tc.signOpts.hash,
@@ -344,7 +320,6 @@ func TestSignAndVerify(t *testing.T) {
 				}
 			}
 
-			// --- Prepare verification (tampering, time override, etc.) ---
 			if tc.verifyOpts.tamperHeader != nil {
 				tamperTarget := req.Header
 				if !tc.isRequest {
@@ -356,7 +331,6 @@ func TestSignAndVerify(t *testing.T) {
 				testingNowFunc = tc.verifyOpts.overrideNowFunc
 			}
 
-			// --- Verify ---
 			var verifier *sigre.CavageVerifier
 			if tc.isRequest {
 				verifier, err = sigre.NewCavageRequestVerifier(req)
@@ -384,7 +358,6 @@ func TestSignAndVerify(t *testing.T) {
 				err = verifier.Verify(tc.verifyOpts.publicKey, verifyOptions)
 			}
 
-			// --- Check results ---
 			if tc.expectError {
 				if err == nil {
 					t.Error("expected an error, but verification succeeded")
@@ -398,9 +371,6 @@ func TestSignAndVerify(t *testing.T) {
 	}
 }
 
-// ===== Helper Structs for Tests =====
-
-// signOptsPartial holds partial sign options that differ per test case.
 type signOptsPartial struct {
 	privateKey crypto.PrivateKey
 	secret     []byte
@@ -408,7 +378,6 @@ type signOptsPartial struct {
 	headers    []string
 }
 
-// verifyOptsPartial holds partial verify options that differ per test case.
 type verifyOptsPartial struct {
 	publicKey       crypto.PublicKey
 	secret          []byte
@@ -419,21 +388,16 @@ type verifyOptsPartial struct {
 	overrideNowFunc func() time.Time
 }
 
-// tamperAction defines a header tampering action before verification.
 type tamperAction struct {
 	key   string
 	value string
 }
 
-// ===== Helper Functions for Key Generation =====
-
-// rsaKeyPair holds an RSA key pair for tests.
 type rsaKeyPair struct {
 	private *rsa.PrivateKey
 	public  *rsa.PublicKey
 }
 
-// generateRSAKeys generates an RSA key pair for tests.
 func generateRSAKeys(t *testing.T) rsaKeyPair {
 	t.Helper()
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -443,13 +407,11 @@ func generateRSAKeys(t *testing.T) rsaKeyPair {
 	return rsaKeyPair{private: privateKey, public: &privateKey.PublicKey}
 }
 
-// ecdsaKeyPair holds an ECDSA key pair for tests.
 type ecdsaKeyPair struct {
 	private *ecdsa.PrivateKey
 	public  *ecdsa.PublicKey
 }
 
-// generateECDSAKeys generates an ECDSA key pair (P-256) for tests.
 func generateECDSAKeys(t *testing.T) ecdsaKeyPair {
 	t.Helper()
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -459,13 +421,11 @@ func generateECDSAKeys(t *testing.T) ecdsaKeyPair {
 	return ecdsaKeyPair{private: privateKey, public: &privateKey.PublicKey}
 }
 
-// ed25519KeyPair holds an Ed25519 key pair for tests.
 type ed25519KeyPair struct {
 	private ed25519.PrivateKey
 	public  ed25519.PublicKey
 }
 
-// generateEd25519Keys generates an Ed25519 key pair for tests.
 func generateEd25519Keys(t *testing.T) ed25519KeyPair {
 	t.Helper()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)

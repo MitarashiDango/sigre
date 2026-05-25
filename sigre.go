@@ -22,7 +22,7 @@ type SignatureType int
 const (
 	Unsigned             SignatureType = iota
 	CavageHTTPSignatures               // draft-cavage-http-signatures-12
-	RFC9421                            // TODO: not yet implemented
+	RFC9421                            // HTTP Message Signatures; verification is not implemented yet.
 )
 
 // HTTP header name constants used in signature processing.
@@ -41,14 +41,13 @@ var DefaultAllowedHashAlgorithms = []crypto.Hash{crypto.SHA512, crypto.SHA256}
 // Passing nil is equivalent to passing a zero-value VerifyOptions.
 type VerifyOptions struct {
 	// AllowedClockSkew sets the tolerance window for (created) and (expires) checks.
-	// A zero value disables the "too old" check while still rejecting future (created) timestamps.
+	// A zero value still rejects future (created) timestamps but does not reject old ones.
 	AllowedClockSkew time.Duration
 	// RequiredHeaders lists header names that must appear in the signature's headers parameter.
 	RequiredHeaders []string
 	// AllowedHashAlgorithms restricts which hash algorithms are permitted during verification.
 	// When empty or nil, [DefaultAllowedHashAlgorithms] (SHA-512, SHA-256) is used.
-	// This prevents algorithm substitution attacks where an attacker alters the algorithm
-	// parameter to force a weaker hash.
+	// Use this to reject weaker hashes even if the signature parameters request them.
 	AllowedHashAlgorithms []crypto.Hash
 }
 

@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -41,6 +42,7 @@ func TestSignAndVerify(t *testing.T) {
 		body        string
 		headers     http.Header
 		expectError bool
+		wantErr     error
 	}{
 		{
 			name:       "Success: RSA-SHA256 (Request)",
@@ -176,6 +178,7 @@ func TestSignAndVerify(t *testing.T) {
 				allowedHashes: []crypto.Hash{crypto.SHA512},
 			},
 			expectError: true,
+			wantErr:     sigre.ErrUnsupportedHashAlgorithm,
 		},
 		{
 			name:      "Failure: AllowedHashAlgorithms rejects HMAC hash",
@@ -188,6 +191,7 @@ func TestSignAndVerify(t *testing.T) {
 				allowedHashes: []crypto.Hash{crypto.SHA512},
 			},
 			expectError: true,
+			wantErr:     sigre.ErrUnsupportedHashAlgorithm,
 		},
 		{
 			name:        "Failure: RequiredHeaders not satisfied",
@@ -197,6 +201,7 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256, headers: []string{"host", "date"}},
 			verifyOpts:  verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"digest"}},
 			expectError: true,
+			wantErr:     sigre.ErrRequiredHeaderMissing,
 		},
 		{
 			name:      "Failure: AllowedClockSkew exceeded (too old)",
@@ -210,6 +215,7 @@ func TestSignAndVerify(t *testing.T) {
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 31, 1, 0, time.UTC) },
 			},
 			expectError: true,
+			wantErr:     sigre.ErrInvalidCreationTime,
 		},
 		{
 			name:        "Failure: request header tampered after signing",
@@ -219,6 +225,7 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
 			verifyOpts:  verifyOptsPartial{publicKey: rsaPubKey, tamperHeader: &tamperAction{key: "Date", value: "tampered"}},
 			expectError: true,
+			wantErr:     sigre.ErrVerification,
 		},
 		{
 			name:        "Failure: verification with wrong public key",
@@ -228,6 +235,7 @@ func TestSignAndVerify(t *testing.T) {
 			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
 			verifyOpts:  verifyOptsPartial{publicKey: generateRSAKeys(t).public},
 			expectError: true,
+			wantErr:     sigre.ErrVerification,
 		},
 	}
 
@@ -266,7 +274,7 @@ func TestSignAndVerify(t *testing.T) {
 			}
 
 			if targetHeader.Get("Date") == "" {
-				targetHeader.Set("Date", time.Now().UTC().Format(time.RFC1123))
+				targetHeader.Set("Date", testingNowFunc().UTC().Format(time.RFC1123))
 			}
 
 			if req.Host == "" {
@@ -283,8 +291,6 @@ func TestSignAndVerify(t *testing.T) {
 				digest := base64.StdEncoding.EncodeToString(h.Sum(nil))
 				targetHeader.Set("Digest", "SHA-256="+digest)
 			}
-
-			t.Log(targetHeader)
 
 			signOptions := &sigre.CavageSignOptions{
 				Headers:         tc.signOpts.headers,
@@ -362,6 +368,9 @@ func TestSignAndVerify(t *testing.T) {
 				if err == nil {
 					t.Error("expected an error, but verification succeeded")
 				}
+				if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+					t.Errorf("expected error %v, got: %v", tc.wantErr, err)
+				}
 			} else {
 				if err != nil {
 					t.Errorf("verification failed unexpectedly: %v", err)
@@ -369,6 +378,137 @@ func TestSignAndVerify(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSignerInputValidation(t *testing.T) {
+	rsaKeys := generateRSAKeys(t)
+	rsaPrivateKey := rsaKeys.private
+	hmacSecret := []byte("this-is-a-super-secret-key-for-hmac")
+	validationDateHeader := time.Date(2024, 6, 8, 10, 30, 0, 0, time.UTC).Format(time.RFC1123)
+
+	signer := sigre.NewCavageSigner()
+	if signer.Now == nil {
+		t.Fatal("NewCavageSigner() returned a signer with nil Now")
+	}
+
+	t.Run("SignRequest fails without private key", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "https://example.com/", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+		req.Header.Set("Date", validationDateHeader)
+		req.Header.Set("Host", "example.com")
+
+		err = signer.SignRequest(req, nil, "test-key", &sigre.CavageSignOptions{
+			Headers:       []string{"date"},
+			HashAlgorithm: crypto.SHA256,
+		})
+		if !errors.Is(err, sigre.ErrMissingPrivateKey) {
+			t.Fatalf("expected ErrMissingPrivateKey, got: %v", err)
+		}
+	})
+
+	t.Run("SignResponse fails without private key", func(t *testing.T) {
+		res := &http.Response{Header: make(http.Header)}
+		res.Header.Set("Date", validationDateHeader)
+
+		err := signer.SignResponse(res, nil, "test-key", &sigre.CavageSignOptions{
+			Headers:       []string{"date"},
+			HashAlgorithm: crypto.SHA256,
+		})
+		if !errors.Is(err, sigre.ErrMissingPrivateKey) {
+			t.Fatalf("expected ErrMissingPrivateKey, got: %v", err)
+		}
+	})
+
+	t.Run("SignRequestWithHMAC fails without secret", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "https://example.com/", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+		req.Header.Set("Date", validationDateHeader)
+
+		err = signer.SignRequestWithHMAC(req, nil, "test-key", &sigre.CavageSignOptions{
+			Headers:       []string{"date"},
+			HashAlgorithm: crypto.SHA256,
+		})
+		if !errors.Is(err, sigre.ErrMissingSharedSecret) {
+			t.Fatalf("expected ErrMissingSharedSecret, got: %v", err)
+		}
+	})
+
+	t.Run("SignResponseWithHMAC fails without secret", func(t *testing.T) {
+		res := &http.Response{Header: make(http.Header)}
+		res.Header.Set("Date", validationDateHeader)
+
+		err := signer.SignResponseWithHMAC(res, nil, "test-key", &sigre.CavageSignOptions{
+			Headers:       []string{"date"},
+			HashAlgorithm: crypto.SHA256,
+		})
+		if !errors.Is(err, sigre.ErrMissingSharedSecret) {
+			t.Fatalf("expected ErrMissingSharedSecret, got: %v", err)
+		}
+	})
+
+	t.Run("RSA signing fails without hash algorithm", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "https://example.com/", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+		req.Header.Set("Date", validationDateHeader)
+
+		err = signer.SignRequest(req, rsaPrivateKey, "test-key", &sigre.CavageSignOptions{
+			Headers: []string{"date"},
+		})
+		if err == nil || !strings.Contains(err.Error(), "hash algorithm must be specified") {
+			t.Fatalf("expected missing hash algorithm error, got: %v", err)
+		}
+	})
+
+	t.Run("legacy RSA signing rejects created pseudo-header", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "https://example.com/", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		err = signer.SignRequest(req, rsaPrivateKey, "test-key", &sigre.CavageSignOptions{
+			Headers:       []string{"(created)"},
+			HashAlgorithm: crypto.SHA256,
+		})
+		if !errors.Is(err, sigre.ErrInvalidSignatureAlgorithm) {
+			t.Fatalf("expected ErrInvalidSignatureAlgorithm, got: %v", err)
+		}
+	})
+
+	t.Run("legacy HMAC signing rejects expires pseudo-header", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "https://example.com/", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		err = signer.SignRequestWithHMAC(req, hmacSecret, "test-key", &sigre.CavageSignOptions{
+			Headers:       []string{"(expires)"},
+			HashAlgorithm: crypto.SHA256,
+		})
+		if !errors.Is(err, sigre.ErrInvalidSignatureAlgorithm) {
+			t.Fatalf("expected ErrInvalidSignatureAlgorithm, got: %v", err)
+		}
+	})
+
+	t.Run("signing fails when a listed header is missing", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "https://example.com/", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		err = signer.SignRequest(req, rsaPrivateKey, "test-key", &sigre.CavageSignOptions{
+			Headers:       []string{"date"},
+			HashAlgorithm: crypto.SHA256,
+		})
+		if err == nil || !strings.Contains(err.Error(), "missing header") {
+			t.Fatalf("expected missing header error, got: %v", err)
+		}
+	})
 }
 
 type signOptsPartial struct {

@@ -211,289 +211,206 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	nowFunc := func() time.Time { return testFixedTime }
 
-	testCases := []struct {
-		name        string
-		setup       func(t *testing.T) *http.Request
-		signFunc    func(t *testing.T, signer *sigre.CavageSigner, req *http.Request)
-		verifyFunc  func(t *testing.T, verifier *sigre.CavageVerifier)
-		wantKeyId   string
-		expectError bool
-	}{
-		{
-			name: "RSA-SHA256: sign with fixed key and verify with same public key",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
-				setStandardHeaders(t, req.Header, "example.com", true)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "host", "date", "digest"},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				err := verifier.Verify(rsaPub, &sigre.VerifyOptions{})
-				if err != nil {
-					t.Errorf("verification failed: %v", err)
-				}
-			},
-			wantKeyId: "test-key-rsa",
-		},
-		{
-			name: "RSA-SHA512: sign with fixed key and verify with same public key",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "PUT", "https://example.com/update", testBodyJSON)
-				setStandardHeaders(t, req.Header, "example.com", true)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequest(req, rsaPriv, "test-key-rsa-512", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "host", "date", "digest"},
-					HashAlgorithm:   crypto.SHA512,
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				err := verifier.Verify(rsaPub, &sigre.VerifyOptions{})
-				if err != nil {
-					t.Errorf("verification failed: %v", err)
-				}
-			},
-			wantKeyId: "test-key-rsa-512",
-		},
-		{
-			name: "ECDSA-SHA256: sign with fixed key and verify with same public key",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/ecdsa", testBodyJSON)
-				setStandardHeaders(t, req.Header, "example.com", true)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequest(req, ecPriv, "test-key-ecdsa", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "host", "date", "digest"},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				err := verifier.Verify(ecPub, &sigre.VerifyOptions{})
-				if err != nil {
-					t.Errorf("verification failed: %v", err)
-				}
-			},
-			wantKeyId: "test-key-ecdsa",
-		},
-		{
-			name: "Ed25519: sign with fixed key and verify with same public key",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "GET", "https://example.com/", "")
-				setStandardHeaders(t, req.Header, "example.com", false)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "host", "date"},
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				err := verifier.Verify(edPub, &sigre.VerifyOptions{})
-				if err != nil {
-					t.Errorf("verification failed: %v", err)
-				}
-			},
-			wantKeyId: "test-key-ed25519",
-		},
-		{
-			name: "HMAC-SHA256: sign with fixed secret and verify with same secret",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
-				setStandardHeaders(t, req.Header, "example.com", false)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequestWithHMAC(req, hmacSecret, "test-key-hmac", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "date"},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				err := verifier.VerifyHMAC(hmacSecret, &sigre.VerifyOptions{})
-				if err != nil {
-					t.Errorf("verification failed: %v", err)
-				}
-			},
-			wantKeyId: "test-key-hmac",
-		},
-		{
-			name: "RSA-SHA256: verification fails with different RSA public key",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/foo", testBodyJSON)
-				setStandardHeaders(t, req.Header, "example.com", true)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "host", "date", "digest"},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				wrongKey := generateRSAKeys(t).public
-				err := verifier.Verify(wrongKey, &sigre.VerifyOptions{})
-				if err == nil {
-					t.Error("verification succeeded with a different public key")
-				}
-			},
-			wantKeyId:   "test-key-rsa",
-			expectError: true,
-		},
-		{
-			name: "Ed25519: verification fails with different Ed25519 public key",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "GET", "https://example.com/", "")
-				setStandardHeaders(t, req.Header, "example.com", false)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "host", "date"},
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				wrongKey := generateEd25519Keys(t).public
-				err := verifier.Verify(wrongKey, &sigre.VerifyOptions{})
-				if err == nil {
-					t.Error("verification succeeded with a different public key")
-				}
-			},
-			wantKeyId:   "test-key-ed25519",
-			expectError: true,
-		},
-		{
-			name: "HMAC-SHA256: verification fails with different secret",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
-				setStandardHeaders(t, req.Header, "example.com", false)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequestWithHMAC(req, hmacSecret, "test-key-hmac", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "date"},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				wrongSecret := []byte("wrong-secret-key")
-				err := verifier.VerifyHMAC(wrongSecret, &sigre.VerifyOptions{})
-				if err == nil {
-					t.Error("verification succeeded with a different secret")
-				}
-			},
-			wantKeyId:   "test-key-hmac",
-			expectError: true,
-		},
-		{
-			name: "Ed25519: sign and verify with (created) pseudo-header",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/api/data", "")
-				setStandardHeaders(t, req.Header, "example.com", false)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "(created)", "host"},
-					SignatureHeader: sigre.Signature,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				err := verifier.Verify(edPub, &sigre.VerifyOptions{})
-				if err != nil {
-					t.Errorf("verification failed: %v", err)
-				}
-			},
-			wantKeyId: "test-key-ed25519",
-		},
-		{
-			name: "RSA-SHA256: sign and verify with Authorization header format",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/auth", testBodyJSON)
-				setStandardHeaders(t, req.Header, "example.com", true)
-				return req
-			},
-			signFunc: func(t *testing.T, signer *sigre.CavageSigner, req *http.Request) {
-				err := signer.SignRequest(req, rsaPriv, "test-key-rsa-auth", &sigre.CavageSignOptions{
-					Headers:         []string{"(request-target)", "host", "date", "digest"},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: sigre.Authorization,
-				})
-				if err != nil {
-					t.Fatalf("signing failed: %v", err)
-				}
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) {
-				err := verifier.Verify(rsaPub, &sigre.VerifyOptions{})
-				if err != nil {
-					t.Errorf("verification failed: %v", err)
-				}
-			},
-			wantKeyId: "test-key-rsa-auth",
-		},
+	signer := &sigre.CavageSigner{Now: nowFunc}
+	newVerifier := func(t *testing.T, req *http.Request, wantKeyId string) *sigre.CavageVerifier {
+		t.Helper()
+		verifier, err := sigre.NewCavageRequestVerifier(req)
+		if err != nil {
+			t.Fatalf("failed to create verifier: %v", err)
+		}
+		verifier.Now = nowFunc
+		if verifier.KeyId() != wantKeyId {
+			t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), wantKeyId)
+		}
+		return verifier
 	}
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := tc.setup(t)
+	t.Run("RSA-SHA256: sign with fixed key and verify with same public key", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
+		setStandardHeaders(t, req.Header, "example.com", true)
 
-			signer := &sigre.CavageSigner{Now: nowFunc}
-			tc.signFunc(t, signer, req)
-
-			verifier, err := sigre.NewCavageRequestVerifier(req)
-			if err != nil {
-				t.Fatalf("failed to create verifier: %v", err)
-			}
-			verifier.Now = nowFunc
-
-			if verifier.KeyId() != tc.wantKeyId {
-				t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), tc.wantKeyId)
-			}
-
-			tc.verifyFunc(t, verifier)
+		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "host", "date", "digest"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
 		})
-	}
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-rsa")
+		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("RSA-SHA512: sign with fixed key and verify with same public key", func(t *testing.T) {
+		req := newTestRequest(t, "PUT", "https://example.com/update", testBodyJSON)
+		setStandardHeaders(t, req.Header, "example.com", true)
+
+		err := signer.SignRequest(req, rsaPriv, "test-key-rsa-512", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "host", "date", "digest"},
+			HashAlgorithm:   crypto.SHA512,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-rsa-512")
+		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("ECDSA-SHA256: sign with fixed key and verify with same public key", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/ecdsa", testBodyJSON)
+		setStandardHeaders(t, req.Header, "example.com", true)
+
+		err := signer.SignRequest(req, ecPriv, "test-key-ecdsa", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "host", "date", "digest"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-ecdsa")
+		if err := verifier.Verify(ecPub, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("Ed25519: sign with fixed key and verify with same public key", func(t *testing.T) {
+		req := newTestRequest(t, "GET", "https://example.com/", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+
+		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "host", "date"},
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-ed25519")
+		if err := verifier.Verify(edPub, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("HMAC-SHA256: sign with fixed secret and verify with same secret", func(t *testing.T) {
+		req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+
+		err := signer.SignRequestWithHMAC(req, hmacSecret, "test-key-hmac", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "date"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-hmac")
+		if err := verifier.VerifyHMAC(hmacSecret, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("RSA-SHA256: verification fails with different RSA public key", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/foo", testBodyJSON)
+		setStandardHeaders(t, req.Header, "example.com", true)
+
+		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "host", "date", "digest"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-rsa")
+		if err := verifier.Verify(generateRSAKeys(t).public, &sigre.VerifyOptions{}); err == nil {
+			t.Error("verification succeeded with a different public key")
+		}
+	})
+
+	t.Run("Ed25519: verification fails with different Ed25519 public key", func(t *testing.T) {
+		req := newTestRequest(t, "GET", "https://example.com/", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+
+		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "host", "date"},
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-ed25519")
+		if err := verifier.Verify(generateEd25519Keys(t).public, &sigre.VerifyOptions{}); err == nil {
+			t.Error("verification succeeded with a different public key")
+		}
+	})
+
+	t.Run("HMAC-SHA256: verification fails with different secret", func(t *testing.T) {
+		req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+
+		err := signer.SignRequestWithHMAC(req, hmacSecret, "test-key-hmac", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "date"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-hmac")
+		if err := verifier.VerifyHMAC([]byte("wrong-secret-key"), &sigre.VerifyOptions{}); err == nil {
+			t.Error("verification succeeded with a different secret")
+		}
+	})
+
+	t.Run("Ed25519: sign and verify with (created) pseudo-header", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/api/data", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+
+		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "(created)", "host"},
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-ed25519")
+		if err := verifier.Verify(edPub, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("RSA-SHA256: sign and verify with Authorization header format", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/auth", testBodyJSON)
+		setStandardHeaders(t, req.Header, "example.com", true)
+
+		err := signer.SignRequest(req, rsaPriv, "test-key-rsa-auth", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "host", "date", "digest"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Authorization,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier := newVerifier(t, req, "test-key-rsa-auth")
+		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
 }
 
 // Precomputed signature values verify compatibility without using the signer.
@@ -504,145 +421,123 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 	nowFunc := func() time.Time { return testFixedTime }
 
 	testCases := []struct {
-		name       string
-		setup      func(t *testing.T) *http.Request
-		verifyFunc func(t *testing.T, verifier *sigre.CavageVerifier) error
-		wantKeyId  string
-		wantErr    bool
+		name      string
+		method    string
+		url       string
+		body      string
+		date      string
+		host      string
+		digest    string
+		signature string
+		verifyBy  string
+		wantKeyId string
+		wantErr   bool
+		wantErrIs error
 	}{
 		{
-			name: "RSA-SHA256: verify precomputed signature succeeds",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
-				req.Header.Set("Date", testDateHeader)
-				req.Header.Set("Host", "example.com")
-				req.Header.Set("Digest", testBodyDigest)
-				req.Header.Set("Signature",
-					`keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`)
-				return req
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) error {
-				return verifier.Verify(rsaPub, &sigre.VerifyOptions{})
-			},
+			name:      "RSA-SHA256: verify precomputed signature succeeds",
+			method:    "POST",
+			url:       "https://example.com/foo?param=value&pet=dog",
+			body:      testBodyJSON,
+			date:      testDateHeader,
+			host:      "example.com",
+			digest:    testBodyDigest,
+			signature: `keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
+			verifyBy:  "rsa",
 			wantKeyId: "test-key-rsa",
 		},
 		{
-			name: "RSA-SHA512: verify precomputed signature succeeds",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/foo", testBodyJSON)
-				req.Header.Set("Date", testDateHeader)
-				req.Header.Set("Host", "example.com")
-				req.Header.Set("Digest", testBodyDigest)
-				req.Header.Set("Signature",
-					`keyId="test-key-rsa",signature="l36dg8IqFddjKdyQsdWZ4n2QzkSdpCnq9jmvVqsBFcQUW9+r19azLRCpUoV2p3DkvhN1+Ub4mwouipzczQRQcAtcs1x4ZaZKi7J6uYgCe8QpsV/4ixAmD80mDYttXHPCUr8IU1Wg/Iaq6emYsm/cHFH/O46NSO+7dnZDJ1uCAVSTOp5vrlOTKtwgbg6sU7SXEDhUQ+gXSdToa7wXzHkgEIJAMnU815Y0lxI4Djt20ncmWbDC73Mp1ePlalbH2N9Y+rSY3/j4Aos0vIvtSl30zYi2EWO8Uhto4BmzivPRmXKGTJNk8tWtfT99I/t/4UIPuVPaI4kiWcVT0wcamkVkEA==",algorithm="rsa-sha512",headers="date digest"`)
-				return req
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) error {
-				return verifier.Verify(rsaPub, &sigre.VerifyOptions{})
-			},
+			name:      "RSA-SHA512: verify precomputed signature succeeds",
+			method:    "POST",
+			url:       "https://example.com/foo",
+			body:      testBodyJSON,
+			date:      testDateHeader,
+			host:      "example.com",
+			digest:    testBodyDigest,
+			signature: `keyId="test-key-rsa",signature="l36dg8IqFddjKdyQsdWZ4n2QzkSdpCnq9jmvVqsBFcQUW9+r19azLRCpUoV2p3DkvhN1+Ub4mwouipzczQRQcAtcs1x4ZaZKi7J6uYgCe8QpsV/4ixAmD80mDYttXHPCUr8IU1Wg/Iaq6emYsm/cHFH/O46NSO+7dnZDJ1uCAVSTOp5vrlOTKtwgbg6sU7SXEDhUQ+gXSdToa7wXzHkgEIJAMnU815Y0lxI4Djt20ncmWbDC73Mp1ePlalbH2N9Y+rSY3/j4Aos0vIvtSl30zYi2EWO8Uhto4BmzivPRmXKGTJNk8tWtfT99I/t/4UIPuVPaI4kiWcVT0wcamkVkEA==",algorithm="rsa-sha512",headers="date digest"`,
+			verifyBy:  "rsa",
 			wantKeyId: "test-key-rsa",
 		},
 		{
-			name: "Ed25519: verify precomputed signature succeeds",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "GET", "https://example.com/", "")
-				req.Header.Set("Date", testDateHeader)
-				req.Header.Set("Host", "example.com")
-				req.Header.Set("Signature",
-					`keyId="test-key-ed25519",signature="UMoMdVYlZBWj9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`)
-				return req
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) error {
-				return verifier.Verify(edPub, &sigre.VerifyOptions{})
-			},
+			name:      "Ed25519: verify precomputed signature succeeds",
+			method:    "GET",
+			url:       "https://example.com/",
+			date:      testDateHeader,
+			host:      "example.com",
+			signature: `keyId="test-key-ed25519",signature="UMoMdVYlZBWj9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`,
+			verifyBy:  "ed25519",
 			wantKeyId: "test-key-ed25519",
 		},
 		{
-			name: "HMAC-SHA256: verify precomputed signature succeeds",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
-				req.Header.Set("Date", testDateHeader)
-				req.Header.Set("Host", "example.com")
-				req.Header.Set("Signature",
-					`keyId="test-key-hmac",signature="Su9pRLxbHq1uWcYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`)
-				return req
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) error {
-				return verifier.VerifyHMAC([]byte(testHMACSecret), &sigre.VerifyOptions{})
-			},
+			name:      "HMAC-SHA256: verify precomputed signature succeeds",
+			method:    "DELETE",
+			url:       "https://example.com/resource/123",
+			date:      testDateHeader,
+			host:      "example.com",
+			signature: `keyId="test-key-hmac",signature="Su9pRLxbHq1uWcYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`,
+			verifyBy:  "hmac",
 			wantKeyId: "test-key-hmac",
 		},
 		{
-			name: "RSA-SHA256: verification fails with tampered signature value",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
-				req.Header.Set("Date", testDateHeader)
-				req.Header.Set("Host", "example.com")
-				req.Header.Set("Digest", testBodyDigest)
-				req.Header.Set("Signature",
-					`keyId="test-key-rsa",signature="AAAAALN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`)
-				return req
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) error {
-				return verifier.Verify(rsaPub, &sigre.VerifyOptions{})
-			},
+			name:      "RSA-SHA256: verification fails with tampered signature value",
+			method:    "POST",
+			url:       "https://example.com/foo?param=value&pet=dog",
+			body:      testBodyJSON,
+			date:      testDateHeader,
+			host:      "example.com",
+			digest:    testBodyDigest,
+			signature: `keyId="test-key-rsa",signature="AAAAALN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
+			verifyBy:  "rsa",
 			wantKeyId: "test-key-rsa",
 			wantErr:   true,
 		},
 		{
-			name: "Ed25519: verification fails with tampered signature value",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "GET", "https://example.com/", "")
-				req.Header.Set("Date", testDateHeader)
-				req.Header.Set("Host", "example.com")
-				req.Header.Set("Signature",
-					`keyId="test-key-ed25519",signature="AAAAAAAAAABWJ9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`)
-				return req
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) error {
-				return verifier.Verify(edPub, &sigre.VerifyOptions{})
-			},
+			name:      "Ed25519: verification fails with tampered signature value",
+			method:    "GET",
+			url:       "https://example.com/",
+			date:      testDateHeader,
+			host:      "example.com",
+			signature: `keyId="test-key-ed25519",signature="AAAAAAAAAABWJ9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`,
+			verifyBy:  "ed25519",
 			wantKeyId: "test-key-ed25519",
 			wantErr:   true,
 		},
 		{
-			name: "HMAC-SHA256: verification fails with tampered signature value",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
-				req.Header.Set("Date", testDateHeader)
-				req.Header.Set("Host", "example.com")
-				req.Header.Set("Signature",
-					`keyId="test-key-hmac",signature="AAAAAAAAAAAAAAAYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`)
-				return req
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) error {
-				return verifier.VerifyHMAC([]byte(testHMACSecret), &sigre.VerifyOptions{})
-			},
+			name:      "HMAC-SHA256: verification fails with tampered signature value",
+			method:    "DELETE",
+			url:       "https://example.com/resource/123",
+			date:      testDateHeader,
+			host:      "example.com",
+			signature: `keyId="test-key-hmac",signature="AAAAAAAAAAAAAAAYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`,
+			verifyBy:  "hmac",
 			wantKeyId: "test-key-hmac",
 			wantErr:   true,
 		},
 		{
-			name: "RSA-SHA256: verification fails with tampered header",
-			setup: func(t *testing.T) *http.Request {
-				req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
-				req.Header.Set("Date", "Sat, 08 Jun 2024 11:00:00 UTC")
-				req.Header.Set("Host", "example.com")
-				req.Header.Set("Digest", testBodyDigest)
-				req.Header.Set("Signature",
-					`keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`)
-				return req
-			},
-			verifyFunc: func(t *testing.T, verifier *sigre.CavageVerifier) error {
-				return verifier.Verify(rsaPub, &sigre.VerifyOptions{})
-			},
+			name:      "RSA-SHA256: verification fails with tampered header",
+			method:    "POST",
+			url:       "https://example.com/foo?param=value&pet=dog",
+			body:      testBodyJSON,
+			date:      "Sat, 08 Jun 2024 11:00:00 UTC",
+			host:      "example.com",
+			digest:    testBodyDigest,
+			signature: `keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
+			verifyBy:  "rsa",
 			wantKeyId: "test-key-rsa",
 			wantErr:   true,
+			wantErrIs: sigre.ErrVerification,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			req := tc.setup(t)
+			req := newTestRequest(t, tc.method, tc.url, tc.body)
+			req.Header.Set("Date", tc.date)
+			req.Header.Set("Host", tc.host)
+			req.Header.Set("Signature", tc.signature)
+			if tc.digest != "" {
+				req.Header.Set("Digest", tc.digest)
+			}
 
 			verifier, err := sigre.NewCavageRequestVerifier(req)
 			if err != nil {
@@ -654,15 +549,28 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 				t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), tc.wantKeyId)
 			}
 
-			err = tc.verifyFunc(t, verifier)
+			switch tc.verifyBy {
+			case "rsa":
+				err = verifier.Verify(rsaPub, &sigre.VerifyOptions{})
+			case "ed25519":
+				err = verifier.Verify(edPub, &sigre.VerifyOptions{})
+			case "hmac":
+				err = verifier.VerifyHMAC([]byte(testHMACSecret), &sigre.VerifyOptions{})
+			default:
+				t.Fatalf("unknown verifyBy value: %q", tc.verifyBy)
+			}
+
 			if tc.wantErr {
 				if err == nil {
-					t.Error("expected an error, but verification succeeded")
+					t.Fatal("expected an error, but verification succeeded")
 				}
-			} else {
-				if err != nil {
-					t.Errorf("verification failed: %v", err)
+				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+					t.Fatalf("expected error %v, got: %v", tc.wantErrIs, err)
 				}
+				return
+			}
+			if err != nil {
+				t.Errorf("verification failed: %v", err)
 			}
 		})
 	}
@@ -835,6 +743,57 @@ func TestFixedKeyWithGenericVerifier(t *testing.T) {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
+
+	t.Run("NewResponseVerifier: RSA-SHA256", func(t *testing.T) {
+		dummyReq, _ := http.NewRequest("GET", "https://example.com/generic-response", nil)
+		res := &http.Response{
+			Request: dummyReq,
+			Header:  make(http.Header),
+		}
+		res.Header.Set("Date", testDateHeader)
+		res.Header.Set("Digest", testBodyDigest)
+
+		signer := &sigre.CavageSigner{Now: nowFunc}
+		err := signer.SignResponse(res, rsaPriv, "test-key-rsa-res", &sigre.CavageSignOptions{
+			Headers:         []string{"date", "digest"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("response signing failed: %v", err)
+		}
+
+		verifier, err := sigre.NewResponseVerifier(res)
+		if err != nil {
+			t.Fatalf("NewResponseVerifier failed: %v", err)
+		}
+		if verifier.KeyId() != "test-key-rsa-res" {
+			t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), "test-key-rsa-res")
+		}
+		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("response verification failed: %v", err)
+		}
+	})
+
+	t.Run("NewResponseVerifier: missing signature", func(t *testing.T) {
+		res := &http.Response{Header: make(http.Header)}
+
+		_, err := sigre.NewResponseVerifier(res)
+		if !errors.Is(err, sigre.ErrMissingSignature) {
+			t.Fatalf("expected ErrMissingSignature, got: %v", err)
+		}
+	})
+
+	t.Run("NewResponseVerifier: RFC9421 is detected but not implemented", func(t *testing.T) {
+		res := &http.Response{Header: make(http.Header)}
+		res.Header.Set("Signature", "sig1=:abc123:")
+		res.Header.Set("Signature-Input", `sig1=("@method");created=1618884473`)
+
+		_, err := sigre.NewResponseVerifier(res)
+		if err == nil || !strings.Contains(err.Error(), "RFC9421 verifier not implemented") {
+			t.Fatalf("expected RFC9421 not implemented error, got: %v", err)
+		}
+	})
 }
 
 func TestFixedKeyResponseSignAndVerify(t *testing.T) {
@@ -903,6 +862,102 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 
 		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
 			t.Errorf("response signature verification failed: %v", err)
+		}
+	})
+
+	t.Run("HMAC-SHA256: response sign and verify", func(t *testing.T) {
+		dummyReq, _ := http.NewRequest("GET", "https://example.com/data", nil)
+		res := &http.Response{
+			Request: dummyReq,
+			Header:  make(http.Header),
+		}
+		res.Header.Set("Date", testDateHeader)
+		res.Header.Set("Digest", testBodyDigest)
+
+		signer := &sigre.CavageSigner{Now: nowFunc}
+		err := signer.SignResponseWithHMAC(res, []byte(testHMACSecret), "test-key-hmac-resp", &sigre.CavageSignOptions{
+			Headers:         []string{"date", "digest"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("response HMAC signing failed: %v", err)
+		}
+
+		verifier, err := sigre.NewCavageResponseVerifier(res)
+		if err != nil {
+			t.Fatalf("failed to create verifier: %v", err)
+		}
+		verifier.Now = nowFunc
+
+		if verifier.KeyId() != "test-key-hmac-resp" {
+			t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), "test-key-hmac-resp")
+		}
+		if err := verifier.VerifyHMAC([]byte(testHMACSecret), &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("response HMAC verification failed: %v", err)
+		}
+	})
+
+	t.Run("HMAC-SHA256: response verification fails with wrong secret", func(t *testing.T) {
+		dummyReq, _ := http.NewRequest("GET", "https://example.com/data", nil)
+		res := &http.Response{
+			Request: dummyReq,
+			Header:  make(http.Header),
+		}
+		res.Header.Set("Date", testDateHeader)
+		res.Header.Set("Digest", testBodyDigest)
+
+		signer := &sigre.CavageSigner{Now: nowFunc}
+		err := signer.SignResponseWithHMAC(res, []byte(testHMACSecret), "test-key-hmac-resp", &sigre.CavageSignOptions{
+			Headers:         []string{"date", "digest"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("response HMAC signing failed: %v", err)
+		}
+
+		verifier, err := sigre.NewCavageResponseVerifier(res)
+		if err != nil {
+			t.Fatalf("failed to create verifier: %v", err)
+		}
+		verifier.Now = nowFunc
+
+		err = verifier.VerifyHMAC([]byte("wrong-secret"), &sigre.VerifyOptions{})
+		if !errors.Is(err, sigre.ErrVerification) {
+			t.Fatalf("expected ErrVerification, got: %v", err)
+		}
+	})
+
+	t.Run("HMAC-SHA256: response verification fails after header tampering", func(t *testing.T) {
+		dummyReq, _ := http.NewRequest("GET", "https://example.com/data", nil)
+		res := &http.Response{
+			Request: dummyReq,
+			Header:  make(http.Header),
+		}
+		res.Header.Set("Date", testDateHeader)
+		res.Header.Set("Digest", testBodyDigest)
+
+		signer := &sigre.CavageSigner{Now: nowFunc}
+		err := signer.SignResponseWithHMAC(res, []byte(testHMACSecret), "test-key-hmac-resp", &sigre.CavageSignOptions{
+			Headers:         []string{"date", "digest"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("response HMAC signing failed: %v", err)
+		}
+		res.Header.Set("Date", "Sat, 08 Jun 2024 11:00:00 UTC")
+
+		verifier, err := sigre.NewCavageResponseVerifier(res)
+		if err != nil {
+			t.Fatalf("failed to create verifier: %v", err)
+		}
+		verifier.Now = nowFunc
+
+		err = verifier.VerifyHMAC([]byte(testHMACSecret), &sigre.VerifyOptions{})
+		if !errors.Is(err, sigre.ErrVerification) {
+			t.Fatalf("expected ErrVerification, got: %v", err)
 		}
 	})
 }
@@ -1028,6 +1083,102 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		if !errors.Is(err, sigre.ErrInvalidCreationTime) {
 			t.Errorf("unexpected error type: %v", err)
+		}
+	})
+
+	t.Run("Expires: verification succeeds before expiry", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+
+		signer := &sigre.CavageSigner{Now: nowFunc}
+		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "(created)", "(expires)", "host"},
+			Expiry:          60,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier, err := sigre.NewCavageRequestVerifier(req)
+		if err != nil {
+			t.Fatalf("failed to create verifier: %v", err)
+		}
+		verifier.Now = func() time.Time { return testFixedTime.Add(30 * time.Second) }
+
+		if err := verifier.Verify(edPub, &sigre.VerifyOptions{}); err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("Expires: verification fails after expiry", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+
+		signer := &sigre.CavageSigner{Now: nowFunc}
+		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "(created)", "(expires)", "host"},
+			Expiry:          60,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier, err := sigre.NewCavageRequestVerifier(req)
+		if err != nil {
+			t.Fatalf("failed to create verifier: %v", err)
+		}
+		verifier.Now = func() time.Time { return testFixedTime.Add(61 * time.Second) }
+
+		err = verifier.Verify(edPub, &sigre.VerifyOptions{})
+		if !errors.Is(err, sigre.ErrSignatureExpired) {
+			t.Fatalf("expected ErrSignatureExpired, got: %v", err)
+		}
+	})
+
+	t.Run("Expires: verification succeeds within skew tolerance", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+
+		signer := &sigre.CavageSigner{Now: nowFunc}
+		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
+			Headers:         []string{"(request-target)", "(created)", "(expires)", "host"},
+			Expiry:          60,
+			SignatureHeader: sigre.Signature,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+
+		verifier, err := sigre.NewCavageRequestVerifier(req)
+		if err != nil {
+			t.Fatalf("failed to create verifier: %v", err)
+		}
+		verifier.Now = func() time.Time { return testFixedTime.Add(61 * time.Second) }
+
+		err = verifier.Verify(edPub, &sigre.VerifyOptions{
+			AllowedClockSkew: 2 * time.Minute,
+		})
+		if err != nil {
+			t.Errorf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("Expires: verification fails when signed parameter is missing", func(t *testing.T) {
+		req := newTestRequest(t, "POST", "https://example.com/", "")
+		setStandardHeaders(t, req.Header, "example.com", false)
+		req.Header.Set("Signature", `keyId="test-key-ed25519",signature="AAAA",algorithm="ed25519",headers="(expires)"`)
+
+		verifier, err := sigre.NewCavageRequestVerifier(req)
+		if err != nil {
+			t.Fatalf("failed to create verifier: %v", err)
+		}
+		verifier.Now = nowFunc
+
+		err = verifier.Verify(edPub, &sigre.VerifyOptions{})
+		if err == nil || !strings.Contains(err.Error(), "'expires' parameter is missing") {
+			t.Fatalf("expected missing expires parameter error, got: %v", err)
 		}
 	})
 

@@ -149,3 +149,40 @@ func TestParseCavageParams(t *testing.T) {
 		})
 	}
 }
+
+func FuzzParseCavageParams(f *testing.F) {
+	seeds := []string{
+		`keyId="test-key-1",algorithm="rsa-sha256",created=1618952679,expires=1618952739,headers="(created) (expires) host date digest",signature="Base64SignatureHere"`,
+		`keyId="test-key-2",algorithm="hmac-sha512",headers="host date",signature="AnotherBase64Signature"`,
+		`signature="sig",headers="date",keyId="test-key-4"`,
+		`keyId="test-key-5",signature="sig",custom="some-value"`,
+		`algorithm="rsa-sha256",signature="sig"`,
+		`keyId="test-key-1"`,
+		`keyId=test-key-1`,
+		`keyId="test-key-1`,
+		`keyId="key1",keyId="key2",signature="sig"`,
+		`keyId="k",signature="s",created="not-a-number"`,
+		``,
+		`,`,
+		`=`,
+	}
+	for _, seed := range seeds {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, input string) {
+		params, err := sigre.ExportForTesting_parseCavageParams(input)
+		if err != nil {
+			return
+		}
+		if params == nil {
+			t.Fatal("parseCavageParams returned nil params with nil error")
+		}
+		if params.KeyId == "" {
+			t.Fatal("parseCavageParams returned empty KeyId with nil error")
+		}
+		if params.Signature == "" {
+			t.Fatal("parseCavageParams returned empty Signature with nil error")
+		}
+	})
+}

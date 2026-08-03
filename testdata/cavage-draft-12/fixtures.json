@@ -1,0 +1,155 @@
+{
+  "format_version": 1,
+  "fixtures": [
+    {
+      "id": "rsa-request-multiple-and-empty-values",
+      "description": "RSA request fixture covering a normal path, query, multiple header values, and an empty header value.",
+      "source": "Locally constructed conformance vector; not copied from draft Appendix C.",
+      "specification": [
+        "draft-cavage-http-signatures-12 Section 2.1.3",
+        "draft-cavage-http-signatures-12 Section 2.3",
+        "draft-cavage-http-signatures-12 Section 2.4",
+        "draft-cavage-http-signatures-12 Section 2.5",
+        "draft-cavage-http-signatures-12 Appendix E.2"
+      ],
+      "generation": "README.md, Signature generation section, RSA commands",
+      "independent_validation": "README.md, Independent verification section",
+      "message": {
+        "type": "request",
+        "method": "POST",
+        "url": "https://example.test/inbox?batch=1",
+        "headers": [
+          {"name": "Host", "values": ["example.test"]},
+          {"name": "Date", "values": ["Tue, 04 Aug 2026 04:00:00 GMT"]},
+          {"name": "Content-Type", "values": ["application/activity+json"]},
+          {"name": "X-Example", "values": ["first", "second"]},
+          {"name": "X-Empty", "values": [""]}
+        ],
+        "body": "{\"type\":\"fixture\"}"
+      },
+      "signed_headers": ["(request-target)", "host", "date", "content-type", "x-example", "x-empty"],
+      "expected_signing_string": "(request-target): post /inbox?batch=1\nhost: example.test\ndate: Tue, 04 Aug 2026 04:00:00 GMT\ncontent-type: application/activity+json\nx-example: first, second\nx-empty: ",
+      "signature_header": "Signature",
+      "signature_header_value": "keyId=\"test-rsa-2026\",signature=\"XIzan16OcY02rmO/U0J7mLwJXASVKbESy492X+dbeq9B7UKzTCPyuh1nD5G5nHceZrfh5nYK928M5GalLB9e5ksO1ZeSyZf7y7ifYJifhcyAVGQdngGeEO03Wz50LfWufnFPf0XbReBq7fGhMhMWPa14ycLJS5MQ4eUUYqCz14XgpYqqRkeV5AqSj8qGZXTneb1Z/9KtRd9cOz0X+Lked1S92bQ12fB4ndWPDG6s0cRd2NBVDSFtsMoFlix0knkAQP5syEGARE0bbGprlSzLrcowJezoJhTtGztlY8wXUPk/ZXkqK04VJqu1AJGLqRTQGYvqohb0ld4hydbx2gkKeA==\",algorithm=\"hs2019\",headers=\"(request-target) host date content-type x-example x-empty\"",
+      "key_id": "test-rsa-2026",
+      "algorithm": "hs2019",
+      "crypto_path": "rsa",
+      "hash": "sha512",
+      "signature_base64": "XIzan16OcY02rmO/U0J7mLwJXASVKbESy492X+dbeq9B7UKzTCPyuh1nD5G5nHceZrfh5nYK928M5GalLB9e5ksO1ZeSyZf7y7ifYJifhcyAVGQdngGeEO03Wz50LfWufnFPf0XbReBq7fGhMhMWPa14ycLJS5MQ4eUUYqCz14XgpYqqRkeV5AqSj8qGZXTneb1Z/9KtRd9cOz0X+Lked1S92bQ12fB4ndWPDG6s0cRd2NBVDSFtsMoFlix0knkAQP5syEGARE0bbGprlSzLrcowJezoJhTtGztlY8wXUPk/ZXkqK04VJqu1AJGLqRTQGYvqohb0ld4hydbx2gkKeA==",
+      "verification_key_file": "keys/rsa-public.pem",
+      "signing_key_file": "keys/rsa-private.pem",
+      "verification_time": "2026-08-04T04:00:00Z"
+    },
+    {
+      "id": "ecdsa-response-multiple-and-empty-values",
+      "description": "ECDSA response fixture covering multiple header values and an empty header value.",
+      "source": "Locally constructed conformance vector; not copied from draft Appendix C.",
+      "specification": [
+        "draft-cavage-http-signatures-12 Section 2.1.3",
+        "draft-cavage-http-signatures-12 Section 2.3",
+        "draft-cavage-http-signatures-12 Section 2.4",
+        "draft-cavage-http-signatures-12 Section 2.5",
+        "draft-cavage-http-signatures-12 Appendix E.2"
+      ],
+      "generation": "README.md, Signature generation section, ECDSA commands",
+      "independent_validation": "README.md, Independent verification section",
+      "message": {
+        "type": "response",
+        "status_code": 202,
+        "status": "202 Accepted",
+        "headers": [
+          {"name": "Date", "values": ["Tue, 04 Aug 2026 04:00:00 GMT"]},
+          {"name": "X-Trace", "values": ["trace-a", "trace-b"]},
+          {"name": "X-Empty", "values": [""]}
+        ],
+        "body": "accepted"
+      },
+      "signed_headers": ["date", "x-trace", "x-empty"],
+      "expected_signing_string": "date: Tue, 04 Aug 2026 04:00:00 GMT\nx-trace: trace-a, trace-b\nx-empty: ",
+      "signature_header": "Signature",
+      "signature_header_value": "keyId=\"test-ecdsa-2026\",signature=\"MEYCIQCWx7+Gs/jG3taH4XcrbWBnGYNMupYKA1IESLgj1NR/kgIhAJJPwRLBEogSQdQ7OiHpKZvoGIfK00hMfDkUE5B3uZUS\",algorithm=\"hs2019\",headers=\"date x-trace x-empty\"",
+      "key_id": "test-ecdsa-2026",
+      "algorithm": "hs2019",
+      "crypto_path": "ecdsa",
+      "hash": "sha512",
+      "signature_base64": "MEYCIQCWx7+Gs/jG3taH4XcrbWBnGYNMupYKA1IESLgj1NR/kgIhAJJPwRLBEogSQdQ7OiHpKZvoGIfK00hMfDkUE5B3uZUS",
+      "verification_key_file": "keys/ecdsa-public.pem",
+      "signing_key_file": "keys/ecdsa-private.pem",
+      "verification_time": "2026-08-04T04:00:00Z"
+    },
+    {
+      "id": "ed25519-request-created",
+      "description": "Ed25519 request fixture covering a normal path and the (created) pseudo-header.",
+      "source": "Locally constructed conformance vector; not copied from draft Appendix C.",
+      "specification": [
+        "draft-cavage-http-signatures-12 Section 2.1.3",
+        "draft-cavage-http-signatures-12 Section 2.1.4",
+        "draft-cavage-http-signatures-12 Section 2.3",
+        "draft-cavage-http-signatures-12 Section 2.4",
+        "draft-cavage-http-signatures-12 Section 2.5",
+        "draft-cavage-http-signatures-12 Appendix E.2"
+      ],
+      "generation": "README.md, Signature generation section, Ed25519 commands",
+      "independent_validation": "README.md, Independent verification section",
+      "message": {
+        "type": "request",
+        "method": "GET",
+        "url": "https://example.test/status/42",
+        "headers": [
+          {"name": "Host", "values": ["example.test"]},
+          {"name": "X-Note", "values": ["signed"]}
+        ],
+        "body": ""
+      },
+      "signed_headers": ["(request-target)", "(created)", "host", "x-note"],
+      "expected_signing_string": "(request-target): get /status/42\n(created): 1785816000\nhost: example.test\nx-note: signed",
+      "signature_header": "Signature",
+      "signature_header_value": "keyId=\"test-ed25519-2026\",signature=\"0Yvzfy92cF2XssVyiHvaGzTsIX15Lh0tqJ0fxq6lISFaa47/Lh678iZxxURIHkffuAOe9Y7st7rqSlgS5KaZCQ==\",algorithm=\"hs2019\",created=1785816000,headers=\"(request-target) (created) host x-note\"",
+      "key_id": "test-ed25519-2026",
+      "algorithm": "hs2019",
+      "crypto_path": "ed25519",
+      "hash": "",
+      "created": "1785816000",
+      "signature_base64": "0Yvzfy92cF2XssVyiHvaGzTsIX15Lh0tqJ0fxq6lISFaa47/Lh678iZxxURIHkffuAOe9Y7st7rqSlgS5KaZCQ==",
+      "verification_key_file": "keys/ed25519-public.pem",
+      "signing_key_file": "keys/ed25519-private.pem",
+      "verification_time": "2026-08-04T04:00:00Z"
+    },
+    {
+      "id": "hmac-response-multiple-and-empty-values",
+      "description": "HMAC response fixture covering multiple header values and an empty header value.",
+      "source": "Locally constructed conformance vector; not copied from draft Appendix C.",
+      "specification": [
+        "draft-cavage-http-signatures-12 Section 2.1.3",
+        "draft-cavage-http-signatures-12 Section 2.3",
+        "draft-cavage-http-signatures-12 Section 2.4",
+        "draft-cavage-http-signatures-12 Section 2.5",
+        "draft-cavage-http-signatures-12 Appendix E.2"
+      ],
+      "generation": "README.md, Signature generation section, HMAC commands",
+      "independent_validation": "README.md, Independent verification section",
+      "message": {
+        "type": "response",
+        "status_code": 200,
+        "status": "200 OK",
+        "headers": [
+          {"name": "Date", "values": ["Tue, 04 Aug 2026 04:00:00 GMT"]},
+          {"name": "Cache-Control", "values": ["private", "max-age=60"]},
+          {"name": "X-Empty", "values": [""]}
+        ],
+        "body": "response fixture"
+      },
+      "signed_headers": ["date", "cache-control", "x-empty"],
+      "expected_signing_string": "date: Tue, 04 Aug 2026 04:00:00 GMT\ncache-control: private, max-age=60\nx-empty: ",
+      "signature_header": "Signature",
+      "signature_header_value": "keyId=\"test-hmac-2026\",signature=\"VeQkfuHB1Qd5nV+FcoLqF+3W7oLtUdpXje1dlQNoerjOL2G1T5wwUiDuR2Waq/XdrgL0Zk0vLDDx0eVe6J6XOg==\",algorithm=\"hs2019\",headers=\"date cache-control x-empty\"",
+      "key_id": "test-hmac-2026",
+      "algorithm": "hs2019",
+      "crypto_path": "hmac",
+      "hash": "sha512",
+      "signature_base64": "VeQkfuHB1Qd5nV+FcoLqF+3W7oLtUdpXje1dlQNoerjOL2G1T5wwUiDuR2Waq/XdrgL0Zk0vLDDx0eVe6J6XOg==",
+      "hmac_secret_file": "keys/hmac-secret.hex",
+      "verification_time": "2026-08-04T04:00:00Z"
+    }
+  ]
+}

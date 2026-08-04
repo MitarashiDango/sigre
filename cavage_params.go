@@ -2,6 +2,7 @@ package sigre
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"slices"
@@ -32,21 +33,45 @@ type cavageParams struct {
 	Headers   []string
 }
 
-// String serialises p into the Cavage signature-params wire format.
-func (p *cavageParams) String() string {
-	var sb strings.Builder
-	sb.Grow(8192)
+// serializeCavageParams serialises p into the Cavage signature-params wire format.
+func serializeCavageParams(p *cavageParams) (string, error) {
+	if p == nil {
+		return "", fmt.Errorf("signature parameters are nil")
+	}
+	if err := validateCavageKeyID(p.KeyId); err != nil {
+		return "", err
+	}
+	if p.Signature == "" {
+		return "", fmt.Errorf("missing required parameter: signature")
+	}
+	if _, err := base64.StdEncoding.Strict().DecodeString(p.Signature); err != nil {
+		return "", fmt.Errorf("invalid 'signature' value: %w", err)
+	}
+	if p.Created != "" {
+		if err := isValidUnixTime(p.Created); err != nil {
+			return "", fmt.Errorf("invalid 'created' value: %w", err)
+		}
+	}
+	if p.Expires != "" {
+		if err := isValidUnixTime(p.Expires); err != nil {
+			return "", fmt.Errorf("invalid 'expires' value: %w", err)
+		}
+	}
 
-	sb.WriteString("keyId=\"")
-	sb.WriteString(p.KeyId)
-	sb.WriteString("\",signature=\"")
-	sb.WriteString(p.Signature)
-	sb.WriteString("\"")
+	var sb strings.Builder
+	if err := appendCavageQuotedString(&sb, "keyId", p.KeyId); err != nil {
+		return "", err
+	}
+	sb.WriteString(",")
+	if err := appendCavageQuotedString(&sb, "signature", p.Signature); err != nil {
+		return "", err
+	}
 
 	if p.Algorithm != "" {
-		sb.WriteString(",algorithm=\"")
-		sb.WriteString(p.Algorithm)
-		sb.WriteString("\"")
+		sb.WriteString(",")
+		if err := appendCavageQuotedString(&sb, "algorithm", p.Algorithm); err != nil {
+			return "", err
+		}
 	}
 
 	if p.Created != "" {
@@ -60,102 +85,90 @@ func (p *cavageParams) String() string {
 	}
 
 	if len(p.Headers) > 0 {
-		sb.WriteString(",headers=\"")
-		for i, h := range p.Headers {
-			if i > 0 {
-				sb.WriteString(" ")
+		for _, h := range p.Headers {
+			if h == "" {
+				return "", fmt.Errorf("'headers' parameter must not contain an empty header name")
 			}
-			sb.WriteString(h)
 		}
-		sb.WriteString("\"")
+		sb.WriteString(",")
+		if err := appendCavageQuotedString(&sb, "headers", strings.Join(p.Headers, " ")); err != nil {
+			return "", err
+		}
 	}
 
-	return sb.String()
+	return sb.String(), nil
+}
+
+func appendCavageQuotedString(sb *strings.Builder, name, value string) error {
+	if err := validateCavageQuotedStringValue(name, value); err != nil {
+		return err
+	}
+
+	sb.WriteString(name)
+	sb.WriteString("=\"")
+	for i := 0; i < len(value); i++ {
+		if value[i] == '"' || value[i] == '\\' {
+			sb.WriteByte('\\')
+		}
+		sb.WriteByte(value[i])
+	}
+	sb.WriteByte('"')
+	return nil
+}
+
+func validateCavageKeyID(keyID string) error {
+	if keyID == "" {
+		return fmt.Errorf("missing required parameter: keyId")
+	}
+	return validateCavageQuotedStringValue("keyId", keyID)
+}
+
+func validateCavageQuotedStringValue(name, value string) error {
+	for i := 0; i < len(value); i++ {
+		if isForbiddenHeaderValueByte(value[i]) {
+			return fmt.Errorf("'%s' contains a byte that cannot be written to an HTTP header", name)
+		}
+	}
+	return nil
 }
 
 // parseCavageParams parses a Cavage HTTP Signature parameter string as defined in
 // draft-cavage-http-signatures-12 Section 2.1.
 func parseCavageParams(input string) (*cavageParams, error) {
-	kvPairs := make(map[string]string, 6)
-	state := 0
-	var buf strings.Builder
-	buf.Grow(4096)
-	var paramName string
-	var unquoted bool
-
-	for pos, ch := range input {
-		switch state {
-		case 0: // reading parameter name
-			if ch == '=' {
-				if buf.Len() == 0 {
-					return nil, fmt.Errorf("parameter name required")
-				}
-				paramName = buf.String()
-				buf.Reset()
-				state++
-			} else {
-				buf.WriteRune(ch)
-			}
-		case 1: // before value
-			if ch == '"' {
-				unquoted = false
-				buf.Grow(4096)
-				state++
-			} else if (paramName == "created" || paramName == "expires") && ch != ',' {
-				unquoted = true
-				buf.WriteRune(ch)
-				state++
-			} else {
-				return nil, fmt.Errorf("unexpected character '%c' at position %d, expected '\"'", ch, pos+1)
-			}
-		case 2: // reading value
-			if (!unquoted && ch == '"') || (unquoted && ch == ',') {
-				if _, ok := kvPairs[paramName]; ok {
-					return nil, fmt.Errorf("duplicate parameter name '%s' found", paramName)
-				}
-				kvPairs[paramName] = buf.String()
-				buf.Reset()
-				paramName = ""
-				if !unquoted {
-					state++
-				} else {
-					buf.Grow(4096)
-					state = 0
-				}
-			} else {
-				buf.WriteRune(ch)
-			}
-		case 3: // after value
-			if ch == ',' {
-				buf.Grow(4096)
-				state = 0
-			} else {
-				return nil, fmt.Errorf("unexpected character '%c' at position %d, expected ',' or end of input", ch, pos+1)
-			}
-		}
-	}
-
-	if state == 0 && buf.Len() > 0 {
-		return nil, fmt.Errorf("unexpected end of input while reading parameter name")
-	}
-	if state == 1 {
-		return nil, fmt.Errorf("unexpected end of input, expecting '\"' for parameter value")
-	}
-	if state == 2 {
-		if !unquoted {
-			return nil, fmt.Errorf("unexpected end of input, unclosed parameter value for '%s'", paramName)
-		}
-		if buf.Len() == 0 {
-			return nil, fmt.Errorf("unexpected end of input while reading parameter value")
-		}
-		kvPairs[paramName] = buf.String()
-	}
-
 	var hasHeaders bool
 	p := &cavageParams{}
-	for key, value := range kvPairs {
-		switch key {
-		case "keyId":
+	seen := make(map[string]bool, 6)
+
+	for pos := 0; pos < len(input); {
+		segment, next, err := nextCavageAuthParam(input, pos)
+		if err != nil {
+			return nil, err
+		}
+		pos = next
+		segment = trimCavageOWS(segment)
+		if segment == "" {
+			continue
+		}
+
+		name, valueStart, wellFormedName := parseCavageAuthParamName(segment)
+		canonicalName, known := knownCavageParamName(name)
+		if known {
+			if seen[canonicalName] {
+				return nil, fmt.Errorf("duplicate parameter name '%s' found", name)
+			}
+			seen[canonicalName] = true
+		}
+		if !wellFormedName || !known {
+			continue
+		}
+
+		value, wellFormedValue := parseCavageAuthParamValue(segment, valueStart)
+		if !wellFormedValue {
+			continue
+		}
+
+		switch canonicalName {
+		case "keyid":
 			p.KeyId = value
 		case "signature":
 			p.Signature = value
@@ -163,12 +176,12 @@ func parseCavageParams(input string) (*cavageParams, error) {
 			p.Algorithm = value
 		case "created":
 			if err := isValidUnixTime(value); err != nil {
-				return nil, fmt.Errorf("invalid 'created' value: %w", err)
+				continue
 			}
 			p.Created = value
 		case "expires":
 			if err := isValidUnixTime(value); err != nil {
-				return nil, fmt.Errorf("invalid 'expires' value: %w", err)
+				continue
 			}
 			p.Expires = value
 		case "headers":
@@ -179,7 +192,6 @@ func parseCavageParams(input string) (*cavageParams, error) {
 				}
 			}
 		}
-		// Unrecognised parameters are silently ignored per Section 2.2.
 	}
 
 	if p.KeyId == "" {
@@ -188,11 +200,188 @@ func parseCavageParams(input string) (*cavageParams, error) {
 	if p.Signature == "" {
 		return nil, fmt.Errorf("missing required parameter: signature")
 	}
+	if _, err := base64.StdEncoding.Strict().DecodeString(p.Signature); err != nil {
+		return nil, fmt.Errorf("invalid 'signature' value: %w", err)
+	}
 	if len(p.Headers) == 0 && hasHeaders {
 		return nil, fmt.Errorf("'headers' parameter must specify a non-empty value")
 	}
 
 	return p, nil
+}
+
+func nextCavageAuthParam(input string, start int) (segment string, next int, err error) {
+	inQuotedString := false
+	for i := start; i < len(input); i++ {
+		b := input[i]
+		if isForbiddenHeaderValueByte(b) {
+			return "", 0, fmt.Errorf("forbidden control byte at position %d", i+1)
+		}
+		if !inQuotedString {
+			switch b {
+			case ',':
+				return input[start:i], i + 1, nil
+			case '"':
+				inQuotedString = true
+			}
+			continue
+		}
+
+		switch b {
+		case '"':
+			inQuotedString = false
+		case '\\':
+			if i+1 >= len(input) {
+				return "", 0, fmt.Errorf("incomplete quoted-pair at end of input")
+			}
+			if !isCavageQuotedPairByte(input[i+1]) {
+				return "", 0, fmt.Errorf("invalid quoted-pair at position %d", i+1)
+			}
+			i++
+		default:
+			if !isCavageQDTextByte(b) {
+				return "", 0, fmt.Errorf("invalid quoted-string byte at position %d", i+1)
+			}
+		}
+	}
+	if inQuotedString {
+		return "", 0, fmt.Errorf("unexpected end of input: unclosed quoted-string")
+	}
+	return input[start:], len(input), nil
+}
+
+func parseCavageAuthParamName(segment string) (name string, valueStart int, wellFormed bool) {
+	pos := 0
+	for pos < len(segment) && isCavageTokenByte(segment[pos]) {
+		pos++
+	}
+	if pos == 0 {
+		return "", 0, false
+	}
+	name = segment[:pos]
+	pos = skipCavageOWS(segment, pos)
+	if pos >= len(segment) || segment[pos] != '=' {
+		return name, 0, false
+	}
+	pos++
+	pos = skipCavageOWS(segment, pos)
+	if pos >= len(segment) {
+		return name, 0, false
+	}
+	return name, pos, true
+}
+
+func parseCavageAuthParamValue(segment string, pos int) (value string, wellFormed bool) {
+	if segment[pos] == '"' {
+		var ok bool
+		value, pos, ok = parseCavageQuotedString(segment, pos)
+		if !ok {
+			return "", false
+		}
+	} else {
+		valueStart := pos
+		for pos < len(segment) && isCavageTokenByte(segment[pos]) {
+			pos++
+		}
+		if pos == valueStart {
+			return "", false
+		}
+		value = segment[valueStart:pos]
+	}
+
+	pos = skipCavageOWS(segment, pos)
+	return value, pos == len(segment)
+}
+
+func parseCavageQuotedString(input string, start int) (value string, next int, ok bool) {
+	valueStart := start + 1
+	last := valueStart
+	var sb strings.Builder
+	for pos := valueStart; pos < len(input); pos++ {
+		switch input[pos] {
+		case '"':
+			if sb.Len() == 0 {
+				return input[valueStart:pos], pos + 1, true
+			}
+			sb.WriteString(input[last:pos])
+			return sb.String(), pos + 1, true
+		case '\\':
+			if pos+1 >= len(input) || !isCavageQuotedPairByte(input[pos+1]) {
+				return "", 0, false
+			}
+			if sb.Len() == 0 {
+				sb.Grow(len(input) - valueStart)
+			}
+			sb.WriteString(input[last:pos])
+			sb.WriteByte(input[pos+1])
+			pos++
+			last = pos + 1
+		default:
+			if !isCavageQDTextByte(input[pos]) {
+				return "", 0, false
+			}
+		}
+	}
+	return "", 0, false
+}
+
+func knownCavageParamName(name string) (string, bool) {
+	switch {
+	case strings.EqualFold(name, "keyId"):
+		return "keyid", true
+	case strings.EqualFold(name, "signature"):
+		return "signature", true
+	case strings.EqualFold(name, "algorithm"):
+		return "algorithm", true
+	case strings.EqualFold(name, "created"):
+		return "created", true
+	case strings.EqualFold(name, "expires"):
+		return "expires", true
+	case strings.EqualFold(name, "headers"):
+		return "headers", true
+	default:
+		return "", false
+	}
+}
+
+func trimCavageOWS(value string) string {
+	start := skipCavageOWS(value, 0)
+	end := len(value)
+	for end > start && isCavageOWS(value[end-1]) {
+		end--
+	}
+	return value[start:end]
+}
+
+func skipCavageOWS(value string, pos int) int {
+	for pos < len(value) && isCavageOWS(value[pos]) {
+		pos++
+	}
+	return pos
+}
+
+func isCavageOWS(b byte) bool {
+	return b == ' ' || b == '\t'
+}
+
+func isCavageTokenByte(b byte) bool {
+	return b >= '0' && b <= '9' ||
+		b >= 'A' && b <= 'Z' ||
+		b >= 'a' && b <= 'z' ||
+		strings.ContainsRune("!#$%&'*+-.^_`|~", rune(b))
+}
+
+func isCavageQDTextByte(b byte) bool {
+	return b == '\t' || b == ' ' || b == '!' ||
+		b >= '#' && b <= '[' || b >= ']' && b <= '~' || b >= 0x80
+}
+
+func isCavageQuotedPairByte(b byte) bool {
+	return b == '\t' || b == ' ' || b >= '!' && b <= '~' || b >= 0x80
+}
+
+func isForbiddenHeaderValueByte(b byte) bool {
+	return b < ' ' && b != '\t' || b == 0x7f
 }
 
 // validateCreatedExpiresWithAlgorithm enforces the Section 2.3 restriction:

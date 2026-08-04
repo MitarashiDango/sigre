@@ -1,6 +1,7 @@
 package sigre
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 )
@@ -13,15 +14,14 @@ type SignatureHeaderFields struct {
 }
 
 // GetSignatureHeaderFields extracts signature-related header values from h.
-// The Signature field is populated from the "Signature" header when present, or from
-// an "Authorization: Signature ..." header as a fallback.
+// The Signature field is populated from exactly one "Signature" header value or one
+// "Authorization: Signature ..." value. It is empty when Cavage signature placement
+// is ambiguous.
 func GetSignatureHeaderFields(h http.Header) *SignatureHeaderFields {
 	hf := new(SignatureHeaderFields)
 
-	if v := h.Get(Signature); v != "" {
-		hf.Signature = v
-	} else if v := h.Get(Authorization); v != "" && strings.HasPrefix(v, Signature+" ") {
-		hf.Signature = strings.TrimSpace(strings.TrimPrefix(v, Signature+" "))
+	if signature, present, err := cavageSignatureValue(h); err == nil && present {
+		hf.Signature = signature
 	}
 
 	if v := h.Get(SignatureInput); v != "" {
@@ -46,4 +46,56 @@ func (hf *SignatureHeaderFields) GetSignatureType() SignatureType {
 		return CavageHTTPSignatures
 	}
 	return Unsigned
+}
+
+func cavageSignatureValue(h http.Header) (signature string, present bool, err error) {
+	signatureValues := h.Values(Signature)
+	if len(signatureValues) > 1 {
+		return "", false, fmt.Errorf("ambiguous Cavage signature: multiple Signature header values are present")
+	}
+
+	var authorizationSignature string
+	var authorizationSignaturePresent bool
+	for _, value := range h.Values(Authorization) {
+		params, ok := cavageAuthorizationParams(value)
+		if !ok {
+			continue
+		}
+		if authorizationSignaturePresent {
+			return "", false, fmt.Errorf("ambiguous Cavage signature: multiple Authorization Signature values are present")
+		}
+		authorizationSignaturePresent = true
+		authorizationSignature = params
+	}
+
+	if len(signatureValues) == 1 && authorizationSignaturePresent {
+		return "", false, fmt.Errorf("ambiguous Cavage signature: Signature and Authorization Signature are both present")
+	}
+	if len(signatureValues) == 1 {
+		return signatureValues[0], true, nil
+	}
+	if authorizationSignaturePresent {
+		return authorizationSignature, true, nil
+	}
+	return "", false, nil
+}
+
+func cavageAuthorizationParams(value string) (string, bool) {
+	pos := 0
+	for pos < len(value) && isCavageTokenByte(value[pos]) {
+		pos++
+	}
+	if pos == 0 || !strings.EqualFold(value[:pos], Signature) {
+		return "", false
+	}
+	if pos == len(value) {
+		return "", true
+	}
+	if value[pos] != ' ' {
+		return "", false
+	}
+	for pos < len(value) && value[pos] == ' ' {
+		pos++
+	}
+	return trimCavageOWS(value[pos:]), true
 }

@@ -70,6 +70,9 @@ type Verifier interface {
 // To access Cavage-specific fields such as [CavageVerifier.Now], use
 // [NewCavageRequestVerifier] instead.
 func NewRequestVerifier(req *http.Request) (Verifier, error) {
+	if _, _, err := cavageSignatureValue(req.Header); err != nil {
+		return nil, wrapSigreError(err)
+	}
 	hf := GetSignatureHeaderFields(req.Header)
 	switch hf.GetSignatureType() {
 	case CavageHTTPSignatures:
@@ -88,6 +91,9 @@ func NewRequestVerifier(req *http.Request) (Verifier, error) {
 // To access Cavage-specific fields such as [CavageVerifier.Now], use
 // [NewCavageResponseVerifier] instead.
 func NewResponseVerifier(res *http.Response) (Verifier, error) {
+	if _, _, err := cavageSignatureValue(res.Header); err != nil {
+		return nil, wrapSigreError(err)
+	}
 	hf := GetSignatureHeaderFields(res.Header)
 	switch hf.GetSignatureType() {
 	case CavageHTTPSignatures:

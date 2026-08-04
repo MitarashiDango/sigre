@@ -1,5 +1,6 @@
 package sigre
 
 var ExportForTesting_parseCavageParams = parseCavageParams
+var ExportForTesting_serializeCavageParams = serializeCavageParams
 
 type ExportForTesting_cavageParams = cavageParams

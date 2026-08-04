@@ -509,6 +509,100 @@ func TestSignerInputValidation(t *testing.T) {
 			t.Fatalf("expected missing header error, got: %v", err)
 		}
 	})
+
+	t.Run("keyId is escaped in Authorization and restored by the parser", func(t *testing.T) {
+		const keyID = "key\"quote\\slash"
+		req, err := http.NewRequest("GET", "https://example.com/", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+		req.Header.Set("Date", validationDateHeader)
+
+		err = signer.SignRequest(req, rsaPrivateKey, keyID, &sigre.CavageSignOptions{
+			Headers:         []string{"date"},
+			HashAlgorithm:   crypto.SHA256,
+			SignatureHeader: sigre.Authorization,
+		})
+		if err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+		if got := req.Header.Get(sigre.Authorization); !strings.Contains(got, `keyId="key\"quote\\slash"`) {
+			t.Fatalf("Authorization keyId is not correctly escaped: %s", got)
+		}
+
+		verifier, err := sigre.NewCavageRequestVerifier(req)
+		if err != nil {
+			t.Fatalf("failed to parse generated Authorization signature: %v", err)
+		}
+		if verifier.KeyId() != keyID {
+			t.Fatalf("KeyId() = %q, want %q", verifier.KeyId(), keyID)
+		}
+	})
+
+	t.Run("all signing paths reject empty or unsafe keyId", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			keyID string
+			run   func(string) (http.Header, error)
+		}{
+			{
+				name: "request asymmetric",
+				run: func(keyID string) (http.Header, error) {
+					req, err := http.NewRequest("GET", "https://example.com/", nil)
+					if err != nil {
+						return nil, err
+					}
+					req.Header.Set("Date", validationDateHeader)
+					err = signer.SignRequest(req, rsaPrivateKey, keyID, &sigre.CavageSignOptions{Headers: []string{"date"}, HashAlgorithm: crypto.SHA256})
+					return req.Header, err
+				},
+			},
+			{
+				name: "request HMAC",
+				run: func(keyID string) (http.Header, error) {
+					req, err := http.NewRequest("GET", "https://example.com/", nil)
+					if err != nil {
+						return nil, err
+					}
+					req.Header.Set("Date", validationDateHeader)
+					err = signer.SignRequestWithHMAC(req, hmacSecret, keyID, &sigre.CavageSignOptions{Headers: []string{"date"}, HashAlgorithm: crypto.SHA256})
+					return req.Header, err
+				},
+			},
+			{
+				name: "response asymmetric",
+				run: func(keyID string) (http.Header, error) {
+					res := &http.Response{Header: make(http.Header)}
+					res.Header.Set("Date", validationDateHeader)
+					err := signer.SignResponse(res, rsaPrivateKey, keyID, &sigre.CavageSignOptions{Headers: []string{"date"}, HashAlgorithm: crypto.SHA256})
+					return res.Header, err
+				},
+			},
+			{
+				name: "response HMAC",
+				run: func(keyID string) (http.Header, error) {
+					res := &http.Response{Header: make(http.Header)}
+					res.Header.Set("Date", validationDateHeader)
+					err := signer.SignResponseWithHMAC(res, hmacSecret, keyID, &sigre.CavageSignOptions{Headers: []string{"date"}, HashAlgorithm: crypto.SHA256})
+					return res.Header, err
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			for _, keyID := range []string{"", "unsafe\nkey"} {
+				t.Run(tc.name+"/"+keyID, func(t *testing.T) {
+					header, err := tc.run(keyID)
+					if err == nil {
+						t.Fatal("expected invalid keyId to be rejected")
+					}
+					if header.Get(sigre.Signature) != "" || header.Get(sigre.Authorization) != "" {
+						t.Fatal("signer wrote a signature header after rejecting keyId")
+					}
+				})
+			}
+		}
+	})
 }
 
 type signOptsPartial struct {

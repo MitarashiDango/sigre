@@ -1,7 +1,9 @@
 package sigre_test
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/MitarashiDango/sigre"
@@ -34,10 +36,25 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 			wantSignature: "sig1=:abc123:",
 		},
 		{
-			name: "Signature header takes priority over Authorization",
+			name: "Signature header and Authorization Signature are ambiguous",
 			header: http.Header{
 				"Signature":     []string{"sig1=:direct:"},
 				"Authorization": []string{"Signature sig1=:fromauth:"},
+			},
+			wantSignature: "",
+		},
+		{
+			name: "Authorization auth-scheme is case insensitive",
+			header: http.Header{
+				"Authorization": []string{"sIgNaTuRe sig1=:abc123:"},
+			},
+			wantSignature: "sig1=:abc123:",
+		},
+		{
+			name: "Signature header with non-Signature Authorization is not ambiguous",
+			header: http.Header{
+				"Signature":     []string{"sig1=:direct:"},
+				"Authorization": []string{"Bearer some-token"},
 			},
 			wantSignature: "sig1=:direct:",
 		},
@@ -61,6 +78,20 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 				"Authorization": []string{"Signature   sig1=:abc123:  "},
 			},
 			wantSignature: "sig1=:abc123:",
+		},
+		{
+			name: "multiple Signature header values are ambiguous",
+			header: http.Header{
+				"Signature": []string{"sig1=:first:", "sig2=:second:"},
+			},
+			wantSignature: "",
+		},
+		{
+			name: "multiple Authorization Signature values are ambiguous",
+			header: http.Header{
+				"Authorization": []string{"Signature sig1=:first:", "signature sig2=:second:"},
+			},
+			wantSignature: "",
 		},
 		{
 			name: "Signature-Input header only",
@@ -124,6 +155,131 @@ func TestGetSignatureHeaderFields(t *testing.T) {
 				t.Errorf("AcceptSignature = %q, want %q", got.AcceptSignature, tt.wantAcceptSig)
 			}
 		})
+	}
+}
+
+func TestCavageVerifierRejectsAmbiguousSignaturePlacement(t *testing.T) {
+	const validParams = `keyId=key,signature=c2ln`
+	testCases := []struct {
+		name          string
+		header        http.Header
+		wantMissing   bool
+		wantMalformed bool
+		wantConflict  bool
+	}{
+		{
+			name:   "Signature header",
+			header: http.Header{"Signature": []string{validParams}},
+		},
+		{
+			name:   "Authorization Signature with mixed case scheme",
+			header: http.Header{"Authorization": []string{"sIgNaTuRe " + validParams}},
+		},
+		{
+			name: "Signature header with Bearer Authorization",
+			header: http.Header{
+				"Signature":     []string{validParams},
+				"Authorization": []string{"Bearer token"},
+			},
+		},
+		{
+			name:        "Bearer Authorization without Cavage signature",
+			header:      http.Header{"Authorization": []string{"Bearer token"}},
+			wantMissing: true,
+		},
+		{
+			name:          "invalid Base64",
+			header:        http.Header{"Signature": []string{`keyId=key,signature="not@base64"`}},
+			wantMalformed: true,
+		},
+		{
+			name: "both Cavage placements",
+			header: http.Header{
+				"Signature":     []string{validParams},
+				"Authorization": []string{"Signature " + validParams},
+			},
+			wantConflict: true,
+		},
+		{
+			name:         "multiple Signature header values",
+			header:       http.Header{"Signature": []string{validParams, validParams}},
+			wantConflict: true,
+		},
+		{
+			name:         "multiple Authorization Signature values",
+			header:       http.Header{"Authorization": []string{"Signature " + validParams, "signature " + validParams}},
+			wantConflict: true,
+		},
+	}
+
+	constructors := []struct {
+		name string
+		run  func(http.Header) error
+	}{
+		{
+			name: "generic request",
+			run: func(header http.Header) error {
+				req, err := http.NewRequest("GET", "https://example.test/", nil)
+				if err != nil {
+					return err
+				}
+				req.Header = header
+				_, err = sigre.NewRequestVerifier(req)
+				return err
+			},
+		},
+		{
+			name: "Cavage request",
+			run: func(header http.Header) error {
+				req, err := http.NewRequest("GET", "https://example.test/", nil)
+				if err != nil {
+					return err
+				}
+				req.Header = header
+				_, err = sigre.NewCavageRequestVerifier(req)
+				return err
+			},
+		},
+		{
+			name: "generic response",
+			run: func(header http.Header) error {
+				_, err := sigre.NewResponseVerifier(&http.Response{Header: header})
+				return err
+			},
+		},
+		{
+			name: "Cavage response",
+			run: func(header http.Header) error {
+				_, err := sigre.NewCavageResponseVerifier(&http.Response{Header: header})
+				return err
+			},
+		},
+	}
+
+	for _, constructor := range constructors {
+		for _, tc := range testCases {
+			t.Run(constructor.name+"/"+tc.name, func(t *testing.T) {
+				err := constructor.run(tc.header.Clone())
+				switch {
+				case tc.wantConflict:
+					if err == nil || !strings.Contains(err.Error(), "ambiguous Cavage signature") {
+						t.Fatalf("expected ambiguous placement error, got: %v", err)
+					}
+				case tc.wantMissing:
+					if !errors.Is(err, sigre.ErrMissingSignature) {
+						t.Fatalf("expected ErrMissingSignature, got: %v", err)
+					}
+				case tc.wantMalformed:
+					if err == nil || !strings.Contains(err.Error(), "invalid 'signature' value") {
+						t.Fatalf("expected invalid Base64 error, got: %v", err)
+					}
+				default:
+					if err != nil {
+						t.Fatalf("unexpected verifier construction error: %v", err)
+					}
+				}
+			})
+		}
 	}
 }
 

@@ -68,6 +68,9 @@ func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateK
 	if privateKey == nil {
 		return wrapSigreError(ErrMissingPrivateKey)
 	}
+	if err := validateCavageKeyID(keyId); err != nil {
+		return wrapSigreError(err)
+	}
 	if opts == nil {
 		opts = &CavageSignOptions{}
 	}
@@ -103,14 +106,16 @@ func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateK
 		return wrapSigreError(err)
 	}
 
-	s.setSignatureHeader(req.Header, opts.SignatureHeader, cavageParams{
+	if err := s.setSignatureHeader(req.Header, opts.SignatureHeader, cavageParams{
 		KeyId:     keyId,
 		Signature: base64.StdEncoding.EncodeToString(sig),
 		Algorithm: algoStr,
 		Created:   created,
 		Expires:   expires,
 		Headers:   headers,
-	})
+	}); err != nil {
+		return wrapSigreError(fmt.Errorf("failed to serialize signature parameters: %w", err))
+	}
 	return nil
 }
 
@@ -120,6 +125,9 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 	if len(secret) == 0 {
 		return wrapSigreError(ErrMissingSharedSecret)
 	}
+	if err := validateCavageKeyID(keyId); err != nil {
+		return wrapSigreError(err)
+	}
 	if opts == nil {
 		opts = &CavageSignOptions{}
 	}
@@ -155,14 +163,16 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 		return wrapSigreError(err)
 	}
 
-	s.setSignatureHeader(req.Header, opts.SignatureHeader, cavageParams{
+	if err := s.setSignatureHeader(req.Header, opts.SignatureHeader, cavageParams{
 		KeyId:     keyId,
 		Signature: base64.StdEncoding.EncodeToString(sig),
 		Algorithm: algoStr,
 		Created:   created,
 		Expires:   expires,
 		Headers:   headers,
-	})
+	}); err != nil {
+		return wrapSigreError(fmt.Errorf("failed to serialize signature parameters: %w", err))
+	}
 	return nil
 }
 
@@ -171,6 +181,9 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.PrivateKey, keyId string, opts *CavageSignOptions) error {
 	if privateKey == nil {
 		return wrapSigreError(ErrMissingPrivateKey)
+	}
+	if err := validateCavageKeyID(keyId); err != nil {
+		return wrapSigreError(err)
 	}
 	if opts == nil {
 		opts = &CavageSignOptions{}
@@ -215,14 +228,16 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 		return wrapSigreError(err)
 	}
 
-	s.setSignatureHeader(res.Header, opts.SignatureHeader, cavageParams{
+	if err := s.setSignatureHeader(res.Header, opts.SignatureHeader, cavageParams{
 		KeyId:     keyId,
 		Signature: base64.StdEncoding.EncodeToString(sig),
 		Algorithm: algoStr,
 		Created:   created,
 		Expires:   expires,
 		Headers:   headers,
-	})
+	}); err != nil {
+		return wrapSigreError(fmt.Errorf("failed to serialize signature parameters: %w", err))
+	}
 	return nil
 }
 
@@ -231,6 +246,9 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, keyId string, opts *CavageSignOptions) error {
 	if len(secret) == 0 {
 		return wrapSigreError(ErrMissingSharedSecret)
+	}
+	if err := validateCavageKeyID(keyId); err != nil {
+		return wrapSigreError(err)
 	}
 	if opts == nil {
 		opts = &CavageSignOptions{}
@@ -275,14 +293,16 @@ func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, k
 		return wrapSigreError(err)
 	}
 
-	s.setSignatureHeader(res.Header, opts.SignatureHeader, cavageParams{
+	if err := s.setSignatureHeader(res.Header, opts.SignatureHeader, cavageParams{
 		KeyId:     keyId,
 		Signature: base64.StdEncoding.EncodeToString(sig),
 		Algorithm: algoStr,
 		Created:   created,
 		Expires:   expires,
 		Headers:   headers,
-	})
+	}); err != nil {
+		return wrapSigreError(fmt.Errorf("failed to serialize signature parameters: %w", err))
+	}
 	return nil
 }
 
@@ -380,15 +400,20 @@ func (s *CavageSigner) hmacAlgorithmString(useHS2019 bool, hash crypto.Hash) (st
 	return "hmac-" + name, nil
 }
 
-func (s *CavageSigner) setSignatureHeader(h http.Header, signatureHeader string, p cavageParams) {
+func (s *CavageSigner) setSignatureHeader(h http.Header, signatureHeader string, p cavageParams) error {
 	if signatureHeader == "" {
 		signatureHeader = Signature
 	}
-	if http.CanonicalHeaderKey(signatureHeader) == Authorization {
-		h.Set(Authorization, "Signature "+p.String())
-	} else {
-		h.Set(signatureHeader, p.String())
+	value, err := serializeCavageParams(&p)
+	if err != nil {
+		return err
 	}
+	if http.CanonicalHeaderKey(signatureHeader) == Authorization {
+		h.Set(Authorization, "Signature "+value)
+	} else {
+		h.Set(signatureHeader, value)
+	}
+	return nil
 }
 
 func (s *CavageSigner) signBytes(privateKey crypto.PrivateKey, opts *CavageSignOptions, data []byte) ([]byte, string, error) {

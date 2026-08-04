@@ -37,11 +37,14 @@ type CavageVerifier struct {
 // NewCavageRequestVerifier creates a [CavageVerifier] from req.
 // Returns an error if the Cavage signature is absent or malformed.
 func NewCavageRequestVerifier(req *http.Request) (*CavageVerifier, error) {
-	hf := GetSignatureHeaderFields(req.Header)
-	if hf.Signature == "" {
+	signatureValue, present, err := cavageSignatureValue(req.Header)
+	if err != nil {
+		return nil, wrapSigreError(err)
+	}
+	if !present {
 		return nil, wrapSigreError(ErrMissingSignature)
 	}
-	p, err := parseCavageParams(hf.Signature)
+	p, err := parseCavageParams(signatureValue)
 	if err != nil {
 		return nil, wrapSigreError(fmt.Errorf("failed to parse HTTP signature parameters from request: %w", err))
 	}
@@ -57,11 +60,14 @@ func NewCavageRequestVerifier(req *http.Request) (*CavageVerifier, error) {
 // NewCavageResponseVerifier creates a [CavageVerifier] from res.
 // Returns an error if the Cavage signature is absent or malformed.
 func NewCavageResponseVerifier(res *http.Response) (*CavageVerifier, error) {
-	hf := GetSignatureHeaderFields(res.Header)
-	if hf.Signature == "" {
+	signatureValue, present, err := cavageSignatureValue(res.Header)
+	if err != nil {
+		return nil, wrapSigreError(err)
+	}
+	if !present {
 		return nil, wrapSigreError(ErrMissingSignature)
 	}
-	p, err := parseCavageParams(hf.Signature)
+	p, err := parseCavageParams(signatureValue)
 	if err != nil {
 		return nil, wrapSigreError(fmt.Errorf("failed to parse HTTP signature parameters from response: %w", err))
 	}

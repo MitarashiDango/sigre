@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,11 +26,11 @@ type CavageVerifier struct {
 	// Now overrides the clock used for created/expires validation. Uses time.Now when nil.
 	Now func() time.Time
 
-	host   string
-	method string
-	url    *url.URL
-	header http.Header
-	params *cavageParams
+	host          string
+	method        string
+	requestTarget string
+	header        http.Header
+	params        *cavageParams
 }
 
 // NewCavageRequestVerifier creates a [CavageVerifier] from req.
@@ -49,11 +48,11 @@ func NewCavageRequestVerifier(req *http.Request) (*CavageVerifier, error) {
 		return nil, wrapSigreError(fmt.Errorf("failed to parse HTTP signature parameters from request: %w", err))
 	}
 	return &CavageVerifier{
-		host:   req.Host,
-		method: strings.ToLower(req.Method),
-		url:    req.URL,
-		header: req.Header,
-		params: p,
+		host:          req.Host,
+		method:        req.Method,
+		requestTarget: req.RequestURI,
+		header:        req.Header,
+		params:        p,
 	}, nil
 }
 
@@ -72,20 +71,19 @@ func NewCavageResponseVerifier(res *http.Response) (*CavageVerifier, error) {
 		return nil, wrapSigreError(fmt.Errorf("failed to parse HTTP signature parameters from response: %w", err))
 	}
 
-	var host, method string
-	var reqURL *url.URL
+	var host, method, requestTarget string
 	if res.Request != nil {
 		host = res.Request.Host
-		method = strings.ToLower(res.Request.Method)
-		reqURL = res.Request.URL
+		method = res.Request.Method
+		requestTarget = associatedRequestTarget(res.Request)
 	}
 
 	return &CavageVerifier{
-		host:   host,
-		method: method,
-		url:    reqURL,
-		header: res.Header,
-		params: p,
+		host:          host,
+		method:        method,
+		requestTarget: requestTarget,
+		header:        res.Header,
+		params:        p,
 	}, nil
 }
 
@@ -289,22 +287,13 @@ func (v *CavageVerifier) buildVerificationString() ([]byte, error) {
 		return nil, fmt.Errorf("signature parameters are nil")
 	}
 
-	var path, query string
-	if v.url != nil {
-		path = v.url.Path
-		if path == "" {
-			path = "/"
-		}
-		query = v.url.RawQuery
-	}
-
 	// Section 2.1.6: default to (created) when headers parameter was absent.
 	headers := v.params.Headers
 	if len(headers) == 0 {
 		headers = []string{Created}
 	}
 
-	buf, err := generateSignatureStringBuffer(headers, v.host, v.method, path, query, v.header, v.params.Created, v.params.Expires)
+	buf, err := generateSignatureStringBuffer(headers, v.host, v.method, v.requestTarget, v.header, v.params.Created, v.params.Expires)
 	if err != nil {
 		return nil, err
 	}

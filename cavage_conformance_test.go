@@ -107,7 +107,7 @@ func TestCavageConformanceFixtureCoverage(t *testing.T) {
 	fixtures := loadCavageConformanceFixtures(t)
 	cryptoPaths := make(map[string]bool, 4)
 	messageTypes := make(map[string]bool, 2)
-	var normalPath, multipleValues, emptyValue bool
+	var normalPath, escapedRequestTarget, owsBoundary, nonOWSUnicode, multipleValues, emptyValue bool
 
 	for _, fixture := range fixtures {
 		if fixture.WireAlgorithm != "hs2019" {
@@ -127,6 +127,9 @@ func TestCavageConformanceFixtureCoverage(t *testing.T) {
 			if signedHeaders[sigre.RequestTarget] && strings.HasPrefix(u.Path, "/") && u.Path != "/" && u.RawPath == "" && u.EscapedPath() == u.Path && !u.ForceQuery {
 				normalPath = true
 			}
+			if signedHeaders[sigre.RequestTarget] && strings.Contains(fixture.Message.RequestTarget, "%2F") {
+				escapedRequestTarget = true
+			}
 		}
 		for _, header := range fixture.Message.Headers {
 			if !signedHeaders[strings.ToLower(header.Name)] {
@@ -137,6 +140,14 @@ func TestCavageConformanceFixtureCoverage(t *testing.T) {
 			}
 			if len(header.Values) == 1 && header.Values[0] == "" {
 				emptyValue = true
+			}
+			for _, value := range header.Values {
+				if strings.Trim(value, " \t") != value {
+					owsBoundary = true
+				}
+				if strings.ContainsAny(value, "\u00a0\u2003") {
+					nonOWSUnicode = true
+				}
 			}
 		}
 	}
@@ -151,8 +162,8 @@ func TestCavageConformanceFixtureCoverage(t *testing.T) {
 			t.Errorf("fixture coverage is missing message type %q", messageType)
 		}
 	}
-	if !normalPath || !multipleValues || !emptyValue {
-		t.Errorf("fixture coverage incomplete: normalPath=%t multipleValues=%t emptyValue=%t", normalPath, multipleValues, emptyValue)
+	if !normalPath || !escapedRequestTarget || !owsBoundary || !nonOWSUnicode || !multipleValues || !emptyValue {
+		t.Errorf("fixture coverage incomplete: normalPath=%t escapedRequestTarget=%t owsBoundary=%t nonOWSUnicode=%t multipleValues=%t emptyValue=%t", normalPath, escapedRequestTarget, owsBoundary, nonOWSUnicode, multipleValues, emptyValue)
 	}
 }
 

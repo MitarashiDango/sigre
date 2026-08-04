@@ -11,7 +11,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -91,7 +90,7 @@ func (s *CavageSigner) SignRequest(req *http.Request, privateKey crypto.PrivateK
 		return wrapSigreError(err)
 	}
 
-	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, req.URL, req.Header, headers, expiry)
+	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, outgoingRequestTarget(req.URL), req.Header, headers, expiry)
 	if err != nil {
 		return wrapSigreError(fmt.Errorf("failed to create sign string: %w", err))
 	}
@@ -148,7 +147,7 @@ func (s *CavageSigner) SignRequestWithHMAC(req *http.Request, secret []byte, key
 		return wrapSigreError(err)
 	}
 
-	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, req.URL, req.Header, headers, expiry)
+	buf, created, expires, err := s.buildSigningString(req.Host, req.Method, outgoingRequestTarget(req.URL), req.Header, headers, expiry)
 	if err != nil {
 		return wrapSigreError(fmt.Errorf("failed to create sign string: %w", err))
 	}
@@ -205,15 +204,14 @@ func (s *CavageSigner) SignResponse(res *http.Response, privateKey crypto.Privat
 		return wrapSigreError(err)
 	}
 
-	var reqHost, reqMethod string
-	var reqURL *url.URL
+	var reqHost, reqMethod, requestTarget string
 	if res.Request != nil {
 		reqHost = res.Request.Host
 		reqMethod = res.Request.Method
-		reqURL = res.Request.URL
+		requestTarget = associatedRequestTarget(res.Request)
 	}
 
-	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, reqURL, res.Header, headers, expiry)
+	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, requestTarget, res.Header, headers, expiry)
 	if err != nil {
 		return wrapSigreError(fmt.Errorf("failed to create sign string for response: %w", err))
 	}
@@ -270,15 +268,14 @@ func (s *CavageSigner) SignResponseWithHMAC(res *http.Response, secret []byte, k
 		return wrapSigreError(err)
 	}
 
-	var reqHost, reqMethod string
-	var reqURL *url.URL
+	var reqHost, reqMethod, requestTarget string
 	if res.Request != nil {
 		reqHost = res.Request.Host
 		reqMethod = res.Request.Method
-		reqURL = res.Request.URL
+		requestTarget = associatedRequestTarget(res.Request)
 	}
 
-	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, reqURL, res.Header, headers, expiry)
+	buf, created, expires, err := s.buildSigningString(reqHost, reqMethod, requestTarget, res.Header, headers, expiry)
 	if err != nil {
 		return wrapSigreError(fmt.Errorf("failed to create sign string for response: %w", err))
 	}
@@ -342,7 +339,7 @@ func normalizeHeaders(headers []string) []string {
 
 func (s *CavageSigner) buildSigningString(
 	host, method string,
-	reqURL *url.URL,
+	requestTarget string,
 	header http.Header,
 	headers []string,
 	expiry int64,
@@ -361,17 +358,7 @@ func (s *CavageSigner) buildSigningString(
 		expires = strconv.FormatInt(now+expiry, 10)
 	}
 
-	path := ""
-	query := ""
-	if reqURL != nil {
-		path = reqURL.Path
-		if path == "" {
-			path = "/"
-		}
-		query = reqURL.RawQuery
-	}
-
-	buf, err = generateSignatureStringBuffer(headers, host, strings.ToLower(method), path, query, header, created, expires)
+	buf, err = generateSignatureStringBuffer(headers, host, method, requestTarget, header, created, expires)
 	return
 }
 

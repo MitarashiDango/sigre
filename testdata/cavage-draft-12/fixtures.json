@@ -18,6 +18,7 @@
         "type": "request",
         "method": "POST",
         "url": "https://example.test/inbox?batch=1",
+        "request_target": "/inbox?batch=1",
         "headers": [
           {"name": "Host", "values": ["example.test"]},
           {"name": "Date", "values": ["Tue, 04 Aug 2026 04:00:00 GMT"]},
@@ -95,6 +96,7 @@
         "type": "request",
         "method": "GET",
         "url": "https://example.test/status/42",
+        "request_target": "/status/42",
         "headers": [
           {"name": "Host", "values": ["example.test"]},
           {"name": "X-Note", "values": ["signed"]}
@@ -113,6 +115,43 @@
       "signature_base64": "0Yvzfy92cF2XssVyiHvaGzTsIX15Lh0tqJ0fxq6lISFaa47/Lh678iZxxURIHkffuAOe9Y7st7rqSlgS5KaZCQ==",
       "verification_key_file": "keys/ed25519-public.pem",
       "signing_key_file": "keys/ed25519-private.pem",
+      "verification_time": "2026-08-04T04:00:00Z"
+    },
+    {
+      "id": "hmac-request-escaped-target-and-ows",
+      "description": "HMAC request fixture covering an escaped path, raw ordered query, SP and HTAB OWS, and non-OWS Unicode whitespace.",
+      "source": "Locally constructed conformance vector; not copied from draft Appendix C.",
+      "specification": [
+        "draft-cavage-http-signatures-12 Section 2.1.3",
+        "draft-cavage-http-signatures-12 Section 2.3",
+        "draft-cavage-http-signatures-12 Section 2.4",
+        "draft-cavage-http-signatures-12 Section 2.5",
+        "draft-cavage-http-signatures-12 Appendix E.2",
+        "RFC 7230 Section 3.2.3"
+      ],
+      "generation": "README.md, Signature generation section, escaped request HMAC commands",
+      "independent_validation": "README.md, Independent verification section",
+      "message": {
+        "type": "request",
+        "method": "PATCH",
+        "url": "https://example.test/a%2Fb?b=two&a=%2F&a=%3F",
+        "request_target": "/a%2Fb?b=two&a=%2F&a=%3F",
+        "headers": [
+          {"name": "X-OWS", "values": [" \tvalue\t "]},
+          {"name": "X-Unicode", "values": [" kept "]}
+        ],
+        "body": ""
+      },
+      "signed_headers": ["(request-target)", "x-ows", "x-unicode"],
+      "expected_signing_string": "(request-target): patch /a%2Fb?b=two&a=%2F&a=%3F\nx-ows: value\nx-unicode:  kept ",
+      "signature_header": "Signature",
+      "signature_header_value": "keyId=\"test-hmac-escaped-2026\",signature=\"G1RrWeFQ+ia4mhJDWUa/8VSTfhC4+wlOoRsKIO6pydK7NGe2nvnaPfSzPMQrsY02hz1em54VIX8uzN2uKD/NtQ==\",algorithm=\"hs2019\",headers=\"(request-target) x-ows x-unicode\"",
+      "key_id": "test-hmac-escaped-2026",
+      "algorithm": "hs2019",
+      "crypto_path": "hmac",
+      "hash": "sha512",
+      "signature_base64": "G1RrWeFQ+ia4mhJDWUa/8VSTfhC4+wlOoRsKIO6pydK7NGe2nvnaPfSzPMQrsY02hz1em54VIX8uzN2uKD/NtQ==",
+      "hmac_secret_file": "keys/hmac-secret.hex",
       "verification_time": "2026-08-04T04:00:00Z"
     },
     {

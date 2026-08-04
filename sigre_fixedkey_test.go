@@ -188,6 +188,7 @@ func newTestRequest(t *testing.T, method, urlStr, body string) *http.Request {
 	if err != nil {
 		t.Fatalf("failed to create test request: %v", err)
 	}
+	req.RequestURI = req.URL.RequestURI()
 	return req
 }
 

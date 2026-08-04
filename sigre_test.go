@@ -339,6 +339,7 @@ func TestSignAndVerify(t *testing.T) {
 
 			var verifier *sigre.CavageVerifier
 			if tc.isRequest {
+				req.RequestURI = req.URL.RequestURI()
 				verifier, err = sigre.NewCavageRequestVerifier(req)
 			} else {
 				verifier, err = sigre.NewCavageResponseVerifier(res)

@@ -47,13 +47,14 @@ type cavageConformanceFixture struct {
 }
 
 type cavageFixtureHTTPMessage struct {
-	Type       string                `json:"type"`
-	Method     string                `json:"method"`
-	URL        string                `json:"url"`
-	StatusCode int                   `json:"status_code"`
-	Status     string                `json:"status"`
-	Headers    []cavageFixtureHeader `json:"headers"`
-	Body       string                `json:"body"`
+	Type          string                `json:"type"`
+	Method        string                `json:"method"`
+	URL           string                `json:"url"`
+	RequestTarget string                `json:"request_target"`
+	StatusCode    int                   `json:"status_code"`
+	Status        string                `json:"status"`
+	Headers       []cavageFixtureHeader `json:"headers"`
+	Body          string                `json:"body"`
 }
 
 type cavageFixtureHeader struct {
@@ -92,6 +93,9 @@ func loadCavageConformanceFixtures(t *testing.T) []cavageConformanceFixture {
 		}
 		if fixture.Message.Type != "request" && fixture.Message.Type != "response" {
 			t.Fatalf("fixture %q has unsupported message type %q", fixture.ID, fixture.Message.Type)
+		}
+		if fixture.Message.Type == "request" && fixture.Message.RequestTarget == "" {
+			t.Fatalf("request fixture %q is missing its fixed request-target", fixture.ID)
 		}
 		if len(fixture.SignedHeaders) == 0 || fixture.ExpectedSigningString == "" {
 			t.Fatalf("fixture %q is missing its signed headers or expected signing string", fixture.ID)
@@ -162,6 +166,7 @@ func (f cavageConformanceFixture) newRequest(t *testing.T, includeSignature bool
 	}
 	applyCavageFixtureHeaders(req.Header, f.Message.Headers)
 	if includeSignature {
+		req.RequestURI = f.Message.RequestTarget
 		req.Header.Set(f.SignatureHeader, f.SignatureHeaderValue)
 	}
 	return req

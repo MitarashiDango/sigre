@@ -50,7 +50,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:     "POST",
 			url:        "https://example.com/foo?param=value&pet=dog",
 			body:       `{"hello": "world"}`,
-			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
 			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey},
 		},
 		{
@@ -59,7 +59,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:     "GET",
 			url:        "https://example.com/bar",
 			body:       `"response data"`,
-			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA512, headers: []string{"date", "digest"}},
+			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, wireLabel: "rsa-sha512", headers: []string{"date", "digest"}},
 			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey},
 		},
 		{
@@ -68,7 +68,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:     "PUT",
 			url:        "https://example.com/baz",
 			body:       "update data",
-			signOpts:   signOptsPartial{privateKey: ecdsaPrivateKey, hash: crypto.SHA256},
+			signOpts:   signOptsPartial{privateKey: ecdsaPrivateKey, algorithm: sigre.AlgorithmECDSASHA256, wireLabel: "ecdsa-sha256"},
 			verifyOpts: verifyOptsPartial{publicKey: ecdsaPubKey},
 		},
 		{
@@ -77,7 +77,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:     "GET",
 			url:        "https://example.com/",
 			body:       "",
-			signOpts:   signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(request-target)", "host", "date"}},
+			signOpts:   signOptsPartial{privateKey: ed25519PrivateKey, algorithm: sigre.AlgorithmEd25519, wireLabel: "ed25519", headers: []string{"(request-target)", "host", "date"}},
 			verifyOpts: verifyOptsPartial{publicKey: ed25519PubKey},
 		},
 		{
@@ -86,7 +86,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:     "DELETE",
 			url:        "https://example.com/resource/123",
 			body:       "",
-			signOpts:   signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
+			signOpts:   signOptsPartial{secret: hmacSecret, algorithm: sigre.AlgorithmHMACSHA256, wireLabel: "hmac-sha256", headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{secret: hmacSecret},
 		},
 		{
@@ -94,7 +94,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest:  true,
 			method:     "POST",
 			url:        "https://example.com/",
-			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256, headers: []string{"host", "date", "(request-target)"}},
+			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256", headers: []string{"host", "date", "(request-target)"}},
 			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"date", "host"}},
 		},
 		{
@@ -102,7 +102,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
-			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(created)", "date"}},
+			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, algorithm: sigre.AlgorithmEd25519, wireLabel: "ed25519", headers: []string{"(created)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				publicKey:       ed25519PubKey,
 				maxSignatureAge: 1 * time.Minute,
@@ -115,7 +115,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:    "POST",
 			url:       "https://example.com/",
 			body:      `{"hello": "world"}`,
-			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
 			verifyOpts: verifyOptsPartial{
 				publicKey:         rsaPubKey,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
@@ -127,7 +127,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:    "POST",
 			url:       "https://example.com/",
 			body:      `{"hello": "world"}`,
-			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA512},
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, wireLabel: "rsa-sha512"},
 			verifyOpts: verifyOptsPartial{
 				publicKey:         rsaPubKey,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512, sigre.AlgorithmRSAPKCS1v15SHA256},
@@ -139,7 +139,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:    "POST",
 			url:       "https://example.com/",
 			body:      `{"hello": "world"}`,
-			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
 			verifyOpts: verifyOptsPartial{
 				publicKey: rsaPubKey,
 			},
@@ -149,7 +149,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest: true,
 			method:    "GET",
 			url:       "https://example.com/",
-			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(request-target)", "host", "date"}},
+			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, algorithm: sigre.AlgorithmEd25519, wireLabel: "ed25519", headers: []string{"(request-target)", "host", "date"}},
 			verifyOpts: verifyOptsPartial{
 				publicKey:         ed25519PubKey,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmEd25519},
@@ -160,7 +160,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
-			signOpts:  signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
+			signOpts:  signOptsPartial{secret: hmacSecret, algorithm: sigre.AlgorithmHMACSHA256, wireLabel: "hmac-sha256", headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				secret:            hmacSecret,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256},
@@ -172,7 +172,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:    "POST",
 			url:       "https://example.com/",
 			body:      `{"hello": "world"}`,
-			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
 			verifyOpts: verifyOptsPartial{
 				publicKey:         rsaPubKey,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512},
@@ -185,7 +185,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
-			signOpts:  signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
+			signOpts:  signOptsPartial{secret: hmacSecret, algorithm: sigre.AlgorithmHMACSHA256, wireLabel: "hmac-sha256", headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				secret:            hmacSecret,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA512},
@@ -198,7 +198,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest:   true,
 			method:      "POST",
 			url:         "https://example.com/",
-			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256, headers: []string{"host", "date"}},
+			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256", headers: []string{"host", "date", "(request-target)"}},
 			verifyOpts:  verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"digest"}},
 			expectError: true,
 			wantErr:     sigre.ErrRequiredHeaderMissing,
@@ -208,7 +208,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
-			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(created)", "date"}},
+			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, algorithm: sigre.AlgorithmEd25519, wireLabel: "ed25519", headers: []string{"(created)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				publicKey:       ed25519PubKey,
 				maxSignatureAge: 1 * time.Minute,
@@ -222,7 +222,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest:   true,
 			method:      "POST",
 			url:         "https://example.com/",
-			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
 			verifyOpts:  verifyOptsPartial{publicKey: rsaPubKey, tamperHeader: &tamperAction{key: "Date", value: "tampered"}},
 			expectError: true,
 			wantErr:     sigre.ErrVerification,
@@ -232,7 +232,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest:   true,
 			method:      "POST",
 			url:         "https://example.com/",
-			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
+			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
 			verifyOpts:  verifyOptsPartial{publicKey: generateRSAKeys(t).public},
 			expectError: true,
 			wantErr:     sigre.ErrVerification,
@@ -292,13 +292,16 @@ func TestSignAndVerify(t *testing.T) {
 				targetHeader.Set("Digest", "SHA-256="+digest)
 			}
 
-			signOptions := &sigre.CavageSignOptions{
-				Headers:         tc.signOpts.headers,
-				HashAlgorithm:   tc.signOpts.hash,
-				SignatureHeader: sigre.Signature,
-			}
-
 			keyId := "test-key-id"
+			signedHeaders := append([]string(nil), tc.signOpts.headers...)
+			if signedHeaders == nil {
+				signedHeaders = []string{sigre.RequestTarget, "date"}
+				if targetHeader.Get("Digest") != "" {
+					signedHeaders = append(signedHeaders, "digest")
+				}
+				signedHeaders = append(signedHeaders, "host")
+			}
+			signOptions := fixedSigningOptions(tc.signOpts.algorithm, tc.signOpts.wireLabel, signedHeaders, 0)
 
 			signer := &sigre.CavageSigner{
 				Now: testingNowFunc,
@@ -306,21 +309,21 @@ func TestSignAndVerify(t *testing.T) {
 
 			if tc.isRequest {
 				if len(tc.signOpts.secret) != 0 {
-					if err := signer.SignRequestWithHMAC(req, tc.signOpts.secret, keyId, signOptions); err != nil {
+					if err := signer.SignRequestWithHMAC(req, fixedHMACSigningKey(keyId, tc.signOpts.algorithm, tc.signOpts.secret), sigre.CavageSignaturePlacementSignature, signOptions); err != nil {
 						t.Fatalf("SignRequest failed: %v", err)
 					}
 				} else {
-					if err := signer.SignRequest(req, tc.signOpts.privateKey, keyId, signOptions); err != nil {
+					if err := signer.SignRequest(req, fixedSigningKey(keyId, tc.signOpts.algorithm, tc.signOpts.privateKey), sigre.CavageSignaturePlacementSignature, signOptions); err != nil {
 						t.Fatalf("SignRequest failed: %v", err)
 					}
 				}
 			} else {
 				if len(tc.signOpts.secret) != 0 {
-					if err := signer.SignResponseWithHMAC(res, tc.signOpts.secret, keyId, signOptions); err != nil {
+					if err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey(keyId, tc.signOpts.algorithm, tc.signOpts.secret), sigre.CavageSignaturePlacementSignature, signOptions); err != nil {
 						t.Fatalf("SignResponse failed: %v", err)
 					}
 				} else {
-					if err := signer.SignResponse(res, tc.signOpts.privateKey, keyId, signOptions); err != nil {
+					if err := signer.SignResponse(res, fixedSigningKey(keyId, tc.signOpts.algorithm, tc.signOpts.privateKey), sigre.CavageSignaturePlacementSignature, signOptions); err != nil {
 						t.Fatalf("SignResponse failed: %v", err)
 					}
 				}
@@ -353,7 +356,7 @@ func TestSignAndVerify(t *testing.T) {
 
 			verifier.Now = testingNowFunc
 
-			algorithm, wireLabel := testVerificationAlgorithm(tc.signOpts)
+			algorithm, wireLabel := tc.signOpts.algorithm, tc.signOpts.wireLabel
 			verifyOptions := fixedVerificationOptions(algorithm, wireLabel)
 			verifyOptions.RequiredHeaders = tc.verifyOpts.requiredHeaders
 			verifyOptions.AllowedAlgorithms = tc.verifyOpts.allowedAlgorithms
@@ -400,10 +403,9 @@ func TestSignerInputValidation(t *testing.T) {
 		req.Header.Set("Date", validationDateHeader)
 		req.Header.Set("Host", "example.com")
 
-		err = signer.SignRequest(req, nil, "test-key", &sigre.CavageSignOptions{
-			Headers:       []string{"date"},
-			HashAlgorithm: crypto.SHA256,
-		})
+		err = signer.SignRequest(req, sigre.SigningKey{
+			Metadata: sigre.TrustedKeyMetadata{KeyID: "test-key", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA256},
+		}, sigre.CavageSignaturePlacementSignature, nil)
 		if !errors.Is(err, sigre.ErrMissingPrivateKey) {
 			t.Fatalf("expected ErrMissingPrivateKey, got: %v", err)
 		}
@@ -413,10 +415,9 @@ func TestSignerInputValidation(t *testing.T) {
 		res := &http.Response{Header: make(http.Header)}
 		res.Header.Set("Date", validationDateHeader)
 
-		err := signer.SignResponse(res, nil, "test-key", &sigre.CavageSignOptions{
-			Headers:       []string{"date"},
-			HashAlgorithm: crypto.SHA256,
-		})
+		err := signer.SignResponse(res, sigre.SigningKey{
+			Metadata: sigre.TrustedKeyMetadata{KeyID: "test-key", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA256},
+		}, sigre.CavageSignaturePlacementSignature, nil)
 		if !errors.Is(err, sigre.ErrMissingPrivateKey) {
 			t.Fatalf("expected ErrMissingPrivateKey, got: %v", err)
 		}
@@ -429,10 +430,9 @@ func TestSignerInputValidation(t *testing.T) {
 		}
 		req.Header.Set("Date", validationDateHeader)
 
-		err = signer.SignRequestWithHMAC(req, nil, "test-key", &sigre.CavageSignOptions{
-			Headers:       []string{"date"},
-			HashAlgorithm: crypto.SHA256,
-		})
+		err = signer.SignRequestWithHMAC(req, sigre.HMACSigningKey{
+			Metadata: sigre.TrustedKeyMetadata{KeyID: "test-key", Algorithm: sigre.AlgorithmHMACSHA256},
+		}, sigre.CavageSignaturePlacementSignature, nil)
 		if !errors.Is(err, sigre.ErrMissingSharedSecret) {
 			t.Fatalf("expected ErrMissingSharedSecret, got: %v", err)
 		}
@@ -442,27 +442,27 @@ func TestSignerInputValidation(t *testing.T) {
 		res := &http.Response{Header: make(http.Header)}
 		res.Header.Set("Date", validationDateHeader)
 
-		err := signer.SignResponseWithHMAC(res, nil, "test-key", &sigre.CavageSignOptions{
-			Headers:       []string{"date"},
-			HashAlgorithm: crypto.SHA256,
-		})
+		err := signer.SignResponseWithHMAC(res, sigre.HMACSigningKey{
+			Metadata: sigre.TrustedKeyMetadata{KeyID: "test-key", Algorithm: sigre.AlgorithmHMACSHA256},
+		}, sigre.CavageSignaturePlacementSignature, nil)
 		if !errors.Is(err, sigre.ErrMissingSharedSecret) {
 			t.Fatalf("expected ErrMissingSharedSecret, got: %v", err)
 		}
 	})
 
-	t.Run("RSA signing fails without hash algorithm", func(t *testing.T) {
+	t.Run("RSA signing fails with zero AlgorithmID", func(t *testing.T) {
 		req, err := http.NewRequest("GET", "https://example.com/", nil)
 		if err != nil {
 			t.Fatalf("failed to create request: %v", err)
 		}
 		req.Header.Set("Date", validationDateHeader)
 
-		err = signer.SignRequest(req, rsaPrivateKey, "test-key", &sigre.CavageSignOptions{
-			Headers: []string{"date"},
-		})
-		if err == nil || !strings.Contains(err.Error(), "hash algorithm must be specified") {
-			t.Fatalf("expected missing hash algorithm error, got: %v", err)
+		err = signer.SignRequest(req, sigre.SigningKey{
+			Metadata:   sigre.TrustedKeyMetadata{KeyID: "test-key"},
+			PrivateKey: rsaPrivateKey,
+		}, sigre.CavageSignaturePlacementSignature, nil)
+		if !errors.Is(err, sigre.ErrInvalidKeyMetadata) {
+			t.Fatalf("expected ErrInvalidKeyMetadata, got: %v", err)
 		}
 	})
 
@@ -472,10 +472,13 @@ func TestSignerInputValidation(t *testing.T) {
 			t.Fatalf("failed to create request: %v", err)
 		}
 
-		err = signer.SignRequest(req, rsaPrivateKey, "test-key", &sigre.CavageSignOptions{
-			Headers:       []string{"(created)"},
-			HashAlgorithm: crypto.SHA256,
-		})
+		req.Header.Set("Date", validationDateHeader)
+		err = signer.SignRequest(
+			req,
+			fixedSigningKey("test-key", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{sigre.RequestTarget, "date", sigre.Created}, 0),
+		)
 		if !errors.Is(err, sigre.ErrInvalidSignatureAlgorithm) {
 			t.Fatalf("expected ErrInvalidSignatureAlgorithm, got: %v", err)
 		}
@@ -487,10 +490,13 @@ func TestSignerInputValidation(t *testing.T) {
 			t.Fatalf("failed to create request: %v", err)
 		}
 
-		err = signer.SignRequestWithHMAC(req, hmacSecret, "test-key", &sigre.CavageSignOptions{
-			Headers:       []string{"(expires)"},
-			HashAlgorithm: crypto.SHA256,
-		})
+		req.Header.Set("Date", validationDateHeader)
+		err = signer.SignRequestWithHMAC(
+			req,
+			fixedHMACSigningKey("test-key", sigre.AlgorithmHMACSHA256, hmacSecret),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{sigre.RequestTarget, "date", sigre.Expires}, time.Minute),
+		)
 		if !errors.Is(err, sigre.ErrInvalidSignatureAlgorithm) {
 			t.Fatalf("expected ErrInvalidSignatureAlgorithm, got: %v", err)
 		}
@@ -502,10 +508,12 @@ func TestSignerInputValidation(t *testing.T) {
 			t.Fatalf("failed to create request: %v", err)
 		}
 
-		err = signer.SignRequest(req, rsaPrivateKey, "test-key", &sigre.CavageSignOptions{
-			Headers:       []string{"date"},
-			HashAlgorithm: crypto.SHA256,
-		})
+		err = signer.SignRequest(
+			req,
+			fixedSigningKey("test-key", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{sigre.RequestTarget, "date"}, 0),
+		)
 		if err == nil || !strings.Contains(err.Error(), "missing header") {
 			t.Fatalf("expected missing header error, got: %v", err)
 		}
@@ -519,11 +527,12 @@ func TestSignerInputValidation(t *testing.T) {
 		}
 		req.Header.Set("Date", validationDateHeader)
 
-		err = signer.SignRequest(req, rsaPrivateKey, keyID, &sigre.CavageSignOptions{
-			Headers:         []string{"date"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Authorization,
-		})
+		err = signer.SignRequest(
+			req,
+			fixedSigningKey(keyID, sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey),
+			sigre.CavageSignaturePlacementAuthorization,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "", []string{"date"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -554,7 +563,7 @@ func TestSignerInputValidation(t *testing.T) {
 						return nil, err
 					}
 					req.Header.Set("Date", validationDateHeader)
-					err = signer.SignRequest(req, rsaPrivateKey, keyID, &sigre.CavageSignOptions{Headers: []string{"date"}, HashAlgorithm: crypto.SHA256})
+					err = signer.SignRequest(req, fixedSigningKey(keyID, sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey), sigre.CavageSignaturePlacementSignature, nil)
 					return req.Header, err
 				},
 			},
@@ -566,7 +575,7 @@ func TestSignerInputValidation(t *testing.T) {
 						return nil, err
 					}
 					req.Header.Set("Date", validationDateHeader)
-					err = signer.SignRequestWithHMAC(req, hmacSecret, keyID, &sigre.CavageSignOptions{Headers: []string{"date"}, HashAlgorithm: crypto.SHA256})
+					err = signer.SignRequestWithHMAC(req, fixedHMACSigningKey(keyID, sigre.AlgorithmHMACSHA256, hmacSecret), sigre.CavageSignaturePlacementSignature, nil)
 					return req.Header, err
 				},
 			},
@@ -575,7 +584,7 @@ func TestSignerInputValidation(t *testing.T) {
 				run: func(keyID string) (http.Header, error) {
 					res := &http.Response{Header: make(http.Header)}
 					res.Header.Set("Date", validationDateHeader)
-					err := signer.SignResponse(res, rsaPrivateKey, keyID, &sigre.CavageSignOptions{Headers: []string{"date"}, HashAlgorithm: crypto.SHA256})
+					err := signer.SignResponse(res, fixedSigningKey(keyID, sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey), sigre.CavageSignaturePlacementSignature, nil)
 					return res.Header, err
 				},
 			},
@@ -584,7 +593,7 @@ func TestSignerInputValidation(t *testing.T) {
 				run: func(keyID string) (http.Header, error) {
 					res := &http.Response{Header: make(http.Header)}
 					res.Header.Set("Date", validationDateHeader)
-					err := signer.SignResponseWithHMAC(res, hmacSecret, keyID, &sigre.CavageSignOptions{Headers: []string{"date"}, HashAlgorithm: crypto.SHA256})
+					err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey(keyID, sigre.AlgorithmHMACSHA256, hmacSecret), sigre.CavageSignaturePlacementSignature, nil)
 					return res.Header, err
 				},
 			},
@@ -609,7 +618,8 @@ func TestSignerInputValidation(t *testing.T) {
 type signOptsPartial struct {
 	privateKey crypto.PrivateKey
 	secret     []byte
-	hash       crypto.Hash
+	algorithm  sigre.AlgorithmID
+	wireLabel  string
 	headers    []string
 }
 
@@ -621,31 +631,6 @@ type verifyOptsPartial struct {
 	allowedAlgorithms []sigre.AlgorithmID
 	tamperHeader      *tamperAction
 	overrideNowFunc   func() time.Time
-}
-
-func testVerificationAlgorithm(opts signOptsPartial) (sigre.AlgorithmID, string) {
-	if len(opts.secret) != 0 {
-		if opts.hash == crypto.SHA512 {
-			return sigre.AlgorithmHMACSHA512, "hmac-sha512"
-		}
-		return sigre.AlgorithmHMACSHA256, "hmac-sha256"
-	}
-	switch opts.privateKey.(type) {
-	case *rsa.PrivateKey:
-		if opts.hash == crypto.SHA512 {
-			return sigre.AlgorithmRSAPKCS1v15SHA512, "rsa-sha512"
-		}
-		return sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256"
-	case *ecdsa.PrivateKey:
-		if opts.hash == crypto.SHA512 {
-			return sigre.AlgorithmECDSASHA512, "ecdsa-sha512"
-		}
-		return sigre.AlgorithmECDSASHA256, "ecdsa-sha256"
-	case ed25519.PrivateKey, *ed25519.PrivateKey:
-		return sigre.AlgorithmEd25519, "ed25519"
-	default:
-		panic("unsupported test signing key")
-	}
 }
 
 type tamperAction struct {

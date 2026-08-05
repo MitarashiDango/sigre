@@ -21,9 +21,6 @@ const (
 // HTTP Signature Algorithms Registry (Appendix E.2).
 const hs2019 = "hs2019"
 
-// defaultExpirySeconds is used for (expires) when Expiry is unset.
-const defaultExpirySeconds int64 = 60
-
 // cavageParams holds the parsed fields of a Cavage HTTP Signature header.
 type cavageParams struct {
 	KeyId          string

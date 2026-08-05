@@ -38,6 +38,8 @@ and must never be used outside the test suite.
 | `ed25519-request-created` | Locally constructed request covering a normal path and the `(created)` pseudo-header. | Sections 2.1.3, 2.1.4, 2.3, 2.4, and 2.5; Appendix E.2 |
 | `hmac-request-escaped-target-and-ows` | Locally constructed request covering an escaped path, raw ordered query, SP and HTAB OWS, and non-OWS Unicode whitespace. | Sections 2.1.3, 2.3, 2.4, and 2.5; Appendix E.2; RFC 7230 Section 3.2.3 |
 | `hmac-response-multiple-and-empty-values` | Locally constructed response covering ordered multiple values and an empty value. | Sections 2.1.3, 2.3, 2.4, and 2.5; Appendix E.2 |
+| `hmac-strict-zero-request` | Locally constructed strict request covering `hs2019`, generated `created`, and the default `(request-target) (created)` list while Date and Digest remain unsigned. | Sections 2.1.3, 2.1.4, 2.1.6, 2.3, and 2.4; Appendix E.2 |
+| `hmac-strict-zero-response` | Locally constructed strict response covering an omitted `headers` parameter and its effective `(created)` signing string while Date and Digest remain unsigned. | Sections 2.1.3, 2.1.4, 2.1.6, 2.3, and 2.4; Appendix E.2 |
 
 Section 2.1.3 requires a valid, non-deprecated wire algorithm. Appendix E.2
 identifies `hs2019` as the active value and specifies SHA-512 for its hashed
@@ -61,6 +63,8 @@ The SHA-256 digests of the exact expected signing-string bytes are:
 | `ed25519-request-created` | `b68c0fb469781f39e1f62cc7554ade7f341b9333926164fc5c3258068cf9da70` |
 | `hmac-request-escaped-target-and-ows` | `1b8251a79b785562b55aaaf69950cda9a42b732822dad7769b1eefa5e60e54fe` |
 | `hmac-response-multiple-and-empty-values` | `8da155d99248d6ff52da19a3e5d4b9465e6027349b6b1ecd5951bfc23d0420ca` |
+| `hmac-strict-zero-request` | `0194ea1480b129153797952c1aea92047221c637a677d28051415d8f7217b05a` |
+| `hmac-strict-zero-response` | `77144408aa8e008da89157f44550b4fe041f5a73570d34e64c16688defc36a9b` |
 
 ## Generation environment
 
@@ -116,6 +120,32 @@ openssl dgst -sha512 -mac HMAC -macopt hexkey:d3e709c705ce6575dc8b3e1e3be172825c
 openssl base64 -A -in "$scratch_dir/hmac.sig"
 ```
 
+## Strict zero-value fixture generation
+
+The strict request and response vectors use the same test-only HMAC key. Their
+signing strings and signature parameters were written from the specified
+zero-value behavior before running these commands. The response command signs
+the effective `(created)` field even though its wire value omits `headers`.
+
+```sh
+fixture_dir=testdata/cavage-draft-12
+scratch_dir=$(mktemp -d /tmp/sigre-cavage-strict-fixtures.XXXXXX)
+
+jq -jr '.fixtures[] | select(.id == "hmac-strict-zero-request") | .expected_signing_string' "$fixture_dir/fixtures.json" > "$scratch_dir/hmac-strict-request.txt"
+openssl dgst -sha512 -mac HMAC -macopt hexkey:d3e709c705ce6575dc8b3e1e3be172825c66c766a317ce4a522a88d24adf0047 -binary -out "$scratch_dir/hmac-strict-request.sig" "$scratch_dir/hmac-strict-request.txt"
+openssl base64 -A -in "$scratch_dir/hmac-strict-request.sig"
+
+jq -jr '.fixtures[] | select(.id == "hmac-strict-zero-response") | .expected_signing_string' "$fixture_dir/fixtures.json" > "$scratch_dir/hmac-strict-response.txt"
+openssl dgst -sha512 -mac HMAC -macopt hexkey:d3e709c705ce6575dc8b3e1e3be172825c66c766a317ce4a522a88d24adf0047 -binary -out "$scratch_dir/hmac-strict-response.sig" "$scratch_dir/hmac-strict-response.txt"
+openssl base64 -A -in "$scratch_dir/hmac-strict-response.sig"
+```
+
+The expected Base64 outputs are
+`k0Ro+Ar0Otx5f6YjYjTG/B87F3Ct74GKPkIdLRb1X/IyW4cIkAzvmojP+APqvgiVtLjOC8I/ujxWIgMKsq5WmA==`
+for the request and
+`9lpz4UE0R3N0Nih2Ps4SIuAlu4DQXM3wy6DdFa5khCLD6tdtkScTzh3+UhRbOwVqu/MDL3vxNEBl/CzUFHFs2A==`
+for the response.
+
 RSA PKCS#1 v1.5, Ed25519, and HMAC signatures are deterministic for these
 inputs. ECDSA uses a per-signature nonce and OpenSSL may produce a different
 valid value on each run. The committed ECDSA signature is therefore used as a
@@ -131,7 +161,7 @@ calling sigre production code:
 fixture_dir=testdata/cavage-draft-12
 scratch_dir=$(mktemp -d /tmp/sigre-cavage-verify.XXXXXX)
 
-for fixture_id in rsa-request-multiple-and-empty-values ecdsa-response-multiple-and-empty-values ed25519-request-created hmac-request-escaped-target-and-ows hmac-response-multiple-and-empty-values; do
+for fixture_id in rsa-request-multiple-and-empty-values ecdsa-response-multiple-and-empty-values ed25519-request-created hmac-request-escaped-target-and-ows hmac-response-multiple-and-empty-values hmac-strict-zero-request hmac-strict-zero-response; do
   jq -jr --arg fixture_id "$fixture_id" '.fixtures[] | select(.id == $fixture_id) | .expected_signing_string' "$fixture_dir/fixtures.json" > "$scratch_dir/$fixture_id.txt"
   jq -jr --arg fixture_id "$fixture_id" '.fixtures[] | select(.id == $fixture_id) | .signature_base64' "$fixture_dir/fixtures.json" | openssl base64 -d -A -out "$scratch_dir/$fixture_id.sig"
 done
@@ -143,6 +173,23 @@ openssl dgst -sha512 -mac HMAC -macopt hexkey:d3e709c705ce6575dc8b3e1e3be172825c
 cmp "$scratch_dir/hmac-request-escaped-target-and-ows.sig" "$scratch_dir/hmac-request-check.sig"
 openssl dgst -sha512 -mac HMAC -macopt hexkey:d3e709c705ce6575dc8b3e1e3be172825c66c766a317ce4a522a88d24adf0047 -binary -out "$scratch_dir/hmac-check.sig" "$scratch_dir/hmac-response-multiple-and-empty-values.txt"
 cmp "$scratch_dir/hmac-response-multiple-and-empty-values.sig" "$scratch_dir/hmac-check.sig"
+```
+
+## Strict zero-value fixture verification
+
+After running the independent verification extraction loop above, reproduce
+the strict HMAC values and compare them without using sigre code:
+
+```sh
+fixture_dir=testdata/cavage-draft-12
+scratch_dir=$(mktemp -d /tmp/sigre-cavage-strict-verify.XXXXXX)
+
+for fixture_id in hmac-strict-zero-request hmac-strict-zero-response; do
+  jq -jr --arg fixture_id "$fixture_id" '.fixtures[] | select(.id == $fixture_id) | .expected_signing_string' "$fixture_dir/fixtures.json" > "$scratch_dir/$fixture_id.txt"
+  jq -jr --arg fixture_id "$fixture_id" '.fixtures[] | select(.id == $fixture_id) | .signature_base64' "$fixture_dir/fixtures.json" | openssl base64 -d -A -out "$scratch_dir/$fixture_id.sig"
+  openssl dgst -sha512 -mac HMAC -macopt hexkey:d3e709c705ce6575dc8b3e1e3be172825c66c766a317ce4a522a88d24adf0047 -binary -out "$scratch_dir/$fixture_id.check.sig" "$scratch_dir/$fixture_id.txt"
+  cmp "$scratch_dir/$fixture_id.sig" "$scratch_dir/$fixture_id.check.sig"
+done
 ```
 
 The expected results are `Verified OK` for RSA and ECDSA, `Signature Verified

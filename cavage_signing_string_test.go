@@ -2,7 +2,6 @@ package sigre
 
 import (
 	"bytes"
-	"crypto"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,6 +12,22 @@ import (
 )
 
 var signingStringTestSecret = []byte("signing-string-test-secret")
+
+func signingStringHMACSigningKey(keyID string) HMACSigningKey {
+	return HMACSigningKey{
+		Metadata: TrustedKeyMetadata{KeyID: keyID, Algorithm: AlgorithmHMACSHA256},
+		Secret:   signingStringTestSecret,
+	}
+}
+
+func signingStringOptions(headers []string) *CavageSigningOptions {
+	return &CavageSigningOptions{
+		Compatibility: &CavageSigningCompatibility{
+			AlgorithmField: AlgorithmFieldOmitted,
+			ExactHeaders:   headers,
+		},
+	}
+}
 
 func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
 	tests := []struct {
@@ -93,11 +108,12 @@ func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
 				Header: make(http.Header),
 			}
 			signer := NewCavageSigner()
-			err := signer.SignRequestWithHMAC(req, signingStringTestSecret, "request-target-key", &CavageSignOptions{
-				Headers:         []string{RequestTarget},
-				HashAlgorithm:   crypto.SHA256,
-				SignatureHeader: Signature,
-			})
+			err := signer.SignRequestWithHMAC(
+				req,
+				signingStringHMACSigningKey("request-target-key"),
+				CavageSignaturePlacementSignature,
+				signingStringOptions([]string{RequestTarget}),
+			)
 			if err != nil {
 				t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 			}
@@ -129,11 +145,12 @@ func TestCavageRequestSignerRejectsOpaqueRequestTarget(t *testing.T) {
 		Header: make(http.Header),
 	}
 
-	err := NewCavageSigner().SignRequestWithHMAC(req, signingStringTestSecret, "opaque-key", &CavageSignOptions{
-		Headers:         []string{RequestTarget},
-		HashAlgorithm:   crypto.SHA256,
-		SignatureHeader: Signature,
-	})
+	err := NewCavageSigner().SignRequestWithHMAC(
+		req,
+		signingStringHMACSigningKey("opaque-key"),
+		CavageSignaturePlacementSignature,
+		signingStringOptions([]string{RequestTarget}),
+	)
 	if err == nil || !strings.Contains(err.Error(), "request-target is missing") {
 		t.Fatalf("SignRequestWithHMAC() error = %v, want a missing request-target error", err)
 	}
@@ -171,11 +188,7 @@ func TestCavageSignerNormalHeaderCanonicalization(t *testing.T) {
 	for _, messageType := range []string{"request", "response"} {
 		t.Run(messageType, func(t *testing.T) {
 			header := signingStringTestHeaders()
-			opts := &CavageSignOptions{
-				Headers:         headers,
-				HashAlgorithm:   crypto.SHA256,
-				SignatureHeader: Signature,
-			}
+			opts := signingStringOptions(headers)
 			signer := NewCavageSigner()
 
 			var err error
@@ -187,10 +200,10 @@ func TestCavageSignerNormalHeaderCanonicalization(t *testing.T) {
 					Host:   "example.test",
 					Header: header,
 				}
-				err = signer.SignRequestWithHMAC(req, signingStringTestSecret, "normal-header-key", opts)
+				err = signer.SignRequestWithHMAC(req, signingStringHMACSigningKey("normal-header-key"), CavageSignaturePlacementSignature, opts)
 			case "response":
 				res := &http.Response{Header: header}
-				err = signer.SignResponseWithHMAC(res, signingStringTestSecret, "normal-header-key", opts)
+				err = signer.SignResponseWithHMAC(res, signingStringHMACSigningKey("normal-header-key"), CavageSignaturePlacementSignature, opts)
 			}
 			if err != nil {
 				t.Fatalf("signing failed: %v", err)
@@ -313,11 +326,12 @@ func TestCavageResponseRequestTargetUsesAssociatedRequestURI(t *testing.T) {
 
 			t.Run("signer", func(t *testing.T) {
 				res := &http.Response{Request: req, Header: make(http.Header)}
-				err := NewCavageSigner().SignResponseWithHMAC(res, signingStringTestSecret, "response-request-uri-key", &CavageSignOptions{
-					Headers:         []string{RequestTarget},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: Signature,
-				})
+				err := NewCavageSigner().SignResponseWithHMAC(
+					res,
+					signingStringHMACSigningKey("response-request-uri-key"),
+					CavageSignaturePlacementSignature,
+					signingStringOptions([]string{RequestTarget}),
+				)
 				if err != nil {
 					t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 				}
@@ -390,11 +404,12 @@ func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
 
 			t.Run("signer", func(t *testing.T) {
 				res := &http.Response{Request: req, Header: make(http.Header)}
-				err := NewCavageSigner().SignResponseWithHMAC(res, signingStringTestSecret, "response-outgoing-url-key", &CavageSignOptions{
-					Headers:         []string{RequestTarget},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: Signature,
-				})
+				err := NewCavageSigner().SignResponseWithHMAC(
+					res,
+					signingStringHMACSigningKey("response-outgoing-url-key"),
+					CavageSignaturePlacementSignature,
+					signingStringOptions([]string{RequestTarget}),
+				)
 				if err != nil {
 					t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 				}
@@ -492,11 +507,7 @@ func TestCavageSignerRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 			t.Run(messageType+"/"+tt.name, func(t *testing.T) {
 				header := make(http.Header)
 				tt.setHeader(header)
-				opts := &CavageSignOptions{
-					Headers:         []string{tt.headerName},
-					HashAlgorithm:   crypto.SHA256,
-					SignatureHeader: Signature,
-				}
+				opts := signingStringOptions([]string{tt.headerName})
 				signer := NewCavageSigner()
 
 				var err error
@@ -507,9 +518,9 @@ func TestCavageSignerRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 						URL:    &url.URL{Scheme: "https", Host: "example.test", Path: "/"},
 						Host:   "example.test",
 						Header: header,
-					}, signingStringTestSecret, "invalid-header-key", opts)
+					}, signingStringHMACSigningKey("invalid-header-key"), CavageSignaturePlacementSignature, opts)
 				case "response":
-					err = signer.SignResponseWithHMAC(&http.Response{Header: header}, signingStringTestSecret, "invalid-header-key", opts)
+					err = signer.SignResponseWithHMAC(&http.Response{Header: header}, signingStringHMACSigningKey("invalid-header-key"), CavageSignaturePlacementSignature, opts)
 				}
 				if err == nil {
 					t.Fatal("signing unexpectedly succeeded")

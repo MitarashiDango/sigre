@@ -58,11 +58,17 @@ func TestCavageConformanceSignerUsesExpectedSigningString(t *testing.T) {
 		t.Run(fixture.ID, func(t *testing.T) {
 			now := fixture.verificationTime(t)
 			signer := &sigre.CavageSigner{Now: func() time.Time { return now }}
-			opts := &sigre.CavageSignOptions{
-				Headers:         append([]string(nil), fixture.SignedHeaders...),
-				HashAlgorithm:   fixture.cryptoHash(t),
-				UseHS2019:       true,
-				SignatureHeader: fixture.SignatureHeader,
+			var opts *sigre.CavageSigningOptions
+			if !fixture.ZeroValueSigningOptions {
+				opts = &sigre.CavageSigningOptions{
+					Compatibility: &sigre.CavageSigningCompatibility{
+						ExactHeaders: append([]string(nil), fixture.SignedHeaders...),
+					},
+				}
+			}
+			placement := sigre.CavageSignaturePlacementSignature
+			if fixture.SignatureHeader == sigre.Authorization {
+				placement = sigre.CavageSignaturePlacementAuthorization
 			}
 
 			var generatedHeader string
@@ -71,17 +77,29 @@ func TestCavageConformanceSignerUsesExpectedSigningString(t *testing.T) {
 			case "request":
 				req := fixture.newRequest(t, false)
 				if fixture.CryptoPath == "hmac" {
-					err = signer.SignRequestWithHMAC(req, loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile), fixture.KeyID, opts)
+					err = signer.SignRequestWithHMAC(req, sigre.HMACSigningKey{
+						Metadata: sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
+						Secret:   loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile),
+					}, placement, opts)
 				} else {
-					err = signer.SignRequest(req, loadCavageFixturePrivateKey(t, fixture.SigningKeyFile), fixture.KeyID, opts)
+					err = signer.SignRequest(req, sigre.SigningKey{
+						Metadata:   sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
+						PrivateKey: loadCavageFixturePrivateKey(t, fixture.SigningKeyFile),
+					}, placement, opts)
 				}
 				generatedHeader = req.Header.Get(fixture.SignatureHeader)
 			case "response":
 				res := fixture.newResponse(t, false)
 				if fixture.CryptoPath == "hmac" {
-					err = signer.SignResponseWithHMAC(res, loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile), fixture.KeyID, opts)
+					err = signer.SignResponseWithHMAC(res, sigre.HMACSigningKey{
+						Metadata: sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
+						Secret:   loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile),
+					}, placement, opts)
 				} else {
-					err = signer.SignResponse(res, loadCavageFixturePrivateKey(t, fixture.SigningKeyFile), fixture.KeyID, opts)
+					err = signer.SignResponse(res, sigre.SigningKey{
+						Metadata:   sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
+						PrivateKey: loadCavageFixturePrivateKey(t, fixture.SigningKeyFile),
+					}, placement, opts)
 				}
 				generatedHeader = res.Header.Get(fixture.SignatureHeader)
 			}

@@ -3,10 +3,11 @@ package sigre
 import (
 	"crypto"
 	"fmt"
+	"strings"
 	"time"
 )
 
-// AlgorithmID identifies one complete cryptographic verification algorithm.
+// AlgorithmID identifies one complete signature or MAC algorithm.
 // Each value fixes the key type, hash function, and RSA padding where applicable.
 // The zero value is invalid.
 type AlgorithmID uint16
@@ -28,8 +29,8 @@ const (
 	AlgorithmHMACSHA256
 )
 
-// TrustedKeyMetadata binds an opaque key identifier to one trusted algorithm.
-// KeyID is compared with the received keyId byte-for-byte without normalization.
+// TrustedKeyMetadata binds an opaque wire keyId to one trusted algorithm.
+// KeyID is serialized or compared byte-for-byte without normalization.
 type TrustedKeyMetadata struct {
 	KeyID     string
 	Algorithm AlgorithmID
@@ -105,30 +106,30 @@ const (
 	algorithmKeyHMAC
 )
 
-type verificationAlgorithm struct {
+type algorithmDefinition struct {
 	id      AlgorithmID
 	keyKind algorithmKeyKind
 	hash    crypto.Hash
 }
 
-func verificationAlgorithmFor(id AlgorithmID) (verificationAlgorithm, error) {
+func algorithmDefinitionFor(id AlgorithmID) (algorithmDefinition, error) {
 	switch id {
 	case AlgorithmRSAPKCS1v15SHA512:
-		return verificationAlgorithm{id: id, keyKind: algorithmKeyRSA, hash: crypto.SHA512}, nil
+		return algorithmDefinition{id: id, keyKind: algorithmKeyRSA, hash: crypto.SHA512}, nil
 	case AlgorithmRSAPKCS1v15SHA256:
-		return verificationAlgorithm{id: id, keyKind: algorithmKeyRSA, hash: crypto.SHA256}, nil
+		return algorithmDefinition{id: id, keyKind: algorithmKeyRSA, hash: crypto.SHA256}, nil
 	case AlgorithmECDSASHA512:
-		return verificationAlgorithm{id: id, keyKind: algorithmKeyECDSA, hash: crypto.SHA512}, nil
+		return algorithmDefinition{id: id, keyKind: algorithmKeyECDSA, hash: crypto.SHA512}, nil
 	case AlgorithmECDSASHA256:
-		return verificationAlgorithm{id: id, keyKind: algorithmKeyECDSA, hash: crypto.SHA256}, nil
+		return algorithmDefinition{id: id, keyKind: algorithmKeyECDSA, hash: crypto.SHA256}, nil
 	case AlgorithmEd25519:
-		return verificationAlgorithm{id: id, keyKind: algorithmKeyEd25519}, nil
+		return algorithmDefinition{id: id, keyKind: algorithmKeyEd25519}, nil
 	case AlgorithmHMACSHA512:
-		return verificationAlgorithm{id: id, keyKind: algorithmKeyHMAC, hash: crypto.SHA512}, nil
+		return algorithmDefinition{id: id, keyKind: algorithmKeyHMAC, hash: crypto.SHA512}, nil
 	case AlgorithmHMACSHA256:
-		return verificationAlgorithm{id: id, keyKind: algorithmKeyHMAC, hash: crypto.SHA256}, nil
+		return algorithmDefinition{id: id, keyKind: algorithmKeyHMAC, hash: crypto.SHA256}, nil
 	default:
-		return verificationAlgorithm{}, fmt.Errorf("%w: unsupported AlgorithmID %d", ErrInvalidKeyMetadata, id)
+		return algorithmDefinition{}, fmt.Errorf("%w: unsupported AlgorithmID %d", ErrInvalidKeyMetadata, id)
 	}
 }
 
@@ -147,5 +148,53 @@ func isLegacyCavageAlgorithm(id AlgorithmID) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func isReservedCavageAlgorithmLabel(label string) bool {
+	switch label {
+	case hs2019, "rsa-sha1", "rsa-sha256", "ecdsa-sha256", "hmac-sha256":
+		return true
+	default:
+		return false
+	}
+}
+
+func legacyAlgorithmID(label string) (AlgorithmID, bool) {
+	switch label {
+	case "rsa-sha256":
+		return AlgorithmRSAPKCS1v15SHA256, true
+	case "ecdsa-sha256":
+		return AlgorithmECDSASHA256, true
+	case "hmac-sha256":
+		return AlgorithmHMACSHA256, true
+	default:
+		return 0, false
+	}
+}
+
+func legacyAlgorithmLabel(id AlgorithmID) (string, bool) {
+	switch id {
+	case AlgorithmRSAPKCS1v15SHA256:
+		return "rsa-sha256", true
+	case AlgorithmECDSASHA256:
+		return "ecdsa-sha256", true
+	case AlgorithmHMACSHA256:
+		return "hmac-sha256", true
+	default:
+		return "", false
+	}
+}
+
+func legacyAlgorithmFamily(label string) string {
+	switch {
+	case strings.HasPrefix(label, "rsa"):
+		return "rsa"
+	case strings.HasPrefix(label, "hmac"):
+		return "hmac"
+	case strings.HasPrefix(label, "ecdsa"):
+		return "ecdsa"
+	default:
+		return ""
 	}
 }

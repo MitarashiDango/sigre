@@ -98,43 +98,43 @@ func TestSignAndVerify(t *testing.T) {
 			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"date", "host"}},
 		},
 		{
-			name:      "Success: AllowedClockSkew (future)",
+			name:      "Success: MaxSignatureAge within boundary",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(created)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				publicKey:       ed25519PubKey,
-				clockSkew:       1 * time.Minute,
+				maxSignatureAge: 1 * time.Minute,
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 30, 30, 0, time.UTC) },
 			},
 		},
 		{
-			name:      "Success: AllowedHashAlgorithms includes signing algorithm (RSA-SHA256)",
+			name:      "Success: AllowedAlgorithms includes signing algorithm (RSA-SHA256)",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
 			body:      `{"hello": "world"}`,
 			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
 			verifyOpts: verifyOptsPartial{
-				publicKey:     rsaPubKey,
-				allowedHashes: []crypto.Hash{crypto.SHA256},
+				publicKey:         rsaPubKey,
+				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
 			},
 		},
 		{
-			name:      "Success: AllowedHashAlgorithms includes multiple hashes (RSA-SHA512)",
+			name:      "Success: AllowedAlgorithms includes multiple algorithms (RSA-SHA512)",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
 			body:      `{"hello": "world"}`,
 			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA512},
 			verifyOpts: verifyOptsPartial{
-				publicKey:     rsaPubKey,
-				allowedHashes: []crypto.Hash{crypto.SHA512, crypto.SHA256},
+				publicKey:         rsaPubKey,
+				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512, sigre.AlgorithmRSAPKCS1v15SHA256},
 			},
 		},
 		{
-			name:      "Success: AllowedHashAlgorithms unspecified (uses default allow list)",
+			name:      "Success: AllowedAlgorithms unspecified",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -145,53 +145,53 @@ func TestSignAndVerify(t *testing.T) {
 			},
 		},
 		{
-			name:      "Success: AllowedHashAlgorithms does not affect Ed25519 (no hash required)",
+			name:      "Success: AllowedAlgorithms permits Ed25519",
 			isRequest: true,
 			method:    "GET",
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(request-target)", "host", "date"}},
 			verifyOpts: verifyOptsPartial{
-				publicKey:     ed25519PubKey,
-				allowedHashes: []crypto.Hash{crypto.SHA512},
+				publicKey:         ed25519PubKey,
+				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmEd25519},
 			},
 		},
 		{
-			name:      "Success: AllowedHashAlgorithms permits HMAC-SHA256",
+			name:      "Success: AllowedAlgorithms permits HMAC-SHA256",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{
-				secret:        hmacSecret,
-				allowedHashes: []crypto.Hash{crypto.SHA256},
+				secret:            hmacSecret,
+				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256},
 			},
 		},
 		{
-			name:      "Failure: AllowedHashAlgorithms does not include signing algorithm",
+			name:      "Failure: AllowedAlgorithms does not include trusted algorithm",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
 			body:      `{"hello": "world"}`,
 			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, hash: crypto.SHA256},
 			verifyOpts: verifyOptsPartial{
-				publicKey:     rsaPubKey,
-				allowedHashes: []crypto.Hash{crypto.SHA512},
+				publicKey:         rsaPubKey,
+				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512},
 			},
 			expectError: true,
-			wantErr:     sigre.ErrUnsupportedHashAlgorithm,
+			wantErr:     sigre.ErrInvalidSignatureAlgorithm,
 		},
 		{
-			name:      "Failure: AllowedHashAlgorithms rejects HMAC hash",
+			name:      "Failure: AllowedAlgorithms rejects HMAC algorithm",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{secret: hmacSecret, hash: crypto.SHA256, headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{
-				secret:        hmacSecret,
-				allowedHashes: []crypto.Hash{crypto.SHA512},
+				secret:            hmacSecret,
+				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA512},
 			},
 			expectError: true,
-			wantErr:     sigre.ErrUnsupportedHashAlgorithm,
+			wantErr:     sigre.ErrInvalidSignatureAlgorithm,
 		},
 		{
 			name:        "Failure: RequiredHeaders not satisfied",
@@ -204,14 +204,14 @@ func TestSignAndVerify(t *testing.T) {
 			wantErr:     sigre.ErrRequiredHeaderMissing,
 		},
 		{
-			name:      "Failure: AllowedClockSkew exceeded (too old)",
+			name:      "Failure: MaxSignatureAge exceeded",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
 			signOpts:  signOptsPartial{privateKey: ed25519PrivateKey, headers: []string{"(created)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				publicKey:       ed25519PubKey,
-				clockSkew:       1 * time.Minute,
+				maxSignatureAge: 1 * time.Minute,
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 31, 1, 0, time.UTC) },
 			},
 			expectError: true,
@@ -353,16 +353,16 @@ func TestSignAndVerify(t *testing.T) {
 
 			verifier.Now = testingNowFunc
 
-			verifyOptions := &sigre.VerifyOptions{
-				AllowedClockSkew:      tc.verifyOpts.clockSkew,
-				RequiredHeaders:       tc.verifyOpts.requiredHeaders,
-				AllowedHashAlgorithms: tc.verifyOpts.allowedHashes,
-			}
+			algorithm, wireLabel := testVerificationAlgorithm(tc.signOpts)
+			verifyOptions := fixedVerificationOptions(algorithm, wireLabel)
+			verifyOptions.RequiredHeaders = tc.verifyOpts.requiredHeaders
+			verifyOptions.AllowedAlgorithms = tc.verifyOpts.allowedAlgorithms
+			verifyOptions.MaxSignatureAge = tc.verifyOpts.maxSignatureAge
 
 			if len(tc.verifyOpts.secret) != 0 {
-				err = verifier.VerifyHMAC(tc.verifyOpts.secret, verifyOptions)
+				err = verifier.VerifyHMAC(fixedHMACVerificationKey(keyId, algorithm, tc.verifyOpts.secret), verifyOptions)
 			} else {
-				err = verifier.Verify(tc.verifyOpts.publicKey, verifyOptions)
+				err = verifier.Verify(fixedPublicVerificationKey(keyId, algorithm, tc.verifyOpts.publicKey), verifyOptions)
 			}
 
 			if tc.expectError {
@@ -614,13 +614,38 @@ type signOptsPartial struct {
 }
 
 type verifyOptsPartial struct {
-	publicKey       crypto.PublicKey
-	secret          []byte
-	clockSkew       time.Duration
-	requiredHeaders []string
-	allowedHashes   []crypto.Hash
-	tamperHeader    *tamperAction
-	overrideNowFunc func() time.Time
+	publicKey         crypto.PublicKey
+	secret            []byte
+	maxSignatureAge   time.Duration
+	requiredHeaders   []string
+	allowedAlgorithms []sigre.AlgorithmID
+	tamperHeader      *tamperAction
+	overrideNowFunc   func() time.Time
+}
+
+func testVerificationAlgorithm(opts signOptsPartial) (sigre.AlgorithmID, string) {
+	if len(opts.secret) != 0 {
+		if opts.hash == crypto.SHA512 {
+			return sigre.AlgorithmHMACSHA512, "hmac-sha512"
+		}
+		return sigre.AlgorithmHMACSHA256, "hmac-sha256"
+	}
+	switch opts.privateKey.(type) {
+	case *rsa.PrivateKey:
+		if opts.hash == crypto.SHA512 {
+			return sigre.AlgorithmRSAPKCS1v15SHA512, "rsa-sha512"
+		}
+		return sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256"
+	case *ecdsa.PrivateKey:
+		if opts.hash == crypto.SHA512 {
+			return sigre.AlgorithmECDSASHA512, "ecdsa-sha512"
+		}
+		return sigre.AlgorithmECDSASHA256, "ecdsa-sha256"
+	case ed25519.PrivateKey, *ed25519.PrivateKey:
+		return sigre.AlgorithmEd25519, "ed25519"
+	default:
+		panic("unsupported test signing key")
+	}
 }
 
 type tamperAction struct {

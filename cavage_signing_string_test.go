@@ -249,7 +249,7 @@ func TestCavageRequestVerifierUsesRequestURI(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewCavageRequestVerifier() failed: %v", err)
 			}
-			if err := verifier.VerifyHMAC(signingStringTestSecret, &VerifyOptions{AllowedHashAlgorithms: []crypto.Hash{crypto.SHA256}}); err != nil {
+			if err := verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions()); err != nil {
 				t.Fatalf("VerifyHMAC() failed: %v", err)
 			}
 		})
@@ -271,7 +271,7 @@ func TestCavageRequestVerifierDoesNotRebuildMissingRequestURI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCavageRequestVerifier() failed: %v", err)
 	}
-	err = verifier.VerifyHMAC(signingStringTestSecret, &VerifyOptions{AllowedHashAlgorithms: []crypto.Hash{crypto.SHA256}})
+	err = verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions())
 	if err == nil || !strings.Contains(err.Error(), "request-target is missing") {
 		t.Fatalf("VerifyHMAC() error = %v, want a missing request-target error", err)
 	}
@@ -333,7 +333,7 @@ func TestCavageResponseRequestTargetUsesAssociatedRequestURI(t *testing.T) {
 				if err != nil {
 					t.Fatalf("NewCavageResponseVerifier() failed: %v", err)
 				}
-				if err := verifier.VerifyHMAC(signingStringTestSecret, &VerifyOptions{AllowedHashAlgorithms: []crypto.Hash{crypto.SHA256}}); err != nil {
+				if err := verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions()); err != nil {
 					t.Fatalf("VerifyHMAC() failed: %v", err)
 				}
 			})
@@ -410,7 +410,7 @@ func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
 				if err != nil {
 					t.Fatalf("NewCavageResponseVerifier() failed: %v", err)
 				}
-				if err := verifier.VerifyHMAC(signingStringTestSecret, &VerifyOptions{AllowedHashAlgorithms: []crypto.Hash{crypto.SHA256}}); err != nil {
+				if err := verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions()); err != nil {
 					t.Fatalf("VerifyHMAC() failed: %v", err)
 				}
 			})
@@ -448,7 +448,7 @@ func TestCavageVerifierNormalHeaderCanonicalization(t *testing.T) {
 			if err != nil {
 				t.Fatalf("verifier construction failed: %v", err)
 			}
-			if err := verifier.VerifyHMAC(signingStringTestSecret, &VerifyOptions{AllowedHashAlgorithms: []crypto.Hash{crypto.SHA256}}); err != nil {
+			if err := verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions()); err != nil {
 				t.Fatalf("VerifyHMAC() failed: %v", err)
 			}
 		})
@@ -588,7 +588,7 @@ func TestCavageVerifierRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 				if err != nil {
 					t.Fatalf("verifier construction failed: %v", err)
 				}
-				err = verifier.VerifyHMAC(signingStringTestSecret, &VerifyOptions{AllowedHashAlgorithms: []crypto.Hash{crypto.SHA256}})
+				err = verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions())
 				if err == nil {
 					t.Fatal("verification unexpectedly succeeded")
 				}
@@ -646,6 +646,21 @@ func fixedCavageHMACHeader(t *testing.T, signingString, signedHeaders string) st
 	}
 	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return `keyId="test-key",signature="` + signature + `",algorithm="hmac-sha256",headers="` + signedHeaders + `"`
+}
+
+func signingStringVerificationKey() HMACVerificationKey {
+	return HMACVerificationKey{
+		Metadata: TrustedKeyMetadata{KeyID: "test-key", Algorithm: AlgorithmHMACSHA256},
+		Secret:   signingStringTestSecret,
+	}
+}
+
+func signingStringVerificationOptions() *CavageVerificationOptions {
+	return &CavageVerificationOptions{
+		Compatibility: &CavageVerificationCompatibility{
+			AllowedLegacyAlgorithms: []AlgorithmID{AlgorithmHMACSHA256},
+		},
+	}
 }
 
 func assertCavageHMACSignature(t *testing.T, headerValue, signingString string) {

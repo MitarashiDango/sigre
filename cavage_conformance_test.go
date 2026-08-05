@@ -35,11 +35,16 @@ func TestCavageConformanceFixedSignatureVerification(t *testing.T) {
 				t.Fatalf("KeyId() = %q, want %q", verifier.KeyId(), fixture.KeyID)
 			}
 
-			verifyOptions := &sigre.VerifyOptions{AllowedHashAlgorithms: []crypto.Hash{crypto.SHA512}}
 			if fixture.CryptoPath == "hmac" {
-				err = verifier.VerifyHMAC(loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile), verifyOptions)
+				err = verifier.VerifyHMAC(sigre.HMACVerificationKey{
+					Metadata: sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
+					Secret:   loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile),
+				}, nil)
 			} else {
-				err = verifier.Verify(loadCavageFixturePublicKey(t, fixture.VerificationKeyFile), verifyOptions)
+				err = verifier.Verify(sigre.VerificationKey{
+					Metadata:  sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
+					PublicKey: loadCavageFixturePublicKey(t, fixture.VerificationKeyFile),
+				}, nil)
 			}
 			if err != nil {
 				t.Fatalf("fixed signature verification failed: %v", err)

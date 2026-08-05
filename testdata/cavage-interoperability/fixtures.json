@@ -1,0 +1,359 @@
+{
+  "format_version": 1,
+  "fixtures": [
+    {
+      "id": "mastodon-cavage-post-rsa-sha256",
+      "target": "Mastodon Cavage POST compatibility form",
+      "description": "Locally constructed POST vector following the fixed Mastodon request signing code, including its header insertion order and query-preserving request-target rule.",
+      "construction": "locally constructed from fixed source behavior; not captured from a running Mastodon server",
+      "sources": [
+        {
+          "url": "https://github.com/mastodon/mastodon/blob/f80b1ba92e63c3da771b405b9100f5c9abda909f/app/lib/http_signature_draft.rb#L14-L28",
+          "revision": "f80b1ba92e63c3da771b405b9100f5c9abda909f",
+          "assertion": "The request-target retains the query, is appended after the ordinary signed headers, and the wire algorithm is rsa-sha256."
+        },
+        {
+          "url": "https://github.com/mastodon/mastodon/blob/f80b1ba92e63c3da771b405b9100f5c9abda909f/app/lib/request.rb#L151-L164",
+          "revision": "f80b1ba92e63c3da771b405b9100f5c9abda909f",
+          "assertion": "A request with a body inserts Host, Date, and Digest in that order before signing."
+        }
+      ],
+      "generation": "README.md, Fixed signature generation",
+      "independent_validation": "README.md, Independent signature verification",
+      "message": {
+        "method": "POST",
+        "url": "https://mastodon.example/inbox?shared=1&next=%2Fitems",
+        "request_target": "/inbox?shared=1&next=%2Fitems",
+        "headers": [
+          {"name": "Host", "values": ["mastodon.example"]},
+          {"name": "Date", "values": ["Wed, 05 Aug 2026 03:00:00 GMT"]},
+          {"name": "Digest", "values": ["SHA-256=wUcY70G61UmGiv1h5BcDptK4F4dQwSC8GYamueGOwQI="]},
+          {"name": "Content-Type", "values": ["application/activity+json"]}
+        ],
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"id\":\"https://sender.example/activities/mastodon-fixture\",\"type\":\"Create\"}"
+      },
+      "signed_headers": ["host", "date", "digest", "(request-target)"],
+      "expected_signing_string": "host: mastodon.example\ndate: Wed, 05 Aug 2026 03:00:00 GMT\ndigest: SHA-256=wUcY70G61UmGiv1h5BcDptK4F4dQwSC8GYamueGOwQI=\n(request-target): post /inbox?shared=1&next=%2Fitems",
+      "key_id": "https://sender.example/users/mastodon#main-key",
+      "wire_algorithm": "rsa-sha256",
+      "trusted_algorithm": "AlgorithmRSAPKCS1v15SHA256",
+      "signature_placement": "Signature",
+      "signature_header_value": "keyId=\"https://sender.example/users/mastodon#main-key\",algorithm=\"rsa-sha256\",headers=\"host date digest (request-target)\",signature=\"0DPS8AajA3zgzhKukdM9v3KHYz7L6Rff/oOahDGvjFjnzgTXl0y21i4e+WumvNHEyoxVg+OEElM4HMAkoGB2J5nIURaGjrGX8wcr1IRodOqachE/SVKkkwE/31AWtzXRaXPI/ucg8tg/mxt6KAiYSY7suGJ/vaB9d8YanosqHAbSQEZmK9uR+p4PC8tSCxBJLiH00bUePvo0SOIjrgG7AWKP5YcQzqT++nd3sQ5dIo5US6FfbU0uo0by0cDfcmSe4yRFfKyeMYoPh42yRqMJfaglvS1xKZjLTwavZsgleIRKfax8dcwh/xtqHLLcP0VjRerYcQrRBKBwDrSZRfhSWA==\"",
+      "signature_base64": "0DPS8AajA3zgzhKukdM9v3KHYz7L6Rff/oOahDGvjFjnzgTXl0y21i4e+WumvNHEyoxVg+OEElM4HMAkoGB2J5nIURaGjrGX8wcr1IRodOqachE/SVKkkwE/31AWtzXRaXPI/ucg8tg/mxt6KAiYSY7suGJ/vaB9d8YanosqHAbSQEZmK9uR+p4PC8tSCxBJLiH00bUePvo0SOIjrgG7AWKP5YcQzqT++nd3sQ5dIo5US6FfbU0uo0by0cDfcmSe4yRFfKyeMYoPh42yRqMJfaglvS1xKZjLTwavZsgleIRKfax8dcwh/xtqHLLcP0VjRerYcQrRBKBwDrSZRfhSWA==",
+      "verification_key_file": "../cavage-draft-12/keys/rsa-public.pem",
+      "signing_key_file": "../cavage-draft-12/keys/rsa-private.pem",
+      "verification_time": "2026-08-05T03:00:00Z",
+      "strict_rejection": "ErrInvalidSignatureAlgorithm",
+      "verification_compatibility": {
+        "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
+      },
+      "signing_compatibility": {
+        "algorithm_field": "AlgorithmFieldLegacy",
+        "exact_headers": ["host", "date", "digest", "(request-target)"]
+      }
+    },
+    {
+      "id": "misskey-inbox-post-rsa-sha256",
+      "target": "Misskey inbox POST compatibility form",
+      "description": "Locally constructed inbox POST vector following the fixed Misskey header list without normalizing it to a generic ActivityPub order.",
+      "construction": "locally constructed from fixed source behavior; not captured from a running Misskey server",
+      "sources": [
+        {
+          "url": "https://github.com/misskey-dev/misskey/blob/8ea4a0ecac058688f69706ab88de1fcd439e2621/packages/backend/src/core/activitypub/ApRequestService.ts#L44-L70",
+          "revision": "8ea4a0ecac058688f69706ab88de1fcd439e2621",
+          "assertion": "Inbox POST signs (request-target), date, host, and digest in exactly that order and computes SHA-256 Digest."
+        },
+        {
+          "url": "https://github.com/misskey-dev/misskey/blob/8ea4a0ecac058688f69706ab88de1fcd439e2621/packages/backend/src/server/ActivityPubServerService.ts#L108-L175",
+          "revision": "8ea4a0ecac058688f69706ab88de1fcd439e2621",
+          "assertion": "Inbox handling retains rawBody and compares its SHA-256 digest before queueing the decoded activity."
+        }
+      ],
+      "generation": "README.md, Fixed signature generation",
+      "independent_validation": "README.md, Independent signature verification",
+      "message": {
+        "method": "POST",
+        "url": "https://misskey.example/inbox",
+        "request_target": "/inbox",
+        "headers": [
+          {"name": "Host", "values": ["misskey.example"]},
+          {"name": "Date", "values": ["Wed, 05 Aug 2026 03:00:00 GMT"]},
+          {"name": "Content-Type", "values": ["application/activity+json"]},
+          {"name": "Digest", "values": ["SHA-256=yyzVOHgT2fi3ipwlZNEseWTE6HFbb0R8h0mMTqOVrVM="]}
+        ],
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"actor\":\"https://sender.example/users/misskey\",\"id\":\"https://sender.example/activities/misskey-fixture\",\"type\":\"Follow\"}"
+      },
+      "signed_headers": ["(request-target)", "date", "host", "digest"],
+      "expected_signing_string": "(request-target): post /inbox\ndate: Wed, 05 Aug 2026 03:00:00 GMT\nhost: misskey.example\ndigest: SHA-256=yyzVOHgT2fi3ipwlZNEseWTE6HFbb0R8h0mMTqOVrVM=",
+      "key_id": "https://sender.example/users/misskey#main-key",
+      "wire_algorithm": "rsa-sha256",
+      "trusted_algorithm": "AlgorithmRSAPKCS1v15SHA256",
+      "signature_placement": "Signature",
+      "signature_header_value": "keyId=\"https://sender.example/users/misskey#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) date host digest\",signature=\"2uU5pLkSHtk5APDnDBYvGc1e4jVI1IypYwRX0XzLujJWD50TOJbfhqJxvG48xS9J2DJQAsfwo0KVFQjmkN2z4SBd1LnWhALll3EVYpbLvwydzOupnvlIfCse4GKCLfO+zz3lb2MaqlZD9SVoU4tASoNC1TVXCygnUp+P411xUNVPq+GWXhFgipBRTaLtI95MHUybQcBMDUP6CQ4sswkGPzndZqEsG9qLSjzIcDPwubpdeUpwA9W9HF/U88UfxxbF6z53NVN2nY0BlArc90X7bF9RXojf19LdCw4j6Tatx+80gb4S2iO5oLpJ2SJ/t4OaJ3DlpFTUbpzVHA+ELLEvRA==\"",
+      "signature_base64": "2uU5pLkSHtk5APDnDBYvGc1e4jVI1IypYwRX0XzLujJWD50TOJbfhqJxvG48xS9J2DJQAsfwo0KVFQjmkN2z4SBd1LnWhALll3EVYpbLvwydzOupnvlIfCse4GKCLfO+zz3lb2MaqlZD9SVoU4tASoNC1TVXCygnUp+P411xUNVPq+GWXhFgipBRTaLtI95MHUybQcBMDUP6CQ4sswkGPzndZqEsG9qLSjzIcDPwubpdeUpwA9W9HF/U88UfxxbF6z53NVN2nY0BlArc90X7bF9RXojf19LdCw4j6Tatx+80gb4S2iO5oLpJ2SJ/t4OaJ3DlpFTUbpzVHA+ELLEvRA==",
+      "verification_key_file": "../cavage-draft-12/keys/rsa-public.pem",
+      "signing_key_file": "../cavage-draft-12/keys/rsa-private.pem",
+      "verification_time": "2026-08-05T03:00:00Z",
+      "strict_rejection": "ErrInvalidSignatureAlgorithm",
+      "verification_compatibility": {
+        "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
+      },
+      "signing_compatibility": {
+        "algorithm_field": "AlgorithmFieldLegacy",
+        "exact_headers": ["(request-target)", "date", "host", "digest"]
+      }
+    },
+    {
+      "id": "misskey-signed-get-rsa-sha256",
+      "target": "Misskey signed GET compatibility form",
+      "description": "Locally constructed query-free signed GET vector following the fixed Misskey header order and pathname-only request-target construction.",
+      "construction": "locally constructed from fixed source behavior; not captured from a running Misskey server",
+      "sources": [
+        {
+          "url": "https://github.com/misskey-dev/misskey/blob/8ea4a0ecac058688f69706ab88de1fcd439e2621/packages/backend/src/core/activitypub/ApRequestService.ts#L73-L100",
+          "revision": "8ea4a0ecac058688f69706ab88de1fcd439e2621",
+          "assertion": "Signed GET uses (request-target), date, and host in exactly that order and emits rsa-sha256."
+        },
+        {
+          "url": "https://github.com/misskey-dev/misskey/blob/8ea4a0ecac058688f69706ab88de1fcd439e2621/packages/backend/src/core/activitypub/ApRequestService.ts#L116-L129",
+          "revision": "8ea4a0ecac058688f69706ab88de1fcd439e2621",
+          "assertion": "The fixed source uses URL.pathname for request-target; this fixture deliberately has no query."
+        }
+      ],
+      "generation": "README.md, Fixed signature generation",
+      "independent_validation": "README.md, Independent signature verification",
+      "message": {
+        "method": "GET",
+        "url": "https://misskey.example/users/alice",
+        "request_target": "/users/alice",
+        "headers": [
+          {"name": "Accept", "values": ["application/activity+json, application/ld+json; profile=\"https://www.w3.org/ns/activitystreams\""]},
+          {"name": "Date", "values": ["Wed, 05 Aug 2026 03:00:00 GMT"]},
+          {"name": "Host", "values": ["misskey.example"]}
+        ],
+        "body": ""
+      },
+      "signed_headers": ["(request-target)", "date", "host"],
+      "expected_signing_string": "(request-target): get /users/alice\ndate: Wed, 05 Aug 2026 03:00:00 GMT\nhost: misskey.example",
+      "key_id": "https://sender.example/users/misskey#main-key",
+      "wire_algorithm": "rsa-sha256",
+      "trusted_algorithm": "AlgorithmRSAPKCS1v15SHA256",
+      "signature_placement": "Signature",
+      "signature_header_value": "keyId=\"https://sender.example/users/misskey#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) date host\",signature=\"D5DLu68TqW7tTj/4u6pnfT7DIT39W+TLCb7OdK+T2q3xi0eshWlEhNkzKWEj7JID4eRWF/JZ+TON/bRzqbCWLdOuC+Q7DaBA+W+nhMq+SHpOKGGNujZe+KH/hMjO9G5NEPvlofNlNICK0YlbpGsFHhVP8e5ZYAvt+gOzrLmc4YGJVDi4VbuWAJcAA5Uuito6J8XCo5XanPhlxIqSqGPe4CMO2rJFn4yNZVpG5N0AatDtG4YImsJrzzebQeuDIvJ2TD3brUzaoNfRCVsa1XEmfYRqKp08tbsdKGidQA1KflHA+6jAhuRCO5KyznAAFh5kkJfUU452CRhAbCNULpq4iA==\"",
+      "signature_base64": "D5DLu68TqW7tTj/4u6pnfT7DIT39W+TLCb7OdK+T2q3xi0eshWlEhNkzKWEj7JID4eRWF/JZ+TON/bRzqbCWLdOuC+Q7DaBA+W+nhMq+SHpOKGGNujZe+KH/hMjO9G5NEPvlofNlNICK0YlbpGsFHhVP8e5ZYAvt+gOzrLmc4YGJVDi4VbuWAJcAA5Uuito6J8XCo5XanPhlxIqSqGPe4CMO2rJFn4yNZVpG5N0AatDtG4YImsJrzzebQeuDIvJ2TD3brUzaoNfRCVsa1XEmfYRqKp08tbsdKGidQA1KflHA+6jAhuRCO5KyznAAFh5kkJfUU452CRhAbCNULpq4iA==",
+      "verification_key_file": "../cavage-draft-12/keys/rsa-public.pem",
+      "signing_key_file": "../cavage-draft-12/keys/rsa-private.pem",
+      "verification_time": "2026-08-05T03:00:00Z",
+      "strict_rejection": "ErrInvalidSignatureAlgorithm",
+      "verification_compatibility": {
+        "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
+      },
+      "signing_compatibility": {
+        "algorithm_field": "AlgorithmFieldLegacy",
+        "exact_headers": ["(request-target)", "date", "host"]
+      }
+    },
+    {
+      "id": "pleroma-inbox-post-rsa-sha256",
+      "target": "Pleroma inbox POST compatibility form",
+      "description": "Locally constructed inbox POST vector following Pleroma's fixed source and the sorted header order of its locked http_signatures 0.1.3 dependency.",
+      "construction": "locally constructed from fixed source behavior; not captured from a running Pleroma server",
+      "sources": [
+        {
+          "url": "https://git.pleroma.social/pleroma/pleroma/src/commit/f53342775d0f11aba7ee7a635a3c359397b87fa9/lib/pleroma/web/activity_pub/publisher.ex#L132-L183",
+          "revision": "f53342775d0f11aba7ee7a635a3c359397b87fa9",
+          "assertion": "Pleroma supplies request-target, host, content-length, digest, and date to the signature implementation and sends Date, Signature, and Digest."
+        },
+        {
+          "url": "https://git.pleroma.social/pleroma/pleroma/src/commit/f53342775d0f11aba7ee7a635a3c359397b87fa9/mix.lock#L65",
+          "revision": "http_signatures 0.1.3; lock checksum 20313a65516db88006f85b090f6f76cc5b04e9609b45943657e6781eb91174f4",
+          "assertion": "The dependency version and package checksum are fixed by Pleroma's lock file."
+        },
+        {
+          "url": "https://repo.hex.pm/tarballs/http_signatures-0.1.3.tar",
+          "revision": "0.1.3; package checksum 20313a65516db88006f85b090f6f76cc5b04e9609b45943657e6781eb91174f4",
+          "assertion": "HTTPSignatures.sign sorts Map keys before building the signing string, producing (request-target), content-length, date, digest, host."
+        }
+      ],
+      "generation": "README.md, Fixed signature generation",
+      "independent_validation": "README.md, Independent signature verification",
+      "message": {
+        "method": "POST",
+        "url": "https://pleroma.example/inbox",
+        "request_target": "/inbox",
+        "headers": [
+          {"name": "Host", "values": ["pleroma.example"]},
+          {"name": "Content-Length", "values": ["172"]},
+          {"name": "Date", "values": ["Wed, 05 Aug 2026 03:00:00 GMT"]},
+          {"name": "Digest", "values": ["SHA-256=NwxmGd+vay9TePC/w+TUch7/jOyrTyqe5+81fsH0gvs="]},
+          {"name": "Content-Type", "values": ["application/activity+json"]}
+        ],
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"actor\":\"https://sender.example/users/pleroma\",\"id\":\"https://sender.example/activities/pleroma-fixture\",\"type\":\"Create\"}"
+      },
+      "signed_headers": ["(request-target)", "content-length", "date", "digest", "host"],
+      "expected_signing_string": "(request-target): post /inbox\ncontent-length: 172\ndate: Wed, 05 Aug 2026 03:00:00 GMT\ndigest: SHA-256=NwxmGd+vay9TePC/w+TUch7/jOyrTyqe5+81fsH0gvs=\nhost: pleroma.example",
+      "key_id": "https://sender.example/users/pleroma#main-key",
+      "wire_algorithm": "rsa-sha256",
+      "trusted_algorithm": "AlgorithmRSAPKCS1v15SHA256",
+      "signature_placement": "Signature",
+      "signature_header_value": "keyId=\"https://sender.example/users/pleroma#main-key\",algorithm=\"rsa-sha256\",headers=\"(request-target) content-length date digest host\",signature=\"wBBQX6euDq81wylZy13dfjWZqwmFh8gpk5hcXE50khXQ45g2UWacdK+LvcLVPEFDYSKUm1lyXyDfUX98EefBRtv0EiUikb/w26GQdgfmPypDmtcWhbStOBWZH0G5MyETcYs9z7inPrG74sbusb9ZY+z2k7mWLjQH8rlrZPj3Vp4Ig1nh1SYP99ZF/K611kP2Dyq/uRMbpw9oZAuKo9qdooKHX36tDoF1jXV6cLide/x7drxDivUnhUeuqn7U+DdRWVCHuopAEG4euz2fh26ktDNKNKY2bZSJDC1e/XkrmSdbawH9ofD7PIV7vECz1uJQNbekmBmhzoTQD2Y3DpDTdA==\"",
+      "signature_base64": "wBBQX6euDq81wylZy13dfjWZqwmFh8gpk5hcXE50khXQ45g2UWacdK+LvcLVPEFDYSKUm1lyXyDfUX98EefBRtv0EiUikb/w26GQdgfmPypDmtcWhbStOBWZH0G5MyETcYs9z7inPrG74sbusb9ZY+z2k7mWLjQH8rlrZPj3Vp4Ig1nh1SYP99ZF/K611kP2Dyq/uRMbpw9oZAuKo9qdooKHX36tDoF1jXV6cLide/x7drxDivUnhUeuqn7U+DdRWVCHuopAEG4euz2fh26ktDNKNKY2bZSJDC1e/XkrmSdbawH9ofD7PIV7vECz1uJQNbekmBmhzoTQD2Y3DpDTdA==",
+      "verification_key_file": "../cavage-draft-12/keys/rsa-public.pem",
+      "signing_key_file": "../cavage-draft-12/keys/rsa-private.pem",
+      "verification_time": "2026-08-05T03:00:00Z",
+      "strict_rejection": "ErrInvalidSignatureAlgorithm",
+      "verification_compatibility": {
+        "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
+      },
+      "signing_compatibility": {
+        "algorithm_field": "AlgorithmFieldLegacy",
+        "exact_headers": ["(request-target)", "content-length", "date", "digest", "host"]
+      }
+    },
+    {
+      "id": "oci-authorization-get-rsa-sha256",
+      "target": "Oracle Cloud Infrastructure Signature Version 1 GET compatibility form",
+      "description": "Locally constructed GET vector following OCI's official Authorization: Signature requirements while retaining the synthetic request's percent-encoding and query order.",
+      "construction": "locally constructed from the official documentation with synthetic request values; not captured from OCI and not signed with an OCI operational key",
+      "sources": [
+        {
+          "url": "https://docs.oracle.com/en-us/iaas/Content/API/Concepts/signingrequests.htm",
+          "revision": "Signature Version 1 documentation retrieved 2026-08-05",
+          "assertion": "OCI requires Authorization: Signature, RSA-SHA256, a method-specific signed-header set, and preservation of path/query encoding and query order."
+        }
+      ],
+      "generation": "README.md, Fixed signature generation",
+      "independent_validation": "README.md, Independent signature verification",
+      "message": {
+        "method": "GET",
+        "url": "https://iaas.example.test/20160918/instances?availabilityDomain=Fixture%3A%20AD-1&displayName=Team%20X&limit=25",
+        "request_target": "/20160918/instances?availabilityDomain=Fixture%3A%20AD-1&displayName=Team%20X&limit=25",
+        "headers": [
+          {"name": "Date", "values": ["Wed, 05 Aug 2026 03:00:00 GMT"]},
+          {"name": "Host", "values": ["iaas.example.test"]}
+        ],
+        "body": ""
+      },
+      "signed_headers": ["date", "(request-target)", "host"],
+      "expected_signing_string": "date: Wed, 05 Aug 2026 03:00:00 GMT\n(request-target): get /20160918/instances?availabilityDomain=Fixture%3A%20AD-1&displayName=Team%20X&limit=25\nhost: iaas.example.test",
+      "key_id": "ocid1.tenancy.oc1..fixture/ocid1.user.oc1..fixture/aa:bb:cc",
+      "wire_algorithm": "rsa-sha256",
+      "trusted_algorithm": "AlgorithmRSAPKCS1v15SHA256",
+      "signature_placement": "Authorization",
+      "signature_header_value": "Signature version=\"1\",keyId=\"ocid1.tenancy.oc1..fixture/ocid1.user.oc1..fixture/aa:bb:cc\",algorithm=\"rsa-sha256\",headers=\"date (request-target) host\",signature=\"JYG6oBcRVlfm0H71WxLnnHXRoFomcQkvpOMKR6Jd2a9lT3dVwOz3jdYxfrRAwDAujOkf5CVvi6C/BHUqi4AbbfOK0D2yw6nuPtesAOFjMaTa+xpmWnvwk4emdUIZOnfeawK1Jj8zbbR5rVC/+4Y8dCUiahdxM9KfyGao3tMZxjEwjiPQT4ztgVOC29fgyikDgpjmT2j68wDUQ1BGssJSfrx0ctk6Xzr0wqNuQSqHXcRxH0ht1PdfiaAL2eNeHK1p3WBL8m2vLyszEG/7e2Gg2UoGFPJvObZoSwAa1ZtQjwJvjilRlEjCKxtjQEq0pM6jG0lJshqf8LQNZCTjJqnTiA==\"",
+      "signature_base64": "JYG6oBcRVlfm0H71WxLnnHXRoFomcQkvpOMKR6Jd2a9lT3dVwOz3jdYxfrRAwDAujOkf5CVvi6C/BHUqi4AbbfOK0D2yw6nuPtesAOFjMaTa+xpmWnvwk4emdUIZOnfeawK1Jj8zbbR5rVC/+4Y8dCUiahdxM9KfyGao3tMZxjEwjiPQT4ztgVOC29fgyikDgpjmT2j68wDUQ1BGssJSfrx0ctk6Xzr0wqNuQSqHXcRxH0ht1PdfiaAL2eNeHK1p3WBL8m2vLyszEG/7e2Gg2UoGFPJvObZoSwAa1ZtQjwJvjilRlEjCKxtjQEq0pM6jG0lJshqf8LQNZCTjJqnTiA==",
+      "verification_key_file": "../cavage-draft-12/keys/rsa-public.pem",
+      "signing_key_file": "../cavage-draft-12/keys/rsa-private.pem",
+      "verification_time": "2026-08-05T03:00:00Z",
+      "strict_rejection": "ErrInvalidSignatureAlgorithm",
+      "verification_compatibility": {
+        "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
+      },
+      "signing_compatibility": {
+        "algorithm_field": "AlgorithmFieldLegacy",
+        "exact_headers": ["date", "(request-target)", "host"]
+      }
+    },
+    {
+      "id": "fediverse-hs2019-rsa-sha256",
+      "target": "Fediverse hs2019 with RSA PKCS #1 v1.5 and SHA-256 compatibility form",
+      "description": "Locally constructed Fediverse compatibility vector that keeps hs2019 on the wire while binding verification to RSA PKCS #1 v1.5 with SHA-256.",
+      "construction": "locally constructed from the SWICG interoperability report; not attributed to a specific server product",
+      "sources": [
+        {
+          "url": "https://swicg.github.io/activitypub-http-signature/",
+          "revision": "report retrieved 2026-08-05",
+          "assertion": "The report documents the Fediverse interpretation of hs2019 as RSA-SHA256 and SHA-256 Digest checking."
+        },
+        {
+          "url": "https://datatracker.ietf.org/doc/html/draft-cavage-http-signatures-12#appendix-E.2",
+          "revision": "draft-cavage-http-signatures-12, 2019-10-20",
+          "assertion": "The draft's active hs2019 hashed algorithms use SHA-512, so SHA-256 is not strict draft-12 behavior."
+        }
+      ],
+      "generation": "README.md, Fixed signature generation",
+      "independent_validation": "README.md, Independent signature verification",
+      "message": {
+        "method": "POST",
+        "url": "https://fediverse.example/inbox",
+        "request_target": "/inbox",
+        "headers": [
+          {"name": "Host", "values": ["fediverse.example"]},
+          {"name": "Date", "values": ["Wed, 05 Aug 2026 03:00:00 GMT"]},
+          {"name": "Digest", "values": ["SHA-256=B48r61tD91nlsYyoHg0yhSXm52Q0iVwL8pqYyTTcvTA="]},
+          {"name": "Content-Type", "values": ["application/activity+json"]}
+        ],
+        "body": "{\"@context\":\"https://www.w3.org/ns/activitystreams\",\"actor\":\"https://sender.example/users/fediverse\",\"id\":\"https://sender.example/activities/hs2019-fixture\",\"type\":\"Create\"}"
+      },
+      "signed_headers": ["(request-target)", "host", "date", "digest", "content-type"],
+      "expected_signing_string": "(request-target): post /inbox\nhost: fediverse.example\ndate: Wed, 05 Aug 2026 03:00:00 GMT\ndigest: SHA-256=B48r61tD91nlsYyoHg0yhSXm52Q0iVwL8pqYyTTcvTA=\ncontent-type: application/activity+json",
+      "key_id": "https://sender.example/users/fediverse#main-key",
+      "wire_algorithm": "hs2019",
+      "trusted_algorithm": "AlgorithmRSAPKCS1v15SHA256",
+      "signature_placement": "Signature",
+      "signature_header_value": "keyId=\"https://sender.example/users/fediverse#main-key\",algorithm=\"hs2019\",headers=\"(request-target) host date digest content-type\",signature=\"Ud1PN8Vw+POXoxPl4zXonKPXG6zk6QRlD3V0qTjaJBE+ukG3Nghv8aQNhQLSGbK/5+KNqYcvh+jFTIFJRPuX7aCR8WY9aCR5rteBzPLd+xyItSXL50fckVgK2mE1X63igm4poypzt4Xf7jBPI3Y6YriXQCusUOW98cpU+LTeocyrOLwoVZcVO8X8g9bs9f9FtxsHivU1MNI6L8KVHulXhkt1f2gssU1RAQ6OqhGwQso3XljdNhJT+VF6JFpezPX91oq70ApXnaMoaKOlaUTb4AdprBFsj97yKrDhBadL4MSC0bqsB/Uogfs8JeZicVEu+zyVp/php9uNhTuUji8ebQ==\"",
+      "signature_base64": "Ud1PN8Vw+POXoxPl4zXonKPXG6zk6QRlD3V0qTjaJBE+ukG3Nghv8aQNhQLSGbK/5+KNqYcvh+jFTIFJRPuX7aCR8WY9aCR5rteBzPLd+xyItSXL50fckVgK2mE1X63igm4poypzt4Xf7jBPI3Y6YriXQCusUOW98cpU+LTeocyrOLwoVZcVO8X8g9bs9f9FtxsHivU1MNI6L8KVHulXhkt1f2gssU1RAQ6OqhGwQso3XljdNhJT+VF6JFpezPX91oq70ApXnaMoaKOlaUTb4AdprBFsj97yKrDhBadL4MSC0bqsB/Uogfs8JeZicVEu+zyVp/php9uNhTuUji8ebQ==",
+      "verification_key_file": "../cavage-draft-12/keys/rsa-public.pem",
+      "signing_key_file": "../cavage-draft-12/keys/rsa-private.pem",
+      "verification_time": "2026-08-05T03:00:00Z",
+      "strict_rejection": "ErrAlgorithmMismatch",
+      "verification_compatibility": {
+        "allow_hs2019_with_sha256": true
+      },
+      "signing_compatibility": {
+        "algorithm_field": "AlgorithmFieldHS2019WithSHA256",
+        "exact_headers": ["(request-target)", "host", "date", "digest", "content-type"]
+      }
+    },
+    {
+      "id": "extension-sigre-test-rsa-sha512",
+      "target": "Unregistered extension label compatibility form",
+      "description": "Locally constructed extension-label vector binding the exact sigre-test-rsa-sha512 label to one RSA PKCS #1 v1.5 with SHA-512 AlgorithmID.",
+      "construction": "locally constructed test-only extension vector",
+      "sources": [
+        {
+          "url": "https://datatracker.ietf.org/doc/html/draft-cavage-http-signatures-12#section-2.1.3",
+          "revision": "draft-cavage-http-signatures-12, 2019-10-20",
+          "assertion": "The algorithm parameter is advisory; the cryptographic algorithm is derived from trusted key metadata rather than the received label."
+        }
+      ],
+      "generation": "README.md, Fixed signature generation",
+      "independent_validation": "README.md, Independent signature verification",
+      "message": {
+        "method": "GET",
+        "url": "https://extension.example/resource/%2Fsegment?view=full&cursor=a%2Fb",
+        "request_target": "/resource/%2Fsegment?view=full&cursor=a%2Fb",
+        "headers": [
+          {"name": "Host", "values": ["extension.example"]},
+          {"name": "Date", "values": ["Wed, 05 Aug 2026 03:00:00 GMT"]}
+        ],
+        "body": ""
+      },
+      "signed_headers": ["(request-target)", "host", "date"],
+      "expected_signing_string": "(request-target): get /resource/%2Fsegment?view=full&cursor=a%2Fb\nhost: extension.example\ndate: Wed, 05 Aug 2026 03:00:00 GMT",
+      "key_id": "urn:sigre:test:key:rsa-sha512",
+      "wire_algorithm": "sigre-test-rsa-sha512",
+      "trusted_algorithm": "AlgorithmRSAPKCS1v15SHA512",
+      "signature_placement": "Signature",
+      "signature_header_value": "keyId=\"urn:sigre:test:key:rsa-sha512\",algorithm=\"sigre-test-rsa-sha512\",headers=\"(request-target) host date\",signature=\"SyJXUJRgJMIcO6NECZCarccEQtNSUIyDrOh38+OEcrFIgdzRil3owDmqdzxibU8X1ZuvvYe8wP+wPx/4h9CmTEU0t6v1JnMSI5XfshI7+wCf5H/BF1bimNF0DUIIQqSPgLrxAM7WDYENF3HYL007wX8UISuaY137c69NWJmoukVXG2FVWoJBqLpfOKlk8dQL7upGv7lTlfriZ0z4nzZiubCW1X/ngSUjdfz9B+EQDEFTf13IOEOdLND4JfmKtJkUsiAk7+h3rIGHBSNrH3iZ87dU42OSkSqI+S7eiEnsg8AeuCfGJRcGrRdYBnKzTOwtV2LufLzf0C7TpdECXwruZw==\"",
+      "signature_base64": "SyJXUJRgJMIcO6NECZCarccEQtNSUIyDrOh38+OEcrFIgdzRil3owDmqdzxibU8X1ZuvvYe8wP+wPx/4h9CmTEU0t6v1JnMSI5XfshI7+wCf5H/BF1bimNF0DUIIQqSPgLrxAM7WDYENF3HYL007wX8UISuaY137c69NWJmoukVXG2FVWoJBqLpfOKlk8dQL7upGv7lTlfriZ0z4nzZiubCW1X/ngSUjdfz9B+EQDEFTf13IOEOdLND4JfmKtJkUsiAk7+h3rIGHBSNrH3iZ87dU42OSkSqI+S7eiEnsg8AeuCfGJRcGrRdYBnKzTOwtV2LufLzf0C7TpdECXwruZw==",
+      "verification_key_file": "../cavage-draft-12/keys/rsa-public.pem",
+      "signing_key_file": "../cavage-draft-12/keys/rsa-private.pem",
+      "verification_time": "2026-08-05T03:00:00Z",
+      "strict_rejection": "ErrInvalidSignatureAlgorithm",
+      "verification_compatibility": {
+        "extension_algorithms": {
+          "sigre-test-rsa-sha512": "AlgorithmRSAPKCS1v15SHA512"
+        }
+      },
+      "signing_compatibility": {
+        "algorithm_field": "ExtensionAlgorithm",
+        "exact_headers": ["(request-target)", "host", "date"],
+        "extension": {
+          "label": "sigre-test-rsa-sha512",
+          "algorithm": "AlgorithmRSAPKCS1v15SHA512"
+        }
+      }
+    }
+  ]
+}

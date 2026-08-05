@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/MitarashiDango/sigre"
 )
 
 const cavageConformanceFixtureDirectory = "testdata/cavage-draft-12"
@@ -151,6 +153,23 @@ func (f cavageConformanceFixture) cryptoHash(t *testing.T) crypto.Hash {
 		return crypto.SHA512
 	default:
 		t.Fatalf("fixture %q has unsupported hash %q", f.ID, f.Hash)
+		return 0
+	}
+}
+
+func (f cavageConformanceFixture) algorithmID(t *testing.T) sigre.AlgorithmID {
+	t.Helper()
+	switch f.CryptoPath + "/" + f.Hash {
+	case "rsa/sha512":
+		return sigre.AlgorithmRSAPKCS1v15SHA512
+	case "ecdsa/sha512":
+		return sigre.AlgorithmECDSASHA512
+	case "ed25519/":
+		return sigre.AlgorithmEd25519
+	case "hmac/sha512":
+		return sigre.AlgorithmHMACSHA512
+	default:
+		t.Fatalf("fixture %q has no AlgorithmID for %s/%s", f.ID, f.CryptoPath, f.Hash)
 		return 0
 	}
 }

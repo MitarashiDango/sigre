@@ -10,10 +10,8 @@
 package sigre
 
 import (
-	"crypto"
 	"fmt"
 	"net/http"
-	"time"
 )
 
 // SignatureType identifies the HTTP signature scheme present in a message.
@@ -33,34 +31,16 @@ const (
 	AcceptSignature = "Accept-Signature"
 )
 
-// DefaultAllowedHashAlgorithms is the default set of hash algorithms permitted
-// during signature verification, used when [VerifyOptions].AllowedHashAlgorithms is empty.
-var DefaultAllowedHashAlgorithms = []crypto.Hash{crypto.SHA512, crypto.SHA256}
-
-// VerifyOptions configures signature verification behaviour.
-// Passing nil is equivalent to passing a zero-value VerifyOptions.
-type VerifyOptions struct {
-	// AllowedClockSkew sets the tolerance window for (created) and (expires) checks.
-	// A zero value still rejects future (created) timestamps but does not reject old ones.
-	AllowedClockSkew time.Duration
-	// RequiredHeaders lists header names that must appear in the signature's headers parameter.
-	RequiredHeaders []string
-	// AllowedHashAlgorithms restricts which hash algorithms are permitted during verification.
-	// When empty or nil, [DefaultAllowedHashAlgorithms] (SHA-512, SHA-256) is used.
-	// Use this to reject weaker hashes even if the signature parameters request them.
-	AllowedHashAlgorithms []crypto.Hash
-}
-
 // Verifier verifies an HTTP message signature.
 type Verifier interface {
 	// KeyId returns the key identifier from the signature parameters.
 	KeyId() string
-	// Verify checks an asymmetric signature (RSA, ECDSA, Ed25519) against key.
+	// Verify checks an asymmetric signature against a trusted key and algorithm.
 	// Returns an error if the signature was created with HMAC; use [Verifier.VerifyHMAC] instead.
-	Verify(key crypto.PublicKey, opts *VerifyOptions) error
-	// VerifyHMAC checks an HMAC signature against secret.
+	Verify(key VerificationKey, opts *CavageVerificationOptions) error
+	// VerifyHMAC checks an HMAC signature against a trusted secret and algorithm.
 	// Returns an error if the signature was created with an asymmetric algorithm; use [Verifier.Verify] instead.
-	VerifyHMAC(secret []byte, opts *VerifyOptions) error
+	VerifyHMAC(key HMACVerificationKey, opts *CavageVerificationOptions) error
 }
 
 // NewRequestVerifier creates a [Verifier] for req.

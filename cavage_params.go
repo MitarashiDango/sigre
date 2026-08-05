@@ -26,12 +26,13 @@ const defaultExpirySeconds int64 = 60
 
 // cavageParams holds the parsed fields of a Cavage HTTP Signature header.
 type cavageParams struct {
-	KeyId     string
-	Signature string
-	Algorithm string
-	Created   string // Unix timestamp as decimal string
-	Expires   string // Unix timestamp as decimal string
-	Headers   []string
+	KeyId          string
+	Signature      string
+	Algorithm      string
+	Created        string // Unix timestamp as decimal string
+	Expires        string // Unix timestamp as decimal string
+	Headers        []string
+	HeadersPresent bool
 }
 
 // serializeCavageParams serialises p into the Cavage signature-params wire format.
@@ -187,6 +188,7 @@ func parseCavageParams(input string) (*cavageParams, error) {
 			p.Expires = value
 		case "headers":
 			hasHeaders = true
+			p.HeadersPresent = true
 			for _, h := range strings.Split(value, " ") {
 				if h != "" {
 					p.Headers = append(p.Headers, strings.ToLower(h))

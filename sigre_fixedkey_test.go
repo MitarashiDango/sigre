@@ -201,6 +201,38 @@ func setStandardHeaders(t *testing.T, header http.Header, host string, includeDi
 	}
 }
 
+func fixedPublicVerificationKey(keyID string, algorithm sigre.AlgorithmID, publicKey crypto.PublicKey) sigre.VerificationKey {
+	return sigre.VerificationKey{
+		Metadata:  sigre.TrustedKeyMetadata{KeyID: keyID, Algorithm: algorithm},
+		PublicKey: publicKey,
+	}
+}
+
+func fixedHMACVerificationKey(keyID string, algorithm sigre.AlgorithmID, secret []byte) sigre.HMACVerificationKey {
+	return sigre.HMACVerificationKey{
+		Metadata: sigre.TrustedKeyMetadata{KeyID: keyID, Algorithm: algorithm},
+		Secret:   secret,
+	}
+}
+
+func fixedVerificationOptions(algorithm sigre.AlgorithmID, wireLabel string) *sigre.CavageVerificationOptions {
+	opts := &sigre.CavageVerificationOptions{}
+	switch wireLabel {
+	case "rsa-sha256", "ecdsa-sha256", "hmac-sha256":
+		opts.Compatibility = &sigre.CavageVerificationCompatibility{
+			AllowedLegacyAlgorithms: []sigre.AlgorithmID{algorithm},
+		}
+	case "hs2019", "":
+	case "rsa-sha512", "ecdsa-sha512", "hmac-sha512", "ed25519":
+		opts.Compatibility = &sigre.CavageVerificationCompatibility{
+			ExtensionAlgorithms: map[string]sigre.AlgorithmID{wireLabel: algorithm},
+		}
+	default:
+		panic("unsupported fixed test wire label: " + wireLabel)
+	}
+	return opts
+}
+
 func TestFixedKeySignAndVerify(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
@@ -240,7 +272,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-rsa")
-		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -259,7 +291,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-rsa-512")
-		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-rsa-512", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPub), fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA512, "rsa-sha512")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -278,7 +310,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-ecdsa")
-		if err := verifier.Verify(ecPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-ecdsa", sigre.AlgorithmECDSASHA256, ecPub), fixedVerificationOptions(sigre.AlgorithmECDSASHA256, "ecdsa-sha256")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -296,7 +328,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-ed25519")
-		if err := verifier.Verify(edPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, edPub), fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -315,7 +347,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-hmac")
-		if err := verifier.VerifyHMAC(hmacSecret, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.VerifyHMAC(fixedHMACVerificationKey("test-key-hmac", sigre.AlgorithmHMACSHA256, hmacSecret), fixedVerificationOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -334,7 +366,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-rsa")
-		if err := verifier.Verify(generateRSAKeys(t).public, &sigre.VerifyOptions{}); err == nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, generateRSAKeys(t).public), fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")); err == nil {
 			t.Error("verification succeeded with a different public key")
 		}
 	})
@@ -352,7 +384,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-ed25519")
-		if err := verifier.Verify(generateEd25519Keys(t).public, &sigre.VerifyOptions{}); err == nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, generateEd25519Keys(t).public), fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")); err == nil {
 			t.Error("verification succeeded with a different public key")
 		}
 	})
@@ -371,7 +403,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-hmac")
-		if err := verifier.VerifyHMAC([]byte("wrong-secret-key"), &sigre.VerifyOptions{}); err == nil {
+		if err := verifier.VerifyHMAC(fixedHMACVerificationKey("test-key-hmac", sigre.AlgorithmHMACSHA256, []byte("wrong-secret-key")), fixedVerificationOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256")); err == nil {
 			t.Error("verification succeeded with a different secret")
 		}
 	})
@@ -389,7 +421,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-ed25519")
-		if err := verifier.Verify(edPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, edPub), fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -408,7 +440,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		}
 
 		verifier := newVerifier(t, req, "test-key-rsa-auth")
-		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-rsa-auth", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -432,6 +464,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 		signature string
 		verifyBy  string
 		wantKeyId string
+		algorithm sigre.AlgorithmID
+		wireLabel string
 		wantErr   bool
 		wantErrIs error
 	}{
@@ -446,6 +480,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			signature: `keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
 			verifyBy:  "rsa",
 			wantKeyId: "test-key-rsa",
+			algorithm: sigre.AlgorithmRSAPKCS1v15SHA256,
+			wireLabel: "rsa-sha256",
 		},
 		{
 			name:      "RSA-SHA512: verify precomputed signature succeeds",
@@ -458,6 +494,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			signature: `keyId="test-key-rsa",signature="l36dg8IqFddjKdyQsdWZ4n2QzkSdpCnq9jmvVqsBFcQUW9+r19azLRCpUoV2p3DkvhN1+Ub4mwouipzczQRQcAtcs1x4ZaZKi7J6uYgCe8QpsV/4ixAmD80mDYttXHPCUr8IU1Wg/Iaq6emYsm/cHFH/O46NSO+7dnZDJ1uCAVSTOp5vrlOTKtwgbg6sU7SXEDhUQ+gXSdToa7wXzHkgEIJAMnU815Y0lxI4Djt20ncmWbDC73Mp1ePlalbH2N9Y+rSY3/j4Aos0vIvtSl30zYi2EWO8Uhto4BmzivPRmXKGTJNk8tWtfT99I/t/4UIPuVPaI4kiWcVT0wcamkVkEA==",algorithm="rsa-sha512",headers="date digest"`,
 			verifyBy:  "rsa",
 			wantKeyId: "test-key-rsa",
+			algorithm: sigre.AlgorithmRSAPKCS1v15SHA512,
+			wireLabel: "rsa-sha512",
 		},
 		{
 			name:      "Ed25519: verify precomputed signature succeeds",
@@ -468,6 +506,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			signature: `keyId="test-key-ed25519",signature="UMoMdVYlZBWj9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`,
 			verifyBy:  "ed25519",
 			wantKeyId: "test-key-ed25519",
+			algorithm: sigre.AlgorithmEd25519,
+			wireLabel: "ed25519",
 		},
 		{
 			name:      "HMAC-SHA256: verify precomputed signature succeeds",
@@ -478,6 +518,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			signature: `keyId="test-key-hmac",signature="Su9pRLxbHq1uWcYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`,
 			verifyBy:  "hmac",
 			wantKeyId: "test-key-hmac",
+			algorithm: sigre.AlgorithmHMACSHA256,
+			wireLabel: "hmac-sha256",
 		},
 		{
 			name:      "RSA-SHA256: verification fails with tampered signature value",
@@ -490,6 +532,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			signature: `keyId="test-key-rsa",signature="AOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
 			verifyBy:  "rsa",
 			wantKeyId: "test-key-rsa",
+			algorithm: sigre.AlgorithmRSAPKCS1v15SHA256,
+			wireLabel: "rsa-sha256",
 			wantErr:   true,
 		},
 		{
@@ -501,6 +545,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			signature: `keyId="test-key-ed25519",signature="AMoMdVYlZBWj9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`,
 			verifyBy:  "ed25519",
 			wantKeyId: "test-key-ed25519",
+			algorithm: sigre.AlgorithmEd25519,
+			wireLabel: "ed25519",
 			wantErr:   true,
 		},
 		{
@@ -512,6 +558,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			signature: `keyId="test-key-hmac",signature="Au9pRLxbHq1uWcYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`,
 			verifyBy:  "hmac",
 			wantKeyId: "test-key-hmac",
+			algorithm: sigre.AlgorithmHMACSHA256,
+			wireLabel: "hmac-sha256",
 			wantErr:   true,
 		},
 		{
@@ -525,6 +573,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 			signature: `keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
 			verifyBy:  "rsa",
 			wantKeyId: "test-key-rsa",
+			algorithm: sigre.AlgorithmRSAPKCS1v15SHA256,
+			wireLabel: "rsa-sha256",
 			wantErr:   true,
 			wantErrIs: sigre.ErrVerification,
 		},
@@ -552,11 +602,11 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 
 			switch tc.verifyBy {
 			case "rsa":
-				err = verifier.Verify(rsaPub, &sigre.VerifyOptions{})
+				err = verifier.Verify(fixedPublicVerificationKey(tc.wantKeyId, tc.algorithm, rsaPub), fixedVerificationOptions(tc.algorithm, tc.wireLabel))
 			case "ed25519":
-				err = verifier.Verify(edPub, &sigre.VerifyOptions{})
+				err = verifier.Verify(fixedPublicVerificationKey(tc.wantKeyId, tc.algorithm, edPub), fixedVerificationOptions(tc.algorithm, tc.wireLabel))
 			case "hmac":
-				err = verifier.VerifyHMAC([]byte(testHMACSecret), &sigre.VerifyOptions{})
+				err = verifier.VerifyHMAC(fixedHMACVerificationKey(tc.wantKeyId, tc.algorithm, []byte(testHMACSecret)), fixedVerificationOptions(tc.algorithm, tc.wireLabel))
 			default:
 				t.Fatalf("unknown verifyBy value: %q", tc.verifyBy)
 			}
@@ -675,7 +725,10 @@ func TestKeyTypeMismatch(t *testing.T) {
 			}
 			verifier.Now = nowFunc
 
-			err = verifier.Verify(tc.verifyKey, &sigre.VerifyOptions{})
+			err = verifier.Verify(
+				fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, tc.verifyKey),
+				fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256"),
+			)
 			if err == nil {
 				t.Error("verification succeeded with mismatched key type")
 			}
@@ -715,7 +768,7 @@ func TestFixedKeyWithGenericVerifier(t *testing.T) {
 		if verifier.KeyId() != "test-key-rsa" {
 			t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), "test-key-rsa")
 		}
-		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -740,7 +793,7 @@ func TestFixedKeyWithGenericVerifier(t *testing.T) {
 		if verifier.KeyId() != "test-key-ed" {
 			t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), "test-key-ed")
 		}
-		if err := verifier.Verify(edPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-ed", sigre.AlgorithmEd25519, edPub), fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -771,7 +824,7 @@ func TestFixedKeyWithGenericVerifier(t *testing.T) {
 		if verifier.KeyId() != "test-key-rsa-res" {
 			t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), "test-key-rsa-res")
 		}
-		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-rsa-res", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")); err != nil {
 			t.Errorf("response verification failed: %v", err)
 		}
 	})
@@ -831,7 +884,7 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		if verifier.KeyId() != "test-key-rsa-resp" {
 			t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), "test-key-rsa-resp")
 		}
-		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-rsa-resp", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")); err != nil {
 			t.Errorf("response signature verification failed: %v", err)
 		}
 	})
@@ -861,7 +914,7 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		}
 		verifier.Now = nowFunc
 
-		if err := verifier.Verify(rsaPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-rsa-resp", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPub), fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA512, "rsa-sha512")); err != nil {
 			t.Errorf("response signature verification failed: %v", err)
 		}
 	})
@@ -894,7 +947,7 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		if verifier.KeyId() != "test-key-hmac-resp" {
 			t.Errorf("KeyId() = %q, want %q", verifier.KeyId(), "test-key-hmac-resp")
 		}
-		if err := verifier.VerifyHMAC([]byte(testHMACSecret), &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.VerifyHMAC(fixedHMACVerificationKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)), fixedVerificationOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256")); err != nil {
 			t.Errorf("response HMAC verification failed: %v", err)
 		}
 	})
@@ -924,7 +977,7 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		}
 		verifier.Now = nowFunc
 
-		err = verifier.VerifyHMAC([]byte("wrong-secret"), &sigre.VerifyOptions{})
+		err = verifier.VerifyHMAC(fixedHMACVerificationKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte("wrong-secret")), fixedVerificationOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256"))
 		if !errors.Is(err, sigre.ErrVerification) {
 			t.Fatalf("expected ErrVerification, got: %v", err)
 		}
@@ -956,14 +1009,14 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		}
 		verifier.Now = nowFunc
 
-		err = verifier.VerifyHMAC([]byte(testHMACSecret), &sigre.VerifyOptions{})
+		err = verifier.VerifyHMAC(fixedHMACVerificationKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)), fixedVerificationOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256"))
 		if !errors.Is(err, sigre.ErrVerification) {
 			t.Fatalf("expected ErrVerification, got: %v", err)
 		}
 	})
 }
 
-func TestFixedKeyVerifyOptions(t *testing.T) {
+func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
 	edPriv := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
@@ -991,9 +1044,9 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = nowFunc
 
-		err = verifier.Verify(rsaPub, &sigre.VerifyOptions{
-			RequiredHeaders: []string{"date", "host", "digest"},
-		})
+		opts := fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")
+		opts.RequiredHeaders = []string{"date", "host", "digest"}
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), opts)
 		if err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
@@ -1019,9 +1072,9 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = nowFunc
 
-		err = verifier.Verify(rsaPub, &sigre.VerifyOptions{
-			RequiredHeaders: []string{"digest"},
-		})
+		opts := fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")
+		opts.RequiredHeaders = []string{"digest"}
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), opts)
 		if err == nil {
 			t.Error("verification succeeded despite missing required header")
 		}
@@ -1030,7 +1083,7 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 	})
 
-	t.Run("AllowedClockSkew: verification succeeds within (created) skew tolerance", func(t *testing.T) {
+	t.Run("MaxSignatureAge: verification succeeds at the age boundary", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", "")
 		setStandardHeaders(t, req.Header, "example.com", false)
 
@@ -1049,15 +1102,15 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = func() time.Time { return testFixedTime.Add(30 * time.Second) }
 
-		err = verifier.Verify(edPub, &sigre.VerifyOptions{
-			AllowedClockSkew: 1 * time.Minute,
-		})
+		opts := fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")
+		opts.MaxSignatureAge = 30 * time.Second
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, edPub), opts)
 		if err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
 
-	t.Run("AllowedClockSkew: verification fails when (created) exceeds skew tolerance", func(t *testing.T) {
+	t.Run("MaxSignatureAge: verification fails outside the age boundary", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", "")
 		setStandardHeaders(t, req.Header, "example.com", false)
 
@@ -1076,9 +1129,9 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = func() time.Time { return testFixedTime.Add(61 * time.Second) }
 
-		err = verifier.Verify(edPub, &sigre.VerifyOptions{
-			AllowedClockSkew: 1 * time.Minute,
-		})
+		opts := fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")
+		opts.MaxSignatureAge = time.Minute
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, edPub), opts)
 		if err == nil {
 			t.Error("verification succeeded despite clock skew exceeded")
 		}
@@ -1107,7 +1160,7 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = func() time.Time { return testFixedTime.Add(30 * time.Second) }
 
-		if err := verifier.Verify(edPub, &sigre.VerifyOptions{}); err != nil {
+		if err := verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, edPub), fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -1132,7 +1185,7 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = func() time.Time { return testFixedTime.Add(61 * time.Second) }
 
-		err = verifier.Verify(edPub, &sigre.VerifyOptions{})
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, edPub), fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519"))
 		if !errors.Is(err, sigre.ErrSignatureExpired) {
 			t.Fatalf("expected ErrSignatureExpired, got: %v", err)
 		}
@@ -1158,9 +1211,9 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = func() time.Time { return testFixedTime.Add(61 * time.Second) }
 
-		err = verifier.Verify(edPub, &sigre.VerifyOptions{
-			AllowedClockSkew: 2 * time.Minute,
-		})
+		opts := fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")
+		opts.Compatibility.AllowedExpiredSkew = 2 * time.Second
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, edPub), opts)
 		if err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
@@ -1177,13 +1230,13 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = nowFunc
 
-		err = verifier.Verify(edPub, &sigre.VerifyOptions{})
-		if err == nil || !strings.Contains(err.Error(), "'expires' parameter is missing") {
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-ed25519", sigre.AlgorithmEd25519, edPub), fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519"))
+		if !errors.Is(err, sigre.ErrSignatureExpired) {
 			t.Fatalf("expected missing expires parameter error, got: %v", err)
 		}
 	})
 
-	t.Run("AllowedHashAlgorithms: verification succeeds with permitted hash", func(t *testing.T) {
+	t.Run("AllowedAlgorithms: verification succeeds with permitted algorithm", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", testBodyJSON)
 		setStandardHeaders(t, req.Header, "example.com", true)
 
@@ -1203,15 +1256,15 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = nowFunc
 
-		err = verifier.Verify(rsaPub, &sigre.VerifyOptions{
-			AllowedHashAlgorithms: []crypto.Hash{crypto.SHA256, crypto.SHA512},
-		})
+		opts := fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")
+		opts.AllowedAlgorithms = []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256, sigre.AlgorithmRSAPKCS1v15SHA512}
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), opts)
 		if err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
 
-	t.Run("AllowedHashAlgorithms: verification fails with non-permitted hash", func(t *testing.T) {
+	t.Run("AllowedAlgorithms: verification fails with non-permitted algorithm", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", testBodyJSON)
 		setStandardHeaders(t, req.Header, "example.com", true)
 
@@ -1231,13 +1284,13 @@ func TestFixedKeyVerifyOptions(t *testing.T) {
 		}
 		verifier.Now = nowFunc
 
-		err = verifier.Verify(rsaPub, &sigre.VerifyOptions{
-			AllowedHashAlgorithms: []crypto.Hash{crypto.SHA512},
-		})
+		opts := fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")
+		opts.AllowedAlgorithms = []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512}
+		err = verifier.Verify(fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub), opts)
 		if err == nil {
 			t.Error("verification succeeded with non-permitted hash algorithm")
 		}
-		if !errors.Is(err, sigre.ErrUnsupportedHashAlgorithm) {
+		if !errors.Is(err, sigre.ErrInvalidSignatureAlgorithm) {
 			t.Errorf("unexpected error type: %v", err)
 		}
 	})

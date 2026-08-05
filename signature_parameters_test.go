@@ -19,24 +19,26 @@ func TestParseCavageParams(t *testing.T) {
 			name:  "all parameters",
 			input: `keyId="test-key-1",algorithm="rsa-sha256",created=1618952679,expires=1618952739,headers="(created) (expires) host date digest",signature="c2ln"`,
 			expected: &sigre.ExportForTesting_cavageParams{
-				KeyId:     "test-key-1",
-				Algorithm: "rsa-sha256",
-				Created:   "1618952679",
-				Expires:   "1618952739",
-				Headers:   []string{"(created)", "(expires)", "host", "date", "digest"},
-				Signature: "c2ln",
+				KeyId:          "test-key-1",
+				Algorithm:      "rsa-sha256",
+				Created:        "1618952679",
+				Expires:        "1618952739",
+				Headers:        []string{"(created)", "(expires)", "host", "date", "digest"},
+				Signature:      "c2ln",
+				HeadersPresent: true,
 			},
 		},
 		{
 			name:  "case insensitive names token values and whitespace",
 			input: "\tKEYID \t= token-key \t, ALGORITHM=hs2019, CREATED = 1618952679 , EXPIRES\t=\t1618952739, HEADERS = \"Host Date\" , SIGNATURE = c2ln\t",
 			expected: &sigre.ExportForTesting_cavageParams{
-				KeyId:     "token-key",
-				Algorithm: "hs2019",
-				Created:   "1618952679",
-				Expires:   "1618952739",
-				Headers:   []string{"host", "date"},
-				Signature: "c2ln",
+				KeyId:          "token-key",
+				Algorithm:      "hs2019",
+				Created:        "1618952679",
+				Expires:        "1618952739",
+				Headers:        []string{"host", "date"},
+				Signature:      "c2ln",
+				HeadersPresent: true,
 			},
 		},
 		{
@@ -51,9 +53,10 @@ func TestParseCavageParams(t *testing.T) {
 			name:  "different parameter order",
 			input: `signature=c2ln,headers=date,keyId=key-4`,
 			expected: &sigre.ExportForTesting_cavageParams{
-				KeyId:     "key-4",
-				Headers:   []string{"date"},
-				Signature: "c2ln",
+				KeyId:          "key-4",
+				Headers:        []string{"date"},
+				Signature:      "c2ln",
+				HeadersPresent: true,
 			},
 		},
 		{
@@ -187,12 +190,13 @@ func TestParseCavageParamsRejectsDuplicateKnownParameters(t *testing.T) {
 
 func TestSerializeCavageParamsRoundTrip(t *testing.T) {
 	want := &sigre.ExportForTesting_cavageParams{
-		KeyId:     "key\"quote\\slash",
-		Signature: "c2ln",
-		Algorithm: "hs2019",
-		Created:   "1618952679",
-		Expires:   "1618952739",
-		Headers:   []string{"(created)", "(expires)", "host", "date"},
+		KeyId:          "key\"quote\\slash",
+		Signature:      "c2ln",
+		Algorithm:      "hs2019",
+		Created:        "1618952679",
+		Expires:        "1618952739",
+		Headers:        []string{"(created)", "(expires)", "host", "date"},
+		HeadersPresent: true,
 	}
 
 	wire, err := sigre.ExportForTesting_serializeCavageParams(want)

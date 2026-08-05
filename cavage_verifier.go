@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -148,17 +147,17 @@ func (v *CavageVerifier) VerifyHMAC(key HMACVerificationKey, opts *CavageVerific
 	return wrapSigreError(verifyHMAC(key.Secret, signature, message, algorithm.hash))
 }
 
-func (v *CavageVerifier) validateMetadata(metadata TrustedKeyMetadata) (verificationAlgorithm, error) {
+func (v *CavageVerifier) validateMetadata(metadata TrustedKeyMetadata) (algorithmDefinition, error) {
 	if v.params == nil {
-		return verificationAlgorithm{}, fmt.Errorf("signature parameters not available for verification")
+		return algorithmDefinition{}, fmt.Errorf("signature parameters not available for verification")
 	}
 	if metadata.KeyID == "" {
-		return verificationAlgorithm{}, fmt.Errorf("%w: KeyID is empty", ErrInvalidKeyMetadata)
+		return algorithmDefinition{}, fmt.Errorf("%w: KeyID is empty", ErrInvalidKeyMetadata)
 	}
 	if v.params.KeyId != metadata.KeyID {
-		return verificationAlgorithm{}, fmt.Errorf("%w: received %q, trusted %q", ErrKeyIDMismatch, v.params.KeyId, metadata.KeyID)
+		return algorithmDefinition{}, fmt.Errorf("%w: received %q, trusted %q", ErrKeyIDMismatch, v.params.KeyId, metadata.KeyID)
 	}
-	return verificationAlgorithmFor(metadata.Algorithm)
+	return algorithmDefinitionFor(metadata.Algorithm)
 }
 
 func validatePublicKey(key crypto.PublicKey, expected algorithmKeyKind) error {
@@ -216,7 +215,7 @@ func validateCavageVerificationOptions(opts *CavageVerificationOptions) (CavageV
 		return CavageVerificationOptions{}, fmt.Errorf("%w: MaxDateAge must not be negative", ErrInvalidVerificationOptions)
 	}
 	for _, id := range options.AllowedAlgorithms {
-		if _, err := verificationAlgorithmFor(id); err != nil {
+		if _, err := algorithmDefinitionFor(id); err != nil {
 			return CavageVerificationOptions{}, fmt.Errorf("%w: AllowedAlgorithms contains AlgorithmID %d", ErrInvalidVerificationOptions, id)
 		}
 	}
@@ -243,7 +242,7 @@ func validateCavageVerificationOptions(opts *CavageVerificationOptions) (CavageV
 		if isReservedCavageAlgorithmLabel(label) {
 			return CavageVerificationOptions{}, fmt.Errorf("%w: ExtensionAlgorithms must not override known label %q", ErrInvalidVerificationOptions, label)
 		}
-		if _, err := verificationAlgorithmFor(id); err != nil {
+		if _, err := algorithmDefinitionFor(id); err != nil {
 			return CavageVerificationOptions{}, fmt.Errorf("%w: extension label %q maps to unsupported AlgorithmID %d", ErrInvalidVerificationOptions, label, id)
 		}
 	}
@@ -348,41 +347,6 @@ func (v *CavageVerifier) validateWireAlgorithm(id AlgorithmID, opts CavageVerifi
 	return nil
 }
 
-func isReservedCavageAlgorithmLabel(label string) bool {
-	switch label {
-	case hs2019, "rsa-sha1", "rsa-sha256", "ecdsa-sha256", "hmac-sha256":
-		return true
-	default:
-		return false
-	}
-}
-
-func legacyAlgorithmID(label string) (AlgorithmID, bool) {
-	switch label {
-	case "rsa-sha256":
-		return AlgorithmRSAPKCS1v15SHA256, true
-	case "ecdsa-sha256":
-		return AlgorithmECDSASHA256, true
-	case "hmac-sha256":
-		return AlgorithmHMACSHA256, true
-	default:
-		return 0, false
-	}
-}
-
-func legacyAlgorithmFamily(label string) string {
-	switch {
-	case strings.HasPrefix(label, "rsa"):
-		return "rsa"
-	case strings.HasPrefix(label, "hmac"):
-		return "hmac"
-	case strings.HasPrefix(label, "ecdsa"):
-		return "ecdsa"
-	default:
-		return ""
-	}
-}
-
 func (v *CavageVerifier) effectiveHeaders() []string {
 	if len(v.params.Headers) == 0 {
 		return []string{Created}
@@ -485,7 +449,7 @@ func (v *CavageVerifier) buildVerificationString(headers []string) ([]byte, erro
 	return buf.Bytes(), nil
 }
 
-func verifyAsymmetric(key crypto.PublicKey, algorithm verificationAlgorithm, sig, data []byte) error {
+func verifyAsymmetric(key crypto.PublicKey, algorithm algorithmDefinition, sig, data []byte) error {
 	switch algorithm.keyKind {
 	case algorithmKeyRSA:
 		return verifyRSA(key.(*rsa.PublicKey), sig, data, algorithm.hash)

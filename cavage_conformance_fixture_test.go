@@ -25,27 +25,28 @@ type cavageConformanceFixtureFile struct {
 }
 
 type cavageConformanceFixture struct {
-	ID                     string                   `json:"id"`
-	Description            string                   `json:"description"`
-	Source                 string                   `json:"source"`
-	Specification          []string                 `json:"specification"`
-	Generation             string                   `json:"generation"`
-	IndependentValidation  string                   `json:"independent_validation"`
-	Message                cavageFixtureHTTPMessage `json:"message"`
-	SignedHeaders          []string                 `json:"signed_headers"`
-	ExpectedSigningString  string                   `json:"expected_signing_string"`
-	SignatureHeader        string                   `json:"signature_header"`
-	SignatureHeaderValue   string                   `json:"signature_header_value"`
-	KeyID                  string                   `json:"key_id"`
-	WireAlgorithm          string                   `json:"algorithm"`
-	CryptoPath             string                   `json:"crypto_path"`
-	Hash                   string                   `json:"hash"`
-	Created                string                   `json:"created"`
-	SignatureBase64        string                   `json:"signature_base64"`
-	VerificationKeyFile    string                   `json:"verification_key_file"`
-	SigningKeyFile         string                   `json:"signing_key_file"`
-	HMACSecretFile         string                   `json:"hmac_secret_file"`
-	VerificationTimeString string                   `json:"verification_time"`
+	ID                      string                   `json:"id"`
+	Description             string                   `json:"description"`
+	Source                  string                   `json:"source"`
+	Specification           []string                 `json:"specification"`
+	Generation              string                   `json:"generation"`
+	IndependentValidation   string                   `json:"independent_validation"`
+	Message                 cavageFixtureHTTPMessage `json:"message"`
+	SignedHeaders           []string                 `json:"signed_headers"`
+	ExpectedSigningString   string                   `json:"expected_signing_string"`
+	SignatureHeader         string                   `json:"signature_header"`
+	SignatureHeaderValue    string                   `json:"signature_header_value"`
+	KeyID                   string                   `json:"key_id"`
+	WireAlgorithm           string                   `json:"algorithm"`
+	CryptoPath              string                   `json:"crypto_path"`
+	Hash                    string                   `json:"hash"`
+	Created                 string                   `json:"created"`
+	SignatureBase64         string                   `json:"signature_base64"`
+	VerificationKeyFile     string                   `json:"verification_key_file"`
+	SigningKeyFile          string                   `json:"signing_key_file"`
+	HMACSecretFile          string                   `json:"hmac_secret_file"`
+	VerificationTimeString  string                   `json:"verification_time"`
+	ZeroValueSigningOptions bool                     `json:"zero_value_signing_options"`
 }
 
 type cavageFixtureHTTPMessage struct {
@@ -142,19 +143,6 @@ func (f cavageConformanceFixture) verificationTime(t *testing.T) time.Time {
 		t.Fatalf("fixture %q has invalid verification_time: %v", f.ID, err)
 	}
 	return tm
-}
-
-func (f cavageConformanceFixture) cryptoHash(t *testing.T) crypto.Hash {
-	t.Helper()
-	switch f.Hash {
-	case "":
-		return 0
-	case "sha512":
-		return crypto.SHA512
-	default:
-		t.Fatalf("fixture %q has unsupported hash %q", f.ID, f.Hash)
-		return 0
-	}
 }
 
 func (f cavageConformanceFixture) algorithmID(t *testing.T) sigre.AlgorithmID {

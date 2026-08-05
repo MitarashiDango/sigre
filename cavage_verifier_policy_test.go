@@ -53,15 +53,16 @@ func signVerifierPolicyRSA(t *testing.T, hash crypto.Hash, useHS2019 bool, heade
 	privateKey := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	req := newVerifierPolicyRequest(t)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return now }}
-	err := signer.SignRequest(req, privateKey, verifierPolicyKeyID, &sigre.CavageSignOptions{
-		Headers:         headers,
-		HashAlgorithm:   hash,
-		UseHS2019:       useHS2019,
-		SignatureHeader: sigre.Signature,
-	})
+	algorithm := verifierPolicyAlgorithmID(t, "rsa", hash)
+	compatibility, rewriteLabel := verifierPolicySigningCompatibility(t, algorithm, useHS2019, headers)
+	err := signer.SignRequest(req, sigre.SigningKey{
+		Metadata:   sigre.TrustedKeyMetadata{KeyID: verifierPolicyKeyID, Algorithm: algorithm},
+		PrivateKey: privateKey,
+	}, sigre.CavageSignaturePlacementSignature, &sigre.CavageSigningOptions{Compatibility: compatibility})
 	if err != nil {
 		t.Fatalf("RSA signing failed: %v", err)
 	}
+	rewriteVerifierPolicyAlgorithm(req, rewriteLabel)
 	return req, &privateKey.PublicKey
 }
 
@@ -70,15 +71,16 @@ func signVerifierPolicyECDSA(t *testing.T, hash crypto.Hash, useHS2019 bool, hea
 	privateKey := parseECDSAPrivateKey(t, testECDSAPrivateKeyPEM)
 	req := newVerifierPolicyRequest(t)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return now }}
-	err := signer.SignRequest(req, privateKey, verifierPolicyKeyID, &sigre.CavageSignOptions{
-		Headers:         headers,
-		HashAlgorithm:   hash,
-		UseHS2019:       useHS2019,
-		SignatureHeader: sigre.Signature,
-	})
+	algorithm := verifierPolicyAlgorithmID(t, "ecdsa", hash)
+	compatibility, rewriteLabel := verifierPolicySigningCompatibility(t, algorithm, useHS2019, headers)
+	err := signer.SignRequest(req, sigre.SigningKey{
+		Metadata:   sigre.TrustedKeyMetadata{KeyID: verifierPolicyKeyID, Algorithm: algorithm},
+		PrivateKey: privateKey,
+	}, sigre.CavageSignaturePlacementSignature, &sigre.CavageSigningOptions{Compatibility: compatibility})
 	if err != nil {
 		t.Fatalf("ECDSA signing failed: %v", err)
 	}
+	rewriteVerifierPolicyAlgorithm(req, rewriteLabel)
 	return req, &privateKey.PublicKey
 }
 
@@ -87,15 +89,18 @@ func signVerifierPolicyEd25519(t *testing.T, useHS2019 bool, headers []string, n
 	privateKey := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
 	req := newVerifierPolicyRequest(t)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return now }}
-	err := signer.SignRequest(req, privateKey, verifierPolicyKeyID, &sigre.CavageSignOptions{
-		Headers:         headers,
-		Expiry:          expiry,
-		UseHS2019:       useHS2019,
-		SignatureHeader: sigre.Signature,
+	compatibility, rewriteLabel := verifierPolicySigningCompatibility(t, sigre.AlgorithmEd25519, useHS2019, headers)
+	err := signer.SignRequest(req, sigre.SigningKey{
+		Metadata:   sigre.TrustedKeyMetadata{KeyID: verifierPolicyKeyID, Algorithm: sigre.AlgorithmEd25519},
+		PrivateKey: privateKey,
+	}, sigre.CavageSignaturePlacementSignature, &sigre.CavageSigningOptions{
+		ExpiresAfter:  time.Duration(expiry) * time.Second,
+		Compatibility: compatibility,
 	})
 	if err != nil {
 		t.Fatalf("Ed25519 signing failed: %v", err)
 	}
+	rewriteVerifierPolicyAlgorithm(req, rewriteLabel)
 	return req, privateKey.Public().(ed25519.PublicKey)
 }
 
@@ -104,16 +109,100 @@ func signVerifierPolicyHMAC(t *testing.T, hash crypto.Hash, useHS2019 bool, head
 	secret := []byte(testHMACSecret)
 	req := newVerifierPolicyRequest(t)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return now }}
-	err := signer.SignRequestWithHMAC(req, secret, verifierPolicyKeyID, &sigre.CavageSignOptions{
-		Headers:         headers,
-		HashAlgorithm:   hash,
-		UseHS2019:       useHS2019,
-		SignatureHeader: sigre.Signature,
-	})
+	algorithm := verifierPolicyAlgorithmID(t, "hmac", hash)
+	compatibility, rewriteLabel := verifierPolicySigningCompatibility(t, algorithm, useHS2019, headers)
+	err := signer.SignRequestWithHMAC(req, sigre.HMACSigningKey{
+		Metadata: sigre.TrustedKeyMetadata{KeyID: verifierPolicyKeyID, Algorithm: algorithm},
+		Secret:   secret,
+	}, sigre.CavageSignaturePlacementSignature, &sigre.CavageSigningOptions{Compatibility: compatibility})
 	if err != nil {
 		t.Fatalf("HMAC signing failed: %v", err)
 	}
+	rewriteVerifierPolicyAlgorithm(req, rewriteLabel)
 	return req, secret
+}
+
+func verifierPolicyAlgorithmID(t *testing.T, keyKind string, hash crypto.Hash) sigre.AlgorithmID {
+	t.Helper()
+	switch keyKind + "/" + hash.String() {
+	case "rsa/SHA-256":
+		return sigre.AlgorithmRSAPKCS1v15SHA256
+	case "rsa/SHA-512":
+		return sigre.AlgorithmRSAPKCS1v15SHA512
+	case "ecdsa/SHA-256":
+		return sigre.AlgorithmECDSASHA256
+	case "ecdsa/SHA-512":
+		return sigre.AlgorithmECDSASHA512
+	case "hmac/SHA-256":
+		return sigre.AlgorithmHMACSHA256
+	case "hmac/SHA-512":
+		return sigre.AlgorithmHMACSHA512
+	default:
+		t.Fatalf("unsupported verifier policy algorithm %s/%v", keyKind, hash)
+		return 0
+	}
+}
+
+func verifierPolicySigningCompatibility(
+	t *testing.T,
+	algorithm sigre.AlgorithmID,
+	useHS2019 bool,
+	headers []string,
+) (*sigre.CavageSigningCompatibility, string) {
+	t.Helper()
+	compatibility := &sigre.CavageSigningCompatibility{ExactHeaders: headers}
+	if useHS2019 {
+		switch algorithm {
+		case sigre.AlgorithmRSAPKCS1v15SHA512, sigre.AlgorithmECDSASHA512, sigre.AlgorithmEd25519, sigre.AlgorithmHMACSHA512:
+			return compatibility, ""
+		case sigre.AlgorithmRSAPKCS1v15SHA256:
+			compatibility.AlgorithmField = sigre.AlgorithmFieldHS2019WithSHA256
+			return compatibility, ""
+		case sigre.AlgorithmECDSASHA256, sigre.AlgorithmHMACSHA256:
+			compatibility.Extension = &sigre.ExtensionAlgorithm{Label: "policy-invalid-hs2019", Algorithm: algorithm}
+			return compatibility, "hs2019"
+		}
+	}
+
+	switch algorithm {
+	case sigre.AlgorithmRSAPKCS1v15SHA256:
+		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: "policy-rsa-sha256", Algorithm: algorithm}
+		return compatibility, "rsa-sha256"
+	case sigre.AlgorithmECDSASHA256:
+		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: "policy-ecdsa-sha256", Algorithm: algorithm}
+		return compatibility, "ecdsa-sha256"
+	case sigre.AlgorithmHMACSHA256:
+		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: "policy-hmac-sha256", Algorithm: algorithm}
+		return compatibility, "hmac-sha256"
+	case sigre.AlgorithmRSAPKCS1v15SHA512:
+		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: "rsa-sha512", Algorithm: algorithm}
+	case sigre.AlgorithmECDSASHA512:
+		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: "ecdsa-sha512", Algorithm: algorithm}
+	case sigre.AlgorithmEd25519:
+		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: "ed25519", Algorithm: algorithm}
+	case sigre.AlgorithmHMACSHA512:
+		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: "hmac-sha512", Algorithm: algorithm}
+	default:
+		t.Fatalf("unsupported verifier policy AlgorithmID %d", algorithm)
+	}
+	return compatibility, ""
+}
+
+func rewriteVerifierPolicyAlgorithm(req *http.Request, label string) {
+	if label == "" {
+		return
+	}
+	value := req.Header.Get(sigre.Signature)
+	start := strings.Index(value, `algorithm="`)
+	if start < 0 {
+		panic("verifier policy signature is missing algorithm")
+	}
+	start += len(`algorithm="`)
+	end := strings.IndexByte(value[start:], '"')
+	if end < 0 {
+		panic("verifier policy algorithm is unterminated")
+	}
+	req.Header.Set(sigre.Signature, value[:start]+label+value[start+end:])
 }
 
 func removeQuotedPolicyParameter(t *testing.T, value, name string) string {

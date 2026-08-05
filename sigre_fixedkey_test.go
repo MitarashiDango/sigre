@@ -233,6 +233,47 @@ func fixedVerificationOptions(algorithm sigre.AlgorithmID, wireLabel string) *si
 	return opts
 }
 
+func fixedSigningKey(keyID string, algorithm sigre.AlgorithmID, privateKey crypto.PrivateKey) sigre.SigningKey {
+	return sigre.SigningKey{
+		Metadata:   sigre.TrustedKeyMetadata{KeyID: keyID, Algorithm: algorithm},
+		PrivateKey: privateKey,
+	}
+}
+
+func fixedHMACSigningKey(keyID string, algorithm sigre.AlgorithmID, secret []byte) sigre.HMACSigningKey {
+	return sigre.HMACSigningKey{
+		Metadata: sigre.TrustedKeyMetadata{KeyID: keyID, Algorithm: algorithm},
+		Secret:   secret,
+	}
+}
+
+func fixedSigningOptions(
+	algorithm sigre.AlgorithmID,
+	wireLabel string,
+	headers []string,
+	expiresAfter time.Duration,
+) *sigre.CavageSigningOptions {
+	compatibility := &sigre.CavageSigningCompatibility{ExactHeaders: headers}
+	switch wireLabel {
+	case "hs2019":
+		if algorithm == sigre.AlgorithmRSAPKCS1v15SHA256 {
+			compatibility.AlgorithmField = sigre.AlgorithmFieldHS2019WithSHA256
+		}
+	case "":
+		compatibility.AlgorithmField = sigre.AlgorithmFieldOmitted
+	case "rsa-sha256", "ecdsa-sha256", "hmac-sha256":
+		compatibility.AlgorithmField = sigre.AlgorithmFieldLegacy
+	case "rsa-sha512", "ecdsa-sha512", "hmac-sha512", "ed25519":
+		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: wireLabel, Algorithm: algorithm}
+	default:
+		panic("unsupported fixed signing wire label: " + wireLabel)
+	}
+	return &sigre.CavageSigningOptions{
+		ExpiresAfter:  expiresAfter,
+		Compatibility: compatibility,
+	}
+}
+
 func TestFixedKeySignAndVerify(t *testing.T) {
 	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
@@ -262,11 +303,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
 		setStandardHeaders(t, req.Header, "example.com", true)
 
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -281,11 +323,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "PUT", "https://example.com/update", testBodyJSON)
 		setStandardHeaders(t, req.Header, "example.com", true)
 
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa-512", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA512,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa-512", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA512, "rsa-sha512", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -300,11 +343,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/ecdsa", testBodyJSON)
 		setStandardHeaders(t, req.Header, "example.com", true)
 
-		err := signer.SignRequest(req, ecPriv, "test-key-ecdsa", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ecdsa", sigre.AlgorithmECDSASHA256, ecPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmECDSASHA256, "ecdsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -319,10 +363,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "GET", "https://example.com/", "")
 		setStandardHeaders(t, req.Header, "example.com", false)
 
-		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date"},
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "host", "date"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -337,11 +383,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
 		setStandardHeaders(t, req.Header, "example.com", false)
 
-		err := signer.SignRequestWithHMAC(req, hmacSecret, "test-key-hmac", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "date"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequestWithHMAC(
+			req,
+			fixedHMACSigningKey("test-key-hmac", sigre.AlgorithmHMACSHA256, hmacSecret),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{"(request-target)", "date"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -356,11 +403,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/foo", testBodyJSON)
 		setStandardHeaders(t, req.Header, "example.com", true)
 
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -375,10 +423,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "GET", "https://example.com/", "")
 		setStandardHeaders(t, req.Header, "example.com", false)
 
-		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date"},
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "host", "date"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -393,11 +443,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
 		setStandardHeaders(t, req.Header, "example.com", false)
 
-		err := signer.SignRequestWithHMAC(req, hmacSecret, "test-key-hmac", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "date"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequestWithHMAC(
+			req,
+			fixedHMACSigningKey("test-key-hmac", sigre.AlgorithmHMACSHA256, hmacSecret),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{"(request-target)", "date"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -412,10 +463,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/api/data", "")
 		setStandardHeaders(t, req.Header, "example.com", false)
 
-		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "(created)", "host"},
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "(created)", "host"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -430,11 +483,12 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/auth", testBodyJSON)
 		setStandardHeaders(t, req.Header, "example.com", true)
 
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa-auth", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Authorization,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa-auth", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementAuthorization,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -640,11 +694,12 @@ func TestDeterministicSignatures(t *testing.T) {
 			setStandardHeaders(t, req.Header, "example.com", true)
 
 			signer := &sigre.CavageSigner{Now: nowFunc}
-			err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-				Headers:         []string{"(request-target)", "host", "date", "digest"},
-				HashAlgorithm:   crypto.SHA256,
-				SignatureHeader: sigre.Signature,
-			})
+			err := signer.SignRequest(
+				req,
+				fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+				sigre.CavageSignaturePlacementSignature,
+				fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+			)
 			if err != nil {
 				t.Fatalf("signing failed (attempt %d): %v", i, err)
 			}
@@ -665,10 +720,12 @@ func TestDeterministicSignatures(t *testing.T) {
 			setStandardHeaders(t, req.Header, "example.com", false)
 
 			signer := &sigre.CavageSigner{Now: nowFunc}
-			err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-				Headers:         []string{"(request-target)", "host", "date"},
-				SignatureHeader: sigre.Signature,
-			})
+			err := signer.SignRequest(
+				req,
+				fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+				sigre.CavageSignaturePlacementSignature,
+				fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "host", "date"}, 0),
+			)
 			if err != nil {
 				t.Fatalf("signing failed (attempt %d): %v", i, err)
 			}
@@ -710,11 +767,12 @@ func TestKeyTypeMismatch(t *testing.T) {
 			setStandardHeaders(t, req.Header, "example.com", true)
 
 			signer := &sigre.CavageSigner{Now: nowFunc}
-			err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-				Headers:         []string{"(request-target)", "host", "date", "digest"},
-				HashAlgorithm:   crypto.SHA256,
-				SignatureHeader: sigre.Signature,
-			})
+			err := signer.SignRequest(
+				req,
+				fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+				sigre.CavageSignaturePlacementSignature,
+				fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+			)
 			if err != nil {
 				t.Fatalf("signing failed: %v", err)
 			}
@@ -752,11 +810,12 @@ func TestFixedKeyWithGenericVerifier(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -778,10 +837,12 @@ func TestFixedKeyWithGenericVerifier(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, edPriv, "test-key-ed", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date"},
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "host", "date"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -808,11 +869,12 @@ func TestFixedKeyWithGenericVerifier(t *testing.T) {
 		res.Header.Set("Digest", testBodyDigest)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignResponse(res, rsaPriv, "test-key-rsa-res", &sigre.CavageSignOptions{
-			Headers:         []string{"date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignResponse(
+			res,
+			fixedSigningKey("test-key-rsa-res", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("response signing failed: %v", err)
 		}
@@ -866,11 +928,12 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		res.Header.Set("Digest", testBodyDigest)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignResponse(res, rsaPriv, "test-key-rsa-resp", &sigre.CavageSignOptions{
-			Headers:         []string{"date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignResponse(
+			res,
+			fixedSigningKey("test-key-rsa-resp", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("response signing failed: %v", err)
 		}
@@ -899,11 +962,12 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		res.Header.Set("Digest", testBodyDigest)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignResponse(res, rsaPriv, "test-key-rsa-resp", &sigre.CavageSignOptions{
-			Headers:         []string{"date", "digest"},
-			HashAlgorithm:   crypto.SHA512,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignResponse(
+			res,
+			fixedSigningKey("test-key-rsa-resp", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA512, "rsa-sha512", []string{"date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("response signing failed: %v", err)
 		}
@@ -929,11 +993,12 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		res.Header.Set("Digest", testBodyDigest)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignResponseWithHMAC(res, []byte(testHMACSecret), "test-key-hmac-resp", &sigre.CavageSignOptions{
-			Headers:         []string{"date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignResponseWithHMAC(
+			res,
+			fixedHMACSigningKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{"date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("response HMAC signing failed: %v", err)
 		}
@@ -962,11 +1027,12 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		res.Header.Set("Digest", testBodyDigest)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignResponseWithHMAC(res, []byte(testHMACSecret), "test-key-hmac-resp", &sigre.CavageSignOptions{
-			Headers:         []string{"date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignResponseWithHMAC(
+			res,
+			fixedHMACSigningKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{"date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("response HMAC signing failed: %v", err)
 		}
@@ -993,11 +1059,12 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		res.Header.Set("Digest", testBodyDigest)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignResponseWithHMAC(res, []byte(testHMACSecret), "test-key-hmac-resp", &sigre.CavageSignOptions{
-			Headers:         []string{"date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignResponseWithHMAC(
+			res,
+			fixedHMACSigningKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{"date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("response HMAC signing failed: %v", err)
 		}
@@ -1029,11 +1096,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -1057,11 +1125,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -1088,10 +1157,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "(created)", "host"},
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "(created)", "host"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -1115,10 +1186,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "(created)", "host"},
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "(created)", "host"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -1145,11 +1218,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "(created)", "(expires)", "host"},
-			Expiry:          60,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "(created)", "(expires)", "host"}, time.Minute),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -1170,11 +1244,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "(created)", "(expires)", "host"},
-			Expiry:          60,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "(created)", "(expires)", "host"}, time.Minute),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -1196,11 +1271,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, edPriv, "test-key-ed25519", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "(created)", "(expires)", "host"},
-			Expiry:          60,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-ed25519", sigre.AlgorithmEd25519, edPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmEd25519, "ed25519", []string{"(request-target)", "(created)", "(expires)", "host"}, time.Minute),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -1241,11 +1317,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -1269,11 +1346,12 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 		setStandardHeaders(t, req.Header, "example.com", true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
-		err := signer.SignRequest(req, rsaPriv, "test-key-rsa", &sigre.CavageSignOptions{
-			Headers:         []string{"(request-target)", "host", "date", "digest"},
-			HashAlgorithm:   crypto.SHA256,
-			SignatureHeader: sigre.Signature,
-		})
+		err := signer.SignRequest(
+			req,
+			fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
+			sigre.CavageSignaturePlacementSignature,
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}

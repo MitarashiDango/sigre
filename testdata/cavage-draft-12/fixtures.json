@@ -189,6 +189,81 @@
       "signature_base64": "VeQkfuHB1Qd5nV+FcoLqF+3W7oLtUdpXje1dlQNoerjOL2G1T5wwUiDuR2Waq/XdrgL0Zk0vLDDx0eVe6J6XOg==",
       "hmac_secret_file": "keys/hmac-secret.hex",
       "verification_time": "2026-08-04T04:00:00Z"
+    },
+    {
+      "id": "hmac-strict-zero-request",
+      "description": "Strict zero-value HMAC request fixture covering the required hs2019, (request-target), and (created) wire form.",
+      "source": "Locally constructed conformance vector; not copied from draft Appendix C.",
+      "specification": [
+        "draft-cavage-http-signatures-12 Section 2.1.3",
+        "draft-cavage-http-signatures-12 Section 2.1.4",
+        "draft-cavage-http-signatures-12 Section 2.1.6",
+        "draft-cavage-http-signatures-12 Section 2.3",
+        "draft-cavage-http-signatures-12 Section 2.4",
+        "draft-cavage-http-signatures-12 Appendix E.2"
+      ],
+      "generation": "README.md, Strict zero-value fixture generation section",
+      "independent_validation": "README.md, Strict zero-value fixture verification section",
+      "message": {
+        "type": "request",
+        "method": "POST",
+        "url": "https://strict.example/strict?x=1",
+        "request_target": "/strict?x=1",
+        "headers": [
+          {"name": "Date", "values": ["Tue, 04 Aug 2026 04:00:00 GMT"]},
+          {"name": "Digest", "values": ["SHA-256=not-signed-by-the-strict-default"]}
+        ],
+        "body": "strict request body"
+      },
+      "signed_headers": ["(request-target)", "(created)"],
+      "expected_signing_string": "(request-target): post /strict?x=1\n(created): 1785816000",
+      "signature_header": "Signature",
+      "signature_header_value": "keyId=\"strict-hmac-request\",signature=\"k0Ro+Ar0Otx5f6YjYjTG/B87F3Ct74GKPkIdLRb1X/IyW4cIkAzvmojP+APqvgiVtLjOC8I/ujxWIgMKsq5WmA==\",algorithm=\"hs2019\",created=1785816000,headers=\"(request-target) (created)\"",
+      "key_id": "strict-hmac-request",
+      "algorithm": "hs2019",
+      "crypto_path": "hmac",
+      "hash": "sha512",
+      "signature_base64": "k0Ro+Ar0Otx5f6YjYjTG/B87F3Ct74GKPkIdLRb1X/IyW4cIkAzvmojP+APqvgiVtLjOC8I/ujxWIgMKsq5WmA==",
+      "hmac_secret_file": "keys/hmac-secret.hex",
+      "verification_time": "2026-08-04T04:00:00Z",
+      "zero_value_signing_options": true
+    },
+    {
+      "id": "hmac-strict-zero-response",
+      "description": "Strict zero-value HMAC response fixture covering an omitted headers parameter and effective (created).",
+      "source": "Locally constructed conformance vector; not copied from draft Appendix C.",
+      "specification": [
+        "draft-cavage-http-signatures-12 Section 2.1.3",
+        "draft-cavage-http-signatures-12 Section 2.1.4",
+        "draft-cavage-http-signatures-12 Section 2.1.6",
+        "draft-cavage-http-signatures-12 Section 2.3",
+        "draft-cavage-http-signatures-12 Section 2.4",
+        "draft-cavage-http-signatures-12 Appendix E.2"
+      ],
+      "generation": "README.md, Strict zero-value fixture generation section",
+      "independent_validation": "README.md, Strict zero-value fixture verification section",
+      "message": {
+        "type": "response",
+        "status_code": 200,
+        "status": "200 OK",
+        "headers": [
+          {"name": "Date", "values": ["Tue, 04 Aug 2026 04:00:00 GMT"]},
+          {"name": "Digest", "values": ["SHA-256=not-signed-by-the-strict-default"]}
+        ],
+        "body": "strict response body"
+      },
+      "signed_headers": ["(created)"],
+      "expected_signing_string": "(created): 1785816000",
+      "signature_header": "Signature",
+      "signature_header_value": "keyId=\"strict-hmac-response\",signature=\"9lpz4UE0R3N0Nih2Ps4SIuAlu4DQXM3wy6DdFa5khCLD6tdtkScTzh3+UhRbOwVqu/MDL3vxNEBl/CzUFHFs2A==\",algorithm=\"hs2019\",created=1785816000",
+      "key_id": "strict-hmac-response",
+      "algorithm": "hs2019",
+      "crypto_path": "hmac",
+      "hash": "sha512",
+      "signature_base64": "9lpz4UE0R3N0Nih2Ps4SIuAlu4DQXM3wy6DdFa5khCLD6tdtkScTzh3+UhRbOwVqu/MDL3vxNEBl/CzUFHFs2A==",
+      "hmac_secret_file": "keys/hmac-secret.hex",
+      "verification_time": "2026-08-04T04:00:00Z",
+      "zero_value_signing_options": true
     }
   ]
 }

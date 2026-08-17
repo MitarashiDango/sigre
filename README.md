@@ -26,12 +26,19 @@ err := signer.SignRequest(
 
 ```go
 verifier, err := sigre.NewCavageVerifier(nil)
+if err != nil {
+	return err
+}
+req.RequestURI = req.URL.RequestURI() // テストでサーバー受信後の状態を再現する
 signature, err := verifier.ParseRequest(req)
+if err != nil {
+	return err
+}
 verificationKey, ok := trustedKeys[signature.KeyID()]
 if !ok {
-	return errors.New("keyIdを信頼済み鍵へ解決できません")
+	return errors.New("keyId could not be resolved to a trusted key")
 }
-err = verifier.Verify(signature, verificationKey)
+return verifier.Verify(signature, verificationKey)
 ```
 
 詳しい使い方については、[Cavage draft-12利用ガイド](./docs/cavage-draft-12.md)を参照してください。

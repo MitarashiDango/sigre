@@ -30,33 +30,63 @@ const (
 )
 
 // TrustedKeyMetadata binds an opaque wire keyId to one trusted algorithm.
-// KeyID is serialized or compared byte-for-byte without normalization.
+// The caller constructs this metadata from trusted configuration after resolving
+// a received keyId; a received algorithm parameter never constructs it.
 type TrustedKeyMetadata struct {
-	KeyID     string
+	// KeyID is serialized or compared byte-for-byte without normalization.
+	KeyID string
+	// Algorithm uniquely fixes the key kind, hash, and RSA padding where applicable.
 	Algorithm AlgorithmID
 }
 
 // VerificationKey contains trusted metadata and an asymmetric public key.
 type VerificationKey struct {
-	Metadata  TrustedKeyMetadata
+	// Metadata binds the received keyId to the only permitted verification algorithm.
+	Metadata TrustedKeyMetadata
+	// PublicKey is an RSA, ECDSA, or Ed25519 public key matching Metadata.Algorithm.
 	PublicKey crypto.PublicKey
 }
 
 // HMACVerificationKey contains trusted metadata and an HMAC shared secret.
 type HMACVerificationKey struct {
+	// Metadata binds the received keyId to the only permitted HMAC algorithm.
 	Metadata TrustedKeyMetadata
-	Secret   []byte
+	// Secret is the non-empty shared secret used for HMAC verification.
+	Secret []byte
 }
 
+// CavageRequestSignatureSource selects the Cavage signature field parsed from
+// an HTTP request. The zero value selects only the Signature field.
+type CavageRequestSignatureSource uint8
+
+const (
+	// CavageRequestSignatureSourceSignature parses only the Signature field.
+	CavageRequestSignatureSourceSignature CavageRequestSignatureSource = iota
+	// CavageRequestSignatureSourceAuthorization parses only Authorization values
+	// whose authentication scheme is Signature.
+	CavageRequestSignatureSourceAuthorization
+	// CavageRequestSignatureSourceSignatureOrAuthorization accepts either source
+	// and rejects a request containing candidates in both sources.
+	CavageRequestSignatureSourceSignatureOrAuthorization
+)
+
 // CavageVerificationOptions configures Cavage HTTP signature verification.
-// Passing nil is equivalent to the strict zero value: only active draft-12
-// algorithms are accepted, omitted algorithm and headers parameters are accepted,
-// omitted headers means (created), and no application age policy is added.
+// Passing nil is equivalent to the strict zero value: only
+// AlgorithmRSAPKCS1v15SHA512, AlgorithmECDSASHA512, AlgorithmEd25519, and
+// AlgorithmHMACSHA512 are accepted; omitted algorithm and headers parameters
+// are accepted; omitted headers means (created); and no application age policy
+// is added. A SHA-256 AlgorithmID must be listed in AllowedAlgorithms, and a
+// deprecated label additionally requires AllowedLegacyAlgorithms.
 type CavageVerificationOptions struct {
-	// RequiredHeaders adds application-required fields to the effective signed-header list.
+	// RequestSignatureSource selects the request field parsed as a Cavage
+	// signature. It does not affect response parsing, which always uses Signature.
+	RequestSignatureSource CavageRequestSignatureSource
+	// RequiredHeaders requires each field to already be in the effective
+	// signed-header list. It never adds a field to that list.
 	RequiredHeaders []string
-	// AllowedAlgorithms further restricts the trusted algorithms accepted by the application.
-	// It never selects the verification algorithm.
+	// AllowedAlgorithms is the complete set of trusted algorithms accepted by the
+	// application when non-empty. Nil or empty selects the four strict defaults.
+	// It never selects the verification algorithm or enables a wire label.
 	AllowedAlgorithms []AlgorithmID
 	// RequireAlgorithm rejects a signature that omits the algorithm parameter.
 	RequireAlgorithm bool
@@ -73,6 +103,10 @@ type CavageVerificationOptions struct {
 	// includes the exact boundary, and is evaluated without truncation to whole seconds.
 	// Zero disables it.
 	MaxDateAge time.Duration
+	// Now supplies the current time used by ParseRequest and ParseResponse. It is
+	// called exactly once when a valid time comparison is required and is not
+	// called otherwise. Nil uses time.Now.
+	Now func() time.Time
 
 	// Compatibility contains explicit relaxations of the strict draft-12 behaviour.
 	Compatibility *CavageVerificationCompatibility
@@ -86,14 +120,14 @@ type CavageVerificationCompatibility struct {
 	// AllowedExpiredSkew permits (expires) up to this duration in the past.
 	// The exact boundary is accepted without truncating the duration to whole seconds.
 	AllowedExpiredSkew time.Duration
-	// AllowedLegacyAlgorithms explicitly enables the corresponding deprecated SHA-256
-	// algorithms and their wire labels.
+	// AllowedLegacyAlgorithms explicitly enables the corresponding deprecated
+	// SHA-256 wire labels. Each AlgorithmID must also appear in AllowedAlgorithms.
 	AllowedLegacyAlgorithms []AlgorithmID
-	// ExtensionAlgorithms maps an exact wire label to one trusted algorithm. The mapped
-	// AlgorithmID must equal the AlgorithmID in trusted key metadata.
+	// ExtensionAlgorithms maps an exact wire label to one trusted algorithm. The
+	// mapped AlgorithmID must also be allowed and must equal trusted key metadata.
 	ExtensionAlgorithms map[string]AlgorithmID
 	// AllowHS2019WithSHA256 permits the Fediverse hs2019 interpretation only for
-	// RSA PKCS #1 v1.5 with SHA-256.
+	// RSA PKCS #1 v1.5 with SHA-256. That AlgorithmID must also be allowed.
 	AllowHS2019WithSHA256 bool
 }
 

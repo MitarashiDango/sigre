@@ -6,78 +6,59 @@ import (
 	"strings"
 )
 
-// SignatureHeaderFields holds the signature-related header values extracted from an HTTP message.
-type SignatureHeaderFields struct {
-	Signature       string
-	SignatureInput  string
-	AcceptSignature string
+type cavageSignatureCandidate struct {
+	value     string
+	placement CavageSignaturePlacement
 }
 
-// GetSignatureHeaderFields extracts signature-related header values from h.
-// The Signature field is populated from exactly one "Signature" header value or one
-// "Authorization: Signature ..." value. It is empty when Cavage signature placement
-// is ambiguous.
-func GetSignatureHeaderFields(h http.Header) *SignatureHeaderFields {
-	hf := new(SignatureHeaderFields)
-
-	if signature, present, err := cavageSignatureValue(h); err == nil && present {
-		hf.Signature = signature
+func requestCavageSignatureCandidate(h http.Header, source CavageRequestSignatureSource) (cavageSignatureCandidate, error) {
+	switch source {
+	case CavageRequestSignatureSourceSignature:
+		return signatureHeaderCandidate(h)
+	case CavageRequestSignatureSourceAuthorization:
+		return authorizationSignatureCandidate(h)
+	case CavageRequestSignatureSourceSignatureOrAuthorization:
+		signature, signatureErr := signatureHeaderCandidate(h)
+		authorization, authorizationErr := authorizationSignatureCandidate(h)
+		if signatureErr != nil || authorizationErr != nil || signature.placement != 0 && authorization.placement != 0 {
+			return cavageSignatureCandidate{}, fmt.Errorf("%w: multiple selected Cavage signature values are present", ErrSignatureSourceConflict)
+		}
+		if signature.placement != 0 {
+			return signature, nil
+		}
+		return authorization, nil
+	default:
+		return cavageSignatureCandidate{}, fmt.Errorf("%w: unsupported request signature source %d", ErrInvalidVerificationOptions, source)
 	}
-
-	if v := h.Get(SignatureInput); v != "" {
-		hf.SignatureInput = v
-	}
-
-	if v := h.Get(AcceptSignature); v != "" {
-		hf.AcceptSignature = v
-	}
-
-	return hf
 }
 
-// GetSignatureType determines the HTTP signature scheme from the header fields.
-// Both Signature and Signature-Input present indicates RFC9421.
-// Signature alone (or via Authorization) indicates draft-cavage-http-signatures-12.
-func (hf *SignatureHeaderFields) GetSignatureType() SignatureType {
-	if hf.SignatureInput != "" && hf.Signature != "" {
-		return RFC9421
+func signatureHeaderCandidate(h http.Header) (cavageSignatureCandidate, error) {
+	values := h.Values(Signature)
+	if len(values) > 1 {
+		return cavageSignatureCandidate{}, fmt.Errorf("%w: multiple Signature field values are present", ErrSignatureSourceConflict)
 	}
-	if hf.Signature != "" {
-		return CavageHTTPSignatures
+	if len(values) == 0 {
+		return cavageSignatureCandidate{}, nil
 	}
-	return Unsigned
+	return cavageSignatureCandidate{value: values[0], placement: CavageSignaturePlacementSignature}, nil
 }
 
-func cavageSignatureValue(h http.Header) (signature string, present bool, err error) {
-	signatureValues := h.Values(Signature)
-	if len(signatureValues) > 1 {
-		return "", false, fmt.Errorf("ambiguous Cavage signature: multiple Signature header values are present")
-	}
-
-	var authorizationSignature string
-	var authorizationSignaturePresent bool
+func authorizationSignatureCandidate(h http.Header) (cavageSignatureCandidate, error) {
+	var candidate cavageSignatureCandidate
 	for _, value := range h.Values(Authorization) {
 		params, ok := cavageAuthorizationParams(value)
 		if !ok {
 			continue
 		}
-		if authorizationSignaturePresent {
-			return "", false, fmt.Errorf("ambiguous Cavage signature: multiple Authorization Signature values are present")
+		if candidate.placement != 0 {
+			return cavageSignatureCandidate{}, fmt.Errorf("%w: multiple Authorization: Signature values are present", ErrSignatureSourceConflict)
 		}
-		authorizationSignaturePresent = true
-		authorizationSignature = params
+		candidate = cavageSignatureCandidate{
+			value:     params,
+			placement: CavageSignaturePlacementAuthorization,
+		}
 	}
-
-	if len(signatureValues) == 1 && authorizationSignaturePresent {
-		return "", false, fmt.Errorf("ambiguous Cavage signature: Signature and Authorization Signature are both present")
-	}
-	if len(signatureValues) == 1 {
-		return signatureValues[0], true, nil
-	}
-	if authorizationSignaturePresent {
-		return authorizationSignature, true, nil
-	}
-	return "", false, nil
+	return candidate, nil
 }
 
 func cavageAuthorizationParams(value string) (string, bool) {

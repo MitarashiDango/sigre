@@ -19,32 +19,36 @@ import (
 func TestCavageConformanceFixedSignatureVerification(t *testing.T) {
 	for _, fixture := range loadCavageConformanceFixtures(t) {
 		t.Run(fixture.ID, func(t *testing.T) {
-			var verifier *sigre.CavageVerifier
-			var err error
-			switch fixture.Message.Type {
-			case "request":
-				verifier, err = sigre.NewCavageRequestVerifier(fixture.newRequest(t, true))
-			case "response":
-				verifier, err = sigre.NewCavageResponseVerifier(fixture.newResponse(t, true))
-			}
+			verifier, err := sigre.NewCavageVerifier(&sigre.CavageVerificationOptions{
+				Now: func() time.Time { return fixture.verificationTime(t) },
+			})
 			if err != nil {
 				t.Fatalf("failed to construct verifier: %v", err)
 			}
-			verifier.Now = func() time.Time { return fixture.verificationTime(t) }
-			if verifier.KeyId() != fixture.KeyID {
-				t.Fatalf("KeyId() = %q, want %q", verifier.KeyId(), fixture.KeyID)
+			var signature *sigre.CavageSignature
+			switch fixture.Message.Type {
+			case "request":
+				signature, err = verifier.ParseRequest(fixture.newRequest(t, true))
+			case "response":
+				signature, err = verifier.ParseResponse(fixture.newResponse(t, true))
+			}
+			if err != nil {
+				t.Fatalf("failed to parse signature: %v", err)
+			}
+			if signature.KeyID() != fixture.KeyID {
+				t.Fatalf("KeyID() = %q, want %q", signature.KeyID(), fixture.KeyID)
 			}
 
 			if fixture.CryptoPath == "hmac" {
-				err = verifier.VerifyHMAC(sigre.HMACVerificationKey{
+				err = verifier.VerifyHMAC(signature, sigre.HMACVerificationKey{
 					Metadata: sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
 					Secret:   loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile),
-				}, nil)
+				})
 			} else {
-				err = verifier.Verify(sigre.VerificationKey{
+				err = verifier.Verify(signature, sigre.VerificationKey{
 					Metadata:  sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
 					PublicKey: loadCavageFixturePublicKey(t, fixture.VerificationKeyFile),
-				}, nil)
+				})
 			}
 			if err != nil {
 				t.Fatalf("fixed signature verification failed: %v", err)

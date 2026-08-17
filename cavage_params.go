@@ -10,11 +10,13 @@ import (
 	"strings"
 )
 
-// Cavage HTTP Signature pseudo-header names (draft-cavage-http-signatures-12 Section 2.3).
 const (
+	// RequestTarget is the Cavage (request-target) pseudo-header name.
 	RequestTarget = "(request-target)"
-	Created       = "(created)"
-	Expires       = "(expires)"
+	// Created is the Cavage (created) pseudo-header name.
+	Created = "(created)"
+	// Expires is the Cavage (expires) pseudo-header name.
+	Expires = "(expires)"
 )
 
 // hs2019 is the non-deprecated algorithm identifier defined in the IANA
@@ -23,13 +25,16 @@ const hs2019 = "hs2019"
 
 // cavageParams holds the parsed fields of a Cavage HTTP Signature header.
 type cavageParams struct {
-	KeyId          string
-	Signature      string
-	Algorithm      string
-	Created        string // Unix timestamp as decimal string
-	Expires        string // Unix timestamp as decimal string
-	Headers        []string
-	HeadersPresent bool
+	KeyID            string
+	Signature        string
+	Algorithm        string
+	AlgorithmPresent bool
+	Created          string // Unix timestamp as decimal string
+	CreatedPresent   bool
+	Expires          string // Unix timestamp as decimal string
+	ExpiresPresent   bool
+	Headers          []string
+	HeadersPresent   bool
 }
 
 // serializeCavageParams serialises p into the Cavage signature-params wire format.
@@ -37,7 +42,7 @@ func serializeCavageParams(p *cavageParams) (string, error) {
 	if p == nil {
 		return "", fmt.Errorf("signature parameters are nil")
 	}
-	if err := validateCavageKeyID(p.KeyId); err != nil {
+	if err := validateCavageKeyID(p.KeyID); err != nil {
 		return "", err
 	}
 	if p.Signature == "" {
@@ -46,19 +51,21 @@ func serializeCavageParams(p *cavageParams) (string, error) {
 	if _, err := base64.StdEncoding.Strict().DecodeString(p.Signature); err != nil {
 		return "", fmt.Errorf("invalid 'signature' value: %w", err)
 	}
-	if p.Created != "" {
+	createdPresent := p.CreatedPresent || p.Created != ""
+	if createdPresent {
 		if err := isValidUnixTime(p.Created); err != nil {
 			return "", fmt.Errorf("invalid 'created' value: %w", err)
 		}
 	}
-	if p.Expires != "" {
-		if err := isValidUnixTime(p.Expires); err != nil {
+	expiresPresent := p.ExpiresPresent || p.Expires != ""
+	if expiresPresent {
+		if _, err := parseCavageExpires(p.Expires); err != nil {
 			return "", fmt.Errorf("invalid 'expires' value: %w", err)
 		}
 	}
 
 	var sb strings.Builder
-	if err := appendCavageQuotedString(&sb, "keyId", p.KeyId); err != nil {
+	if err := appendCavageQuotedString(&sb, "keyId", p.KeyID); err != nil {
 		return "", err
 	}
 	sb.WriteString(",")
@@ -66,24 +73,27 @@ func serializeCavageParams(p *cavageParams) (string, error) {
 		return "", err
 	}
 
-	if p.Algorithm != "" {
+	if p.AlgorithmPresent || p.Algorithm != "" {
 		sb.WriteString(",")
 		if err := appendCavageQuotedString(&sb, "algorithm", p.Algorithm); err != nil {
 			return "", err
 		}
 	}
 
-	if p.Created != "" {
+	if createdPresent {
 		sb.WriteString(",created=")
 		sb.WriteString(p.Created)
 	}
 
-	if p.Expires != "" {
+	if expiresPresent {
 		sb.WriteString(",expires=")
 		sb.WriteString(p.Expires)
 	}
 
-	if len(p.Headers) > 0 {
+	if p.HeadersPresent || len(p.Headers) > 0 {
+		if len(p.Headers) == 0 {
+			return "", fmt.Errorf("'headers' parameter must specify a non-empty value")
+		}
 		for _, h := range p.Headers {
 			if h == "" {
 				return "", fmt.Errorf("'headers' parameter must not contain an empty header name")
@@ -163,26 +173,23 @@ func parseCavageParams(input string) (*cavageParams, error) {
 
 		value, wellFormedValue := parseCavageAuthParamValue(segment, valueStart)
 		if !wellFormedValue {
-			continue
+			return nil, fmt.Errorf("malformed known parameter %q", name)
 		}
 
 		switch canonicalName {
 		case "keyid":
-			p.KeyId = value
+			p.KeyID = value
 		case "signature":
 			p.Signature = value
 		case "algorithm":
 			p.Algorithm = value
+			p.AlgorithmPresent = true
 		case "created":
-			if err := isValidUnixTime(value); err != nil {
-				continue
-			}
 			p.Created = value
+			p.CreatedPresent = true
 		case "expires":
-			if err := isValidUnixTime(value); err != nil {
-				continue
-			}
 			p.Expires = value
+			p.ExpiresPresent = true
 		case "headers":
 			hasHeaders = true
 			p.HeadersPresent = true
@@ -194,7 +201,7 @@ func parseCavageParams(input string) (*cavageParams, error) {
 		}
 	}
 
-	if p.KeyId == "" {
+	if p.KeyID == "" {
 		return nil, fmt.Errorf("missing required parameter: keyId")
 	}
 	if p.Signature == "" {

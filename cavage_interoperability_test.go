@@ -1,8 +1,11 @@
 package sigre_test
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +13,13 @@ import (
 
 	"github.com/MitarashiDango/sigre"
 )
+
+type cavageRFC9421CoexistFixture struct {
+	FormatVersion         int    `json:"format_version"`
+	BaseFixtureID         string `json:"base_fixture_id"`
+	RFC9421Signature      string `json:"rfc_9421_signature"`
+	RFC9421SignatureInput string `json:"rfc_9421_signature_input"`
+}
 
 func TestCavageInteroperabilityFixtureCoverage(t *testing.T) {
 	t.Parallel()
@@ -105,22 +115,26 @@ func TestCavageInteroperabilityStrictAndExplicitVerification(t *testing.T) {
 			t.Parallel()
 			key := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
 
-			strictVerifier := newCavageInteroperabilityVerifier(t, fixture, fixture.verificationTime(t))
-			if err := strictVerifier.Verify(key, nil); !errors.Is(err, fixture.strictRejectionError(t)) {
+			strictVerifier, strictSignature, err := parseCavageInteroperability(t, fixture, fixture.verificationTime(t), nil)
+			if err == nil {
+				err = strictVerifier.Verify(strictSignature, key)
+			}
+			if !errors.Is(err, fixture.strictRejectionError(t)) {
 				t.Fatalf("strict verification error = %v, want %v", err, fixture.strictRejectionError(t))
 			}
 
-			explicitVerifier := newCavageInteroperabilityVerifier(t, fixture, fixture.verificationTime(t))
-			if err := explicitVerifier.Verify(key, fixture.verificationOptions(t)); err != nil {
+			explicitVerifier, signature, err := parseCavageInteroperability(t, fixture, fixture.verificationTime(t), fixture.verificationOptions(t))
+			if err != nil {
+				t.Fatalf("parsing with recorded explicit compatibility failed: %v", err)
+			}
+			if err := explicitVerifier.Verify(signature, key); err != nil {
 				t.Fatalf("verification with recorded explicit compatibility failed: %v", err)
 			}
 		})
 	}
 
 	fixture := cavageInteroperabilityFixtureByID(t, loadCavageInteroperabilityFixtures(t), "mastodon-cavage-post-rsa-sha256")
-	key := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
-	verifier := newCavageInteroperabilityVerifier(t, fixture, fixture.verificationTime(t))
-	err := verifier.Verify(key, &sigre.CavageVerificationOptions{
+	_, _, err := parseCavageInteroperability(t, fixture, fixture.verificationTime(t), &sigre.CavageVerificationOptions{
 		AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
 	})
 	if !errors.Is(err, sigre.ErrInvalidSignatureAlgorithm) {
@@ -169,13 +183,18 @@ func TestCavageInteroperabilitySignerMatchesFixedSignatures(t *testing.T) {
 				t.Fatalf("generic signer unexpectedly emitted an OCI-specific version parameter: %q", actual)
 			}
 
-			verifier, err := sigre.NewCavageRequestVerifier(req)
+			options := fixture.verificationOptions(t)
+			options.Now = func() time.Time { return fixture.verificationTime(t) }
+			verifier, err := sigre.NewCavageVerifier(options)
+			if err != nil {
+				t.Fatalf("generated signature verifier could not be constructed: %v", err)
+			}
+			signature, err := verifier.ParseRequest(req)
 			if err != nil {
 				t.Fatalf("generated signature could not be parsed: %v", err)
 			}
-			verifier.Now = func() time.Time { return fixture.verificationTime(t) }
 			verificationKey := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
-			if err := verifier.Verify(verificationKey, fixture.verificationOptions(t)); err != nil {
+			if err := verifier.Verify(signature, verificationKey); err != nil {
 				t.Fatalf("generated signature could not be verified once with its trusted AlgorithmID: %v", err)
 			}
 		})
@@ -233,12 +252,19 @@ func TestCavageInteroperabilityExtensionMappingIsExact(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			verifier := newCavageInteroperabilityVerifier(t, fixture, fixture.verificationTime(t))
-			opts := &sigre.CavageVerificationOptions{}
+			opts := &sigre.CavageVerificationOptions{
+				AllowedAlgorithms: []sigre.AlgorithmID{
+					sigre.AlgorithmRSAPKCS1v15SHA256,
+					sigre.AlgorithmRSAPKCS1v15SHA512,
+				},
+			}
 			if test.mapping != nil {
 				opts.Compatibility = &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: test.mapping}
 			}
-			err := verifier.Verify(test.key, opts)
+			verifier, signature, err := parseCavageInteroperability(t, fixture, fixture.verificationTime(t), opts)
+			if err == nil {
+				err = verifier.Verify(signature, test.key)
+			}
 			if !errors.Is(err, test.wantErr) {
 				t.Fatalf("verification error = %v, want %v", err, test.wantErr)
 			}
@@ -256,8 +282,16 @@ func TestCavageInteroperabilityUsesOnlyTrustedAlgorithmAndKeyType(t *testing.T) 
 		Metadata:  sigre.TrustedKeyMetadata{KeyID: mastodon.KeyID, Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512},
 		PublicKey: rsaPublicKey,
 	}
-	verifier := newCavageInteroperabilityVerifier(t, mastodon, mastodon.verificationTime(t))
-	if err := verifier.Verify(wrongAlgorithmKey, mastodon.verificationOptions(t)); !errors.Is(err, sigre.ErrAlgorithmMismatch) {
+	mastodonOptions := mastodon.verificationOptions(t)
+	mastodonOptions.AllowedAlgorithms = []sigre.AlgorithmID{
+		sigre.AlgorithmRSAPKCS1v15SHA256,
+		sigre.AlgorithmRSAPKCS1v15SHA512,
+	}
+	verifier, signature, err := parseCavageInteroperability(t, mastodon, mastodon.verificationTime(t), mastodonOptions)
+	if err != nil {
+		t.Fatalf("failed to parse Mastodon fixture: %v", err)
+	}
+	if err := verifier.Verify(signature, wrongAlgorithmKey); !errors.Is(err, sigre.ErrAlgorithmMismatch) {
 		t.Fatalf("rsa-sha256 wire label selected a different trusted algorithm: %v", err)
 	}
 
@@ -265,8 +299,11 @@ func TestCavageInteroperabilityUsesOnlyTrustedAlgorithmAndKeyType(t *testing.T) 
 		Metadata:  sigre.TrustedKeyMetadata{KeyID: mastodon.KeyID, Algorithm: sigre.AlgorithmRSAPKCS1v15SHA256},
 		PublicKey: loadCavageInteroperabilityPublicKey(t, "../cavage-draft-12/keys/ecdsa-public.pem"),
 	}
-	verifier = newCavageInteroperabilityVerifier(t, mastodon, mastodon.verificationTime(t))
-	if err := verifier.Verify(wrongKeyType, mastodon.verificationOptions(t)); !errors.Is(err, sigre.ErrAlgorithmMismatch) {
+	verifier, signature, err = parseCavageInteroperability(t, mastodon, mastodon.verificationTime(t), mastodon.verificationOptions(t))
+	if err != nil {
+		t.Fatalf("failed to parse Mastodon fixture: %v", err)
+	}
+	if err := verifier.Verify(signature, wrongKeyType); !errors.Is(err, sigre.ErrAlgorithmMismatch) {
 		t.Fatalf("RSA AlgorithmID accepted a non-RSA key: %v", err)
 	}
 
@@ -275,10 +312,13 @@ func TestCavageInteroperabilityUsesOnlyTrustedAlgorithmAndKeyType(t *testing.T) 
 		Metadata:  sigre.TrustedKeyMetadata{KeyID: fediverse.KeyID, Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512},
 		PublicKey: loadCavageInteroperabilityPublicKey(t, fediverse.VerificationKeyFile),
 	}
-	verifier = newCavageInteroperabilityVerifier(t, fediverse, fediverse.verificationTime(t))
-	err := verifier.Verify(sha512Key, &sigre.CavageVerificationOptions{
-		Compatibility: &sigre.CavageVerificationCompatibility{AllowHS2019WithSHA256: true},
+	verifier, signature, err = parseCavageInteroperability(t, fediverse, fediverse.verificationTime(t), &sigre.CavageVerificationOptions{
+		AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256, sigre.AlgorithmRSAPKCS1v15SHA512},
+		Compatibility:     &sigre.CavageVerificationCompatibility{AllowHS2019WithSHA256: true},
 	})
+	if err == nil {
+		err = verifier.Verify(signature, sha512Key)
+	}
 	if !errors.Is(err, sigre.ErrVerification) {
 		t.Fatalf("hs2019 wire label changed the trusted SHA-512 choice or unexpectedly verified: %v", err)
 	}
@@ -294,13 +334,57 @@ func TestCavageInteroperabilityOCICallerPolicies(t *testing.T) {
 	opts.RequiredHeaders = []string{"date", sigre.RequestTarget, "host"}
 	opts.MaxDateAge = 5 * time.Minute
 
-	verifier := newCavageInteroperabilityVerifier(t, fixture, fixture.verificationTime(t).Add(5*time.Minute))
-	if err := verifier.Verify(key, opts); err != nil {
+	verifier, signature, err := parseCavageInteroperability(t, fixture, fixture.verificationTime(t).Add(5*time.Minute), opts)
+	if err != nil {
+		t.Fatalf("OCI fixture failed to parse at the caller-selected five-minute boundary: %v", err)
+	}
+	if err := verifier.Verify(signature, key); err != nil {
 		t.Fatalf("OCI fixture failed at the caller-selected five-minute boundary: %v", err)
 	}
-	verifier = newCavageInteroperabilityVerifier(t, fixture, fixture.verificationTime(t).Add(5*time.Minute+time.Nanosecond))
-	if err := verifier.Verify(key, opts); !errors.Is(err, sigre.ErrInvalidDate) {
+	_, _, err = parseCavageInteroperability(t, fixture, fixture.verificationTime(t).Add(5*time.Minute+time.Nanosecond), opts)
+	if !errors.Is(err, sigre.ErrInvalidDate) {
 		t.Fatalf("OCI caller-selected MaxDateAge did not reject an older Date value: %v", err)
+	}
+}
+
+func TestCavageInteroperabilityAuthorizationCoexistsWithRFC9421(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(filepath.Join(cavageInteroperabilityFixtureDirectory, "rfc9421-coexist.json"))
+	if err != nil {
+		t.Fatalf("failed to read coexistence fixture: %v", err)
+	}
+	var coexist cavageRFC9421CoexistFixture
+	if err := json.Unmarshal(data, &coexist); err != nil {
+		t.Fatalf("failed to decode coexistence fixture: %v", err)
+	}
+	if coexist.FormatVersion != 1 || coexist.BaseFixtureID == "" || coexist.RFC9421Signature == "" || coexist.RFC9421SignatureInput == "" {
+		t.Fatalf("coexistence fixture is incomplete: %+v", coexist)
+	}
+
+	fixture := cavageInteroperabilityFixtureByID(t, loadCavageInteroperabilityFixtures(t), coexist.BaseFixtureID)
+	req := fixture.newRequest(t, true)
+	req.Header.Set(sigre.Signature, coexist.RFC9421Signature)
+	req.Header.Set("Signature-Input", coexist.RFC9421SignatureInput)
+	options := fixture.verificationOptions(t)
+	if options.RequestSignatureSource != sigre.CavageRequestSignatureSourceAuthorization {
+		t.Fatal("Authorization fixture did not explicitly select the Authorization source")
+	}
+	options.Now = func() time.Time { return fixture.verificationTime(t) }
+	verifier, err := sigre.NewCavageVerifier(options)
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	signature, err := verifier.ParseRequest(req)
+	if err != nil {
+		t.Fatalf("Cavage Authorization did not coexist with RFC 9421 fields: %v", err)
+	}
+	if signature.Placement() != sigre.CavageSignaturePlacementAuthorization {
+		t.Fatalf("Placement() = %d, want Authorization", signature.Placement())
+	}
+	key := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
+	if err := verifier.Verify(signature, key); err != nil {
+		t.Fatalf("coexistence fixture verification failed: %v", err)
 	}
 }
 
@@ -328,18 +412,27 @@ func interoperabilityVerificationKey(
 	}
 }
 
-func newCavageInteroperabilityVerifier(
+func parseCavageInteroperability(
 	t *testing.T,
 	fixture cavageInteroperabilityFixture,
 	now time.Time,
-) *sigre.CavageVerifier {
+	opts *sigre.CavageVerificationOptions,
+) (*sigre.CavageVerifier, *sigre.CavageSignature, error) {
 	t.Helper()
-	verifier, err := sigre.NewCavageRequestVerifier(fixture.newRequest(t, true))
-	if err != nil {
-		t.Fatalf("failed to construct verifier for fixture %q: %v", fixture.ID, err)
+	options := sigre.CavageVerificationOptions{}
+	if opts != nil {
+		options = *opts
 	}
-	verifier.Now = func() time.Time { return now }
-	return verifier
+	options.Now = func() time.Time { return now }
+	if fixture.SignaturePlacement == sigre.Authorization {
+		options.RequestSignatureSource = sigre.CavageRequestSignatureSourceAuthorization
+	}
+	verifier, err := sigre.NewCavageVerifier(&options)
+	if err != nil {
+		return nil, nil, err
+	}
+	signature, err := verifier.ParseRequest(fixture.newRequest(t, true))
+	return verifier, signature, err
 }
 
 func cavageInteroperabilitySignatureParameters(

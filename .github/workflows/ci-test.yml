@@ -3,11 +3,13 @@ name: CI - Test
 on:
   push:
     branches:
-      - main
+      - master
     paths:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+      - "testdata/cavage-draft-12/**"
+      - "testdata/cavage-interoperability/**"
       - ".github/workflows/ci-test.yml"
 
   pull_request:
@@ -15,6 +17,8 @@ on:
       - "**/*.go"
       - "go.mod"
       - "go.sum"
+      - "testdata/cavage-draft-12/**"
+      - "testdata/cavage-interoperability/**"
       - ".github/workflows/ci-test.yml"
   workflow_dispatch:
 
@@ -43,7 +47,7 @@ jobs:
         run: go version
 
       - name: Build
-        run: go build
+        run: go build ./...
 
       - name: Vet
         run: go vet ./...

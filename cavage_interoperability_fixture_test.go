@@ -332,7 +332,14 @@ func (f cavageInteroperabilityFixture) verificationOptions(t *testing.T) *sigre.
 	if len(compatibility.AllowedLegacyAlgorithms) == 0 && len(compatibility.ExtensionAlgorithms) == 0 && !compatibility.AllowHS2019WithSHA256 {
 		t.Fatalf("fixture %q does not record an explicit verification compatibility setting", f.ID)
 	}
-	return &sigre.CavageVerificationOptions{Compatibility: compatibility}
+	options := &sigre.CavageVerificationOptions{
+		AllowedAlgorithms: []sigre.AlgorithmID{f.algorithmID(t)},
+		Compatibility:     compatibility,
+	}
+	if f.SignaturePlacement == sigre.Authorization {
+		options.RequestSignatureSource = sigre.CavageRequestSignatureSourceAuthorization
+	}
+	return options
 }
 
 func (f cavageInteroperabilityFixture) signingOptions(t *testing.T) *sigre.CavageSigningOptions {

@@ -258,11 +258,8 @@ func TestCavageRequestVerifierUsesRequestURI(t *testing.T) {
 				Header:     header,
 			}
 
-			verifier, err := NewCavageRequestVerifier(req)
-			if err != nil {
-				t.Fatalf("NewCavageRequestVerifier() failed: %v", err)
-			}
-			if err := verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions()); err != nil {
+			verifier, signature := parseSigningStringRequest(t, req)
+			if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
 				t.Fatalf("VerifyHMAC() failed: %v", err)
 			}
 		})
@@ -280,13 +277,13 @@ func TestCavageRequestVerifierDoesNotRebuildMissingRequestURI(t *testing.T) {
 		Header: header,
 	}
 
-	verifier, err := NewCavageRequestVerifier(req)
+	verifier, err := NewCavageVerifier(signingStringVerificationOptions())
 	if err != nil {
-		t.Fatalf("NewCavageRequestVerifier() failed: %v", err)
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
 	}
-	err = verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions())
-	if err == nil || !strings.Contains(err.Error(), "request-target is missing") {
-		t.Fatalf("VerifyHMAC() error = %v, want a missing request-target error", err)
+	_, err = verifier.ParseRequest(req)
+	if err == nil || !strings.Contains(err.Error(), "request-target is required") {
+		t.Fatalf("ParseRequest() error = %v, want a missing request-target error", err)
 	}
 }
 
@@ -343,11 +340,8 @@ func TestCavageResponseRequestTargetUsesAssociatedRequestURI(t *testing.T) {
 				header.Set(Signature, fixedCavageHMACHeader(t, tt.expectedSigningString, RequestTarget))
 				res := &http.Response{Request: req, Header: header}
 
-				verifier, err := NewCavageResponseVerifier(res)
-				if err != nil {
-					t.Fatalf("NewCavageResponseVerifier() failed: %v", err)
-				}
-				if err := verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions()); err != nil {
+				verifier, signature := parseSigningStringResponse(t, res)
+				if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
 					t.Fatalf("VerifyHMAC() failed: %v", err)
 				}
 			})
@@ -421,11 +415,8 @@ func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
 				header.Set(Signature, fixedCavageHMACHeader(t, tt.expectedSigningString, RequestTarget))
 				res := &http.Response{Request: req, Header: header}
 
-				verifier, err := NewCavageResponseVerifier(res)
-				if err != nil {
-					t.Fatalf("NewCavageResponseVerifier() failed: %v", err)
-				}
-				if err := verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions()); err != nil {
+				verifier, signature := parseSigningStringResponse(t, res)
+				if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
 					t.Fatalf("VerifyHMAC() failed: %v", err)
 				}
 			})
@@ -447,10 +438,10 @@ func TestCavageVerifierNormalHeaderCanonicalization(t *testing.T) {
 			header.Set(Signature, fixedCavageHMACHeader(t, want, signedHeaders))
 
 			var verifier *CavageVerifier
-			var err error
+			var signature *CavageSignature
 			switch messageType {
 			case "request":
-				verifier, err = NewCavageRequestVerifier(&http.Request{
+				verifier, signature = parseSigningStringRequest(t, &http.Request{
 					Method:     "GET",
 					RequestURI: "/unused",
 					URL:        &url.URL{Path: "/unused"},
@@ -458,12 +449,9 @@ func TestCavageVerifierNormalHeaderCanonicalization(t *testing.T) {
 					Header:     header,
 				})
 			case "response":
-				verifier, err = NewCavageResponseVerifier(&http.Response{Header: header})
+				verifier, signature = parseSigningStringResponse(t, &http.Response{Header: header})
 			}
-			if err != nil {
-				t.Fatalf("verifier construction failed: %v", err)
-			}
-			if err := verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions()); err != nil {
+			if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
 				t.Fatalf("VerifyHMAC() failed: %v", err)
 			}
 		})
@@ -563,7 +551,7 @@ func TestCavageVerifierRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 			name:          "missing header",
 			signedHeaders: "x-missing",
 			setHeader:     func(http.Header) {},
-			wantError:     "missing header",
+			wantError:     "signed header missing",
 		},
 		{
 			name:          "header with no values",
@@ -571,7 +559,7 @@ func TestCavageVerifierRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 			setHeader: func(header http.Header) {
 				header["X-Empty-List"] = nil
 			},
-			wantError: "missing header",
+			wantError: "signed header missing",
 		},
 	}
 
@@ -582,11 +570,13 @@ func TestCavageVerifierRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 				tt.setHeader(header)
 				header.Set(Signature, fixedCavageHMACHeader(t, "fixed invalid-header input", tt.signedHeaders))
 
-				var verifier *CavageVerifier
-				var err error
+				verifier, err := NewCavageVerifier(signingStringVerificationOptions())
+				if err != nil {
+					t.Fatalf("NewCavageVerifier() failed: %v", err)
+				}
 				switch messageType {
 				case "request":
-					verifier, err = NewCavageRequestVerifier(&http.Request{
+					_, err = verifier.ParseRequest(&http.Request{
 						Method:     "GET",
 						RequestURI: "/",
 						URL:        &url.URL{Path: "/"},
@@ -594,14 +584,10 @@ func TestCavageVerifierRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 						Header:     header,
 					})
 				case "response":
-					verifier, err = NewCavageResponseVerifier(&http.Response{Header: header})
+					_, err = verifier.ParseResponse(&http.Response{Header: header})
 				}
-				if err != nil {
-					t.Fatalf("verifier construction failed: %v", err)
-				}
-				err = verifier.VerifyHMAC(signingStringVerificationKey(), signingStringVerificationOptions())
 				if err == nil {
-					t.Fatal("verification unexpectedly succeeded")
+					t.Fatal("parsing unexpectedly succeeded")
 				}
 				if !strings.Contains(err.Error(), tt.wantError) {
 					t.Fatalf("verification error = %v, want it to contain %q", err, tt.wantError)
@@ -668,10 +654,37 @@ func signingStringVerificationKey() HMACVerificationKey {
 
 func signingStringVerificationOptions() *CavageVerificationOptions {
 	return &CavageVerificationOptions{
+		AllowedAlgorithms: []AlgorithmID{AlgorithmHMACSHA256},
 		Compatibility: &CavageVerificationCompatibility{
 			AllowedLegacyAlgorithms: []AlgorithmID{AlgorithmHMACSHA256},
 		},
 	}
+}
+
+func parseSigningStringRequest(t *testing.T, req *http.Request) (*CavageVerifier, *CavageSignature) {
+	t.Helper()
+	verifier, err := NewCavageVerifier(signingStringVerificationOptions())
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	signature, err := verifier.ParseRequest(req)
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	return verifier, signature
+}
+
+func parseSigningStringResponse(t *testing.T, res *http.Response) (*CavageVerifier, *CavageSignature) {
+	t.Helper()
+	verifier, err := NewCavageVerifier(signingStringVerificationOptions())
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	signature, err := verifier.ParseResponse(res)
+	if err != nil {
+		t.Fatalf("ParseResponse() failed: %v", err)
+	}
+	return verifier, signature
 }
 
 func assertCavageHMACSignature(t *testing.T, headerValue, signingString string) {

@@ -18,15 +18,19 @@ import (
 // SigningKey contains trusted metadata and an asymmetric private key.
 // Metadata.Algorithm determines the key kind, hash, and RSA padding.
 type SigningKey struct {
-	Metadata   TrustedKeyMetadata
+	// Metadata binds the wire keyId to the only algorithm used for signing.
+	Metadata TrustedKeyMetadata
+	// PrivateKey is an RSA, ECDSA, or Ed25519 private key matching Metadata.Algorithm.
 	PrivateKey crypto.PrivateKey
 }
 
 // HMACSigningKey contains trusted metadata and an HMAC shared secret.
 // Metadata.Algorithm determines the HMAC hash.
 type HMACSigningKey struct {
+	// Metadata binds the wire keyId to the only HMAC algorithm used for signing.
 	Metadata TrustedKeyMetadata
-	Secret   []byte
+	// Secret is the non-empty shared secret used for HMAC signing.
+	Secret []byte
 }
 
 // CavageSignaturePlacement identifies where a Cavage signature is written.
@@ -42,8 +46,11 @@ const (
 
 // CavageSigningOptions configures how a Cavage HTTP signature is created.
 // Passing nil is equivalent to the strict zero value. The strict zero value
-// emits hs2019, signs (request-target) and (created) for a request, and omits
-// the response headers parameter so that its effective value is (created).
+// accepts AlgorithmRSAPKCS1v15SHA512, AlgorithmECDSASHA512, AlgorithmEd25519,
+// or AlgorithmHMACSHA512; emits hs2019; signs (request-target) and (created) for
+// a request; and omits the response headers parameter so that its effective
+// value is (created). SHA-256 algorithms require an explicit Compatibility
+// setting. Signing never calculates a Digest field from a message body.
 type CavageSigningOptions struct {
 	// AdditionalHeaders appends fields to the strict request or response defaults.
 	// It does not replace those defaults.
@@ -81,7 +88,8 @@ const (
 	AlgorithmFieldStrict AlgorithmFieldMode = iota
 	// AlgorithmFieldOmitted omits the algorithm parameter.
 	AlgorithmFieldOmitted
-	// AlgorithmFieldLegacy emits a deprecated SHA-256 algorithm label.
+	// AlgorithmFieldLegacy emits a deprecated SHA-256 algorithm label. It requires
+	// ExactHeaders containing date and, for requests, (request-target).
 	AlgorithmFieldLegacy
 	// AlgorithmFieldHS2019WithSHA256 emits the Fediverse hs2019 representation
 	// for RSA PKCS #1 v1.5 with SHA-256.
@@ -90,7 +98,9 @@ const (
 
 // ExtensionAlgorithm binds one unregistered wire label to one AlgorithmID.
 type ExtensionAlgorithm struct {
-	Label     string
+	// Label is the exact unregistered algorithm parameter value to emit.
+	Label string
+	// Algorithm is the trusted algorithm to which Label is bound.
 	Algorithm AlgorithmID
 }
 
@@ -115,7 +125,7 @@ func (s *CavageSigner) SignRequest(
 	opts *CavageSigningOptions,
 ) error {
 	if req == nil {
-		return wrapSigreError(fmt.Errorf("request is nil"))
+		return wrapSigreError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
 	}
 	algorithm, err := validateSigningKey(key)
 	if err != nil {
@@ -147,7 +157,7 @@ func (s *CavageSigner) SignResponse(
 	opts *CavageSigningOptions,
 ) error {
 	if res == nil {
-		return wrapSigreError(fmt.Errorf("response is nil"))
+		return wrapSigreError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
 	}
 	algorithm, err := validateSigningKey(key)
 	if err != nil {
@@ -173,7 +183,7 @@ func (s *CavageSigner) SignRequestWithHMAC(
 	opts *CavageSigningOptions,
 ) error {
 	if req == nil {
-		return wrapSigreError(fmt.Errorf("request is nil"))
+		return wrapSigreError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
 	}
 	algorithm, err := validateHMACSigningKey(key)
 	if err != nil {
@@ -205,7 +215,7 @@ func (s *CavageSigner) SignResponseWithHMAC(
 	opts *CavageSigningOptions,
 ) error {
 	if res == nil {
-		return wrapSigreError(fmt.Errorf("response is nil"))
+		return wrapSigreError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
 	}
 	algorithm, err := validateHMACSigningKey(key)
 	if err != nil {
@@ -285,7 +295,7 @@ func (s *CavageSigner) signMessage(
 		return fmt.Errorf("failed to create signature with trusted AlgorithmID %d: %w", algorithm.id, err)
 	}
 	params := cavageParams{
-		KeyId:          metadata.KeyID,
+		KeyID:          metadata.KeyID,
 		Signature:      base64.StdEncoding.EncodeToString(signature),
 		Algorithm:      configuration.algorithm,
 		Created:        created,
@@ -581,11 +591,11 @@ func validateCavageSignaturePlacement(placement CavageSignaturePlacement) error 
 }
 
 func ensureCavageSignatureAbsent(header http.Header) error {
-	_, present, err := cavageSignatureValue(header)
+	candidate, err := requestCavageSignatureCandidate(header, CavageRequestSignatureSourceSignatureOrAuthorization)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSignaturePlacement, err)
 	}
-	if present {
+	if candidate.placement != 0 {
 		return fmt.Errorf("%w: message already contains a Cavage signature", ErrInvalidSignaturePlacement)
 	}
 	return nil
@@ -644,7 +654,7 @@ func signAsymmetric(key crypto.PrivateKey, algorithm algorithmDefinition, data [
 
 func signHMAC(secret []byte, hash crypto.Hash, data []byte) ([]byte, error) {
 	if !hash.Available() {
-		return nil, fmt.Errorf("%w: trusted hash %v is unavailable", ErrUnsupportedHashAlgorithm, hash)
+		return nil, fmt.Errorf("trusted hash %v is unavailable", hash)
 	}
 	mac := hmac.New(hash.New, secret)
 	if _, err := mac.Write(data); err != nil {
@@ -655,7 +665,7 @@ func signHMAC(secret []byte, hash crypto.Hash, data []byte) ([]byte, error) {
 
 func hashSigningString(hash crypto.Hash, data []byte) ([]byte, error) {
 	if !hash.Available() {
-		return nil, fmt.Errorf("%w: trusted hash %v is unavailable", ErrUnsupportedHashAlgorithm, hash)
+		return nil, fmt.Errorf("trusted hash %v is unavailable", hash)
 	}
 	h := hash.New()
 	if _, err := h.Write(data); err != nil {

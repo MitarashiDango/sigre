@@ -1,86 +1,42 @@
-// Package sigre provides HTTP message signing and verification.
+// Package sigre signs and verifies HTTP requests and responses using the wire
+// format defined by draft-cavage-http-signatures-12. That Internet-Draft is
+// expired and archived and is not an IETF standard. Package sigre does not
+// implement RFC 9421 HTTP Message Signatures, whose fields and signature-base
+// construction differ from the Cavage format.
 //
-// It currently implements draft-cavage-http-signatures-12 via [CavageSigner].
-// RFC9421 (https://datatracker.ietf.org/doc/html/rfc9421) support is planned.
+// Create signatures with [NewCavageSigner] and the SignRequest, SignResponse,
+// SignRequestWithHMAC, or SignResponseWithHMAC methods on [CavageSigner]. Every
+// signing call receives a [SigningKey] or [HMACSigningKey] and an explicit
+// [CavageSignaturePlacement]. Nil signing options have the same meaning as a
+// zero-value [CavageSigningOptions]. That strict zero value emits hs2019 with
+// a SHA-512 algorithm or Ed25519, signs (request-target) and (created) for a
+// request, and uses the draft's effective (created) field for a response.
 //
-// To verify a signed HTTP request or response, call [NewRequestVerifier] or
-// [NewResponseVerifier]; the returned [Verifier] detects the scheme automatically.
-// For Cavage-specific features such as a custom time source, use
-// [NewCavageRequestVerifier] or [NewCavageResponseVerifier] directly.
+// Construct a [CavageVerifier], parse a received signature with ParseRequest or
+// ParseResponse, resolve the snapshot's KeyID to a trusted [VerificationKey] or
+// [HMACVerificationKey], and then call Verify or VerifyHMAC. KeyID is an opaque,
+// attacker-controlled wire value. The trusted
+// [TrustedKeyMetadata.Algorithm] selects exactly one cryptographic algorithm;
+// the received algorithm parameter is used only for consistency checks. Nil
+// constructor options have the same meaning as a zero-value
+// [CavageVerificationOptions]. That strict zero value permits the active
+// SHA-512 algorithms and Ed25519 without adding a maximum-age policy. A
+// SHA-256 AlgorithmID must be explicitly allowed, and a deprecated wire label
+// additionally requires a matching compatibility setting.
+//
+// Application policy such as required signed fields and maximum age is
+// configured separately from explicit interoperability relaxations. Package
+// sigre does not compute or verify a body Digest, retrieve keys, validate the
+// relationship between a key and a principal, prevent replay, make
+// authorization decisions, or provide transport security. Callers must perform
+// those operations where their protocol requires them. A network key resolver
+// must constrain schemes and origins, redirects, DNS and IP destinations,
+// timeouts, response sizes, concurrency, caching, and TLS validation.
 package sigre
 
-import (
-	"fmt"
-	"net/http"
-)
-
-// SignatureType identifies the HTTP signature scheme present in a message.
-type SignatureType int
-
 const (
-	Unsigned             SignatureType = iota
-	CavageHTTPSignatures               // draft-cavage-http-signatures-12
-	RFC9421                            // HTTP Message Signatures; verification is not implemented yet.
+	// Authorization is the HTTP header used for Authorization: Signature placement.
+	Authorization = "Authorization"
+	// Signature is the HTTP header used for direct Cavage signature placement.
+	Signature = "Signature"
 )
-
-// HTTP header name constants used in signature processing.
-const (
-	Authorization   = "Authorization"
-	Signature       = "Signature"
-	SignatureInput  = "Signature-Input"
-	AcceptSignature = "Accept-Signature"
-)
-
-// Verifier verifies an HTTP message signature.
-type Verifier interface {
-	// KeyId returns the key identifier from the signature parameters.
-	KeyId() string
-	// Verify checks an asymmetric signature against a trusted key and algorithm.
-	// Returns an error if the signature was created with HMAC; use [Verifier.VerifyHMAC] instead.
-	Verify(key VerificationKey, opts *CavageVerificationOptions) error
-	// VerifyHMAC checks an HMAC signature against a trusted secret and algorithm.
-	// Returns an error if the signature was created with an asymmetric algorithm; use [Verifier.Verify] instead.
-	VerifyHMAC(key HMACVerificationKey, opts *CavageVerificationOptions) error
-}
-
-// NewRequestVerifier creates a [Verifier] for req.
-// It detects the signature scheme automatically from the request headers.
-// Returns an error if no recognisable signature is present.
-//
-// To access Cavage-specific fields such as [CavageVerifier.Now], use
-// [NewCavageRequestVerifier] instead.
-func NewRequestVerifier(req *http.Request) (Verifier, error) {
-	if _, _, err := cavageSignatureValue(req.Header); err != nil {
-		return nil, wrapSigreError(err)
-	}
-	hf := GetSignatureHeaderFields(req.Header)
-	switch hf.GetSignatureType() {
-	case CavageHTTPSignatures:
-		return NewCavageRequestVerifier(req)
-	case RFC9421:
-		return nil, wrapSigreError(fmt.Errorf("RFC9421 verifier not implemented"))
-	default:
-		return nil, wrapSigreError(ErrMissingSignature)
-	}
-}
-
-// NewResponseVerifier creates a [Verifier] for res.
-// It detects the signature scheme automatically from the response headers.
-// Returns an error if no recognisable signature is present.
-//
-// To access Cavage-specific fields such as [CavageVerifier.Now], use
-// [NewCavageResponseVerifier] instead.
-func NewResponseVerifier(res *http.Response) (Verifier, error) {
-	if _, _, err := cavageSignatureValue(res.Header); err != nil {
-		return nil, wrapSigreError(err)
-	}
-	hf := GetSignatureHeaderFields(res.Header)
-	switch hf.GetSignatureType() {
-	case CavageHTTPSignatures:
-		return NewCavageResponseVerifier(res)
-	case RFC9421:
-		return nil, wrapSigreError(fmt.Errorf("RFC9421 verifier not implemented"))
-	default:
-		return nil, wrapSigreError(ErrMissingSignature)
-	}
-}

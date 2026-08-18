@@ -340,32 +340,40 @@ func TestSignAndVerify(t *testing.T) {
 				testingNowFunc = tc.verifyOpts.overrideNowFunc
 			}
 
-			var verifier *sigre.CavageVerifier
+			algorithm, wireLabel := tc.signOpts.algorithm, tc.signOpts.wireLabel
+			verifyOptions := fixedVerificationOptions(algorithm, wireLabel)
+			verifyOptions.RequiredHeaders = tc.verifyOpts.requiredHeaders
+			if tc.verifyOpts.allowedAlgorithms != nil {
+				verifyOptions.AllowedAlgorithms = tc.verifyOpts.allowedAlgorithms
+			}
+			verifyOptions.MaxSignatureAge = tc.verifyOpts.maxSignatureAge
+			verifyOptions.Now = testingNowFunc
+
+			verifier, err := sigre.NewCavageVerifier(verifyOptions)
+			if err != nil {
+				t.Fatalf("NewCavageVerifier() failed: %v", err)
+			}
+			var signature *sigre.CavageSignature
 			if tc.isRequest {
 				req.RequestURI = req.URL.RequestURI()
-				verifier, err = sigre.NewCavageRequestVerifier(req)
+				signature, err = verifier.ParseRequest(req)
 			} else {
-				verifier, err = sigre.NewCavageResponseVerifier(res)
+				signature, err = verifier.ParseResponse(res)
 			}
 			if err != nil {
 				if !tc.expectError {
-					t.Fatalf("NewVerifier failed: %v", err)
+					t.Fatalf("Parse failed: %v", err)
+				}
+				if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+					t.Fatalf("expected error %v, got: %v", tc.wantErr, err)
 				}
 				return
 			}
 
-			verifier.Now = testingNowFunc
-
-			algorithm, wireLabel := tc.signOpts.algorithm, tc.signOpts.wireLabel
-			verifyOptions := fixedVerificationOptions(algorithm, wireLabel)
-			verifyOptions.RequiredHeaders = tc.verifyOpts.requiredHeaders
-			verifyOptions.AllowedAlgorithms = tc.verifyOpts.allowedAlgorithms
-			verifyOptions.MaxSignatureAge = tc.verifyOpts.maxSignatureAge
-
 			if len(tc.verifyOpts.secret) != 0 {
-				err = verifier.VerifyHMAC(fixedHMACVerificationKey(keyId, algorithm, tc.verifyOpts.secret), verifyOptions)
+				err = verifier.VerifyHMAC(signature, fixedHMACVerificationKey(keyId, algorithm, tc.verifyOpts.secret))
 			} else {
-				err = verifier.Verify(fixedPublicVerificationKey(keyId, algorithm, tc.verifyOpts.publicKey), verifyOptions)
+				err = verifier.Verify(signature, fixedPublicVerificationKey(keyId, algorithm, tc.verifyOpts.publicKey))
 			}
 
 			if tc.expectError {
@@ -540,12 +548,18 @@ func TestSignerInputValidation(t *testing.T) {
 			t.Fatalf("Authorization keyId is not correctly escaped: %s", got)
 		}
 
-		verifier, err := sigre.NewCavageRequestVerifier(req)
+		verifier, err := sigre.NewCavageVerifier(&sigre.CavageVerificationOptions{
+			RequestSignatureSource: sigre.CavageRequestSignatureSourceAuthorization,
+		})
+		if err != nil {
+			t.Fatalf("NewCavageVerifier() failed: %v", err)
+		}
+		signature, err := verifier.ParseRequest(req)
 		if err != nil {
 			t.Fatalf("failed to parse generated Authorization signature: %v", err)
 		}
-		if verifier.KeyId() != keyID {
-			t.Fatalf("KeyId() = %q, want %q", verifier.KeyId(), keyID)
+		if signature.KeyID() != keyID {
+			t.Fatalf("KeyID() = %q, want %q", signature.KeyID(), keyID)
 		}
 	})
 

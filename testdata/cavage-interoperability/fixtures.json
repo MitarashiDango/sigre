@@ -296,7 +296,7 @@
       "verification_key_file": "../cavage-draft-12/keys/rsa-public.pem",
       "signing_key_file": "../cavage-draft-12/keys/rsa-private.pem",
       "verification_time": "2026-08-05T03:00:00Z",
-      "strict_rejection": "ErrAlgorithmMismatch",
+      "strict_rejection": "ErrInvalidSignatureAlgorithm",
       "verification_compatibility": {
         "allow_hs2019_with_sha256": true
       },

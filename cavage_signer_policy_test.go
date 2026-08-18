@@ -31,6 +31,42 @@ func newSignerPolicyResponse() *http.Response {
 	}}
 }
 
+func parseSignerPolicyRequest(t *testing.T, req *http.Request, now time.Time, opts *sigre.CavageVerificationOptions) (*sigre.CavageVerifier, *sigre.CavageSignature) {
+	t.Helper()
+	options := sigre.CavageVerificationOptions{}
+	if opts != nil {
+		options = *opts
+	}
+	options.Now = func() time.Time { return now }
+	verifier, err := sigre.NewCavageVerifier(&options)
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	signature, err := verifier.ParseRequest(req)
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	return verifier, signature
+}
+
+func parseSignerPolicyResponse(t *testing.T, res *http.Response, now time.Time, opts *sigre.CavageVerificationOptions) (*sigre.CavageVerifier, *sigre.CavageSignature) {
+	t.Helper()
+	options := sigre.CavageVerificationOptions{}
+	if opts != nil {
+		options = *opts
+	}
+	options.Now = func() time.Time { return now }
+	verifier, err := sigre.NewCavageVerifier(&options)
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	signature, err := verifier.ParseResponse(res)
+	if err != nil {
+		t.Fatalf("ParseResponse() failed: %v", err)
+	}
+	return verifier, signature
+}
+
 func signerPolicyParameter(t *testing.T, value, name string) (string, bool) {
 	t.Helper()
 	prefix := name + "="
@@ -127,12 +163,8 @@ func TestCavageSignerStrictZeroValueWireFormat(t *testing.T) {
 			assertSignerPolicyHMAC(t, value, "(request-target): post /signer?fixed=1\n(created): 1785816000", secret)
 
 			req.RequestURI = req.URL.RequestURI()
-			verifier, err := sigre.NewCavageRequestVerifier(req)
-			if err != nil {
-				t.Fatalf("NewCavageRequestVerifier() failed: %v", err)
-			}
-			verifier.Now = func() time.Time { return now }
-			if err := verifier.VerifyHMAC(fixedHMACVerificationKey("strict-request", sigre.AlgorithmHMACSHA512, secret), nil); err != nil {
+			verifier, signature := parseSignerPolicyRequest(t, req, now, nil)
+			if err := verifier.VerifyHMAC(signature, fixedHMACVerificationKey("strict-request", sigre.AlgorithmHMACSHA512, secret)); err != nil {
 				t.Fatalf("strict request verification failed: %v", err)
 			}
 		}
@@ -160,12 +192,8 @@ func TestCavageSignerStrictZeroValueWireFormat(t *testing.T) {
 			}
 			assertSignerPolicyHMAC(t, value, "(created): 1785816000", secret)
 
-			verifier, err := sigre.NewCavageResponseVerifier(res)
-			if err != nil {
-				t.Fatalf("NewCavageResponseVerifier() failed: %v", err)
-			}
-			verifier.Now = func() time.Time { return now }
-			if err := verifier.VerifyHMAC(fixedHMACVerificationKey("strict-response", sigre.AlgorithmHMACSHA512, secret), nil); err != nil {
+			verifier, signature := parseSignerPolicyResponse(t, res, now, nil)
+			if err := verifier.VerifyHMAC(signature, fixedHMACVerificationKey("strict-response", sigre.AlgorithmHMACSHA512, secret)); err != nil {
 				t.Fatalf("strict response verification failed: %v", err)
 			}
 		}
@@ -207,15 +235,11 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 						t.Fatalf("request signing failed: %v", err)
 					}
 					req.RequestURI = req.URL.RequestURI()
-					verifier, err := sigre.NewCavageRequestVerifier(req)
-					if err != nil {
-						t.Fatalf("request verifier construction failed: %v", err)
-					}
-					verifier.Now = func() time.Time { return testFixedTime }
+					verifier, signature := parseSignerPolicyRequest(t, req, testFixedTime, nil)
 					if tt.secret != nil {
-						err = verifier.VerifyHMAC(fixedHMACVerificationKey("active-key", tt.algorithm, tt.secret), nil)
+						err = verifier.VerifyHMAC(signature, fixedHMACVerificationKey("active-key", tt.algorithm, tt.secret))
 					} else {
-						err = verifier.Verify(fixedPublicVerificationKey("active-key", tt.algorithm, tt.publicKey), nil)
+						err = verifier.Verify(signature, fixedPublicVerificationKey("active-key", tt.algorithm, tt.publicKey))
 					}
 					if err != nil {
 						t.Fatalf("request verification failed: %v", err)
@@ -233,15 +257,11 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 				if err != nil {
 					t.Fatalf("response signing failed: %v", err)
 				}
-				verifier, err := sigre.NewCavageResponseVerifier(res)
-				if err != nil {
-					t.Fatalf("response verifier construction failed: %v", err)
-				}
-				verifier.Now = func() time.Time { return testFixedTime }
+				verifier, signature := parseSignerPolicyResponse(t, res, testFixedTime, nil)
 				if tt.secret != nil {
-					err = verifier.VerifyHMAC(fixedHMACVerificationKey("active-key", tt.algorithm, tt.secret), nil)
+					err = verifier.VerifyHMAC(signature, fixedHMACVerificationKey("active-key", tt.algorithm, tt.secret))
 				} else {
-					err = verifier.Verify(fixedPublicVerificationKey("active-key", tt.algorithm, tt.publicKey), nil)
+					err = verifier.Verify(signature, fixedPublicVerificationKey("active-key", tt.algorithm, tt.publicKey))
 				}
 				if err != nil {
 					t.Fatalf("response verification failed: %v", err)
@@ -563,15 +583,13 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 			t.Fatalf("algorithm was not omitted: %s", value)
 		}
 		req.RequestURI = req.URL.RequestURI()
-		verifier, err := sigre.NewCavageRequestVerifier(req)
-		if err != nil {
-			t.Fatalf("verifier construction failed: %v", err)
-		}
-		verifier.Now = func() time.Time { return testFixedTime }
-		verificationOptions := &sigre.CavageVerificationOptions{Compatibility: &sigre.CavageVerificationCompatibility{
-			AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256},
-		}}
-		if err := verifier.VerifyHMAC(fixedHMACVerificationKey("omitted-key", sigre.AlgorithmHMACSHA256, secret), verificationOptions); err != nil {
+		verificationOptions := &sigre.CavageVerificationOptions{
+			AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256},
+			Compatibility: &sigre.CavageVerificationCompatibility{
+				AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256},
+			}}
+		verifier, signature := parseSignerPolicyRequest(t, req, testFixedTime, verificationOptions)
+		if err := verifier.VerifyHMAC(signature, fixedHMACVerificationKey("omitted-key", sigre.AlgorithmHMACSHA256, secret)); err != nil {
 			t.Fatalf("omitted algorithm verification failed: %v", err)
 		}
 	})
@@ -693,17 +711,16 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 			t.Fatalf("algorithm = %q, want hs2019", label)
 		}
 		req.RequestURI = req.URL.RequestURI()
-		verifier, err := sigre.NewCavageRequestVerifier(req)
-		if err != nil {
-			t.Fatalf("verifier construction failed: %v", err)
+		verificationOptions := &sigre.CavageVerificationOptions{
+			AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
+			Compatibility:     &sigre.CavageVerificationCompatibility{AllowHS2019WithSHA256: true},
 		}
-		verifier.Now = func() time.Time { return testFixedTime }
-		verificationOptions := &sigre.CavageVerificationOptions{Compatibility: &sigre.CavageVerificationCompatibility{AllowHS2019WithSHA256: true}}
-		if err := verifier.Verify(fixedPublicVerificationKey("fediverse-key", sigre.AlgorithmRSAPKCS1v15SHA256, &rsaPrivateKey.PublicKey), verificationOptions); err != nil {
+		verifier, signature := parseSignerPolicyRequest(t, req, testFixedTime, verificationOptions)
+		if err := verifier.Verify(signature, fixedPublicVerificationKey("fediverse-key", sigre.AlgorithmRSAPKCS1v15SHA256, &rsaPrivateKey.PublicKey)); err != nil {
 			t.Fatalf("Fediverse signature verification failed: %v", err)
 		}
 
-		err = signer.SignRequest(newSignerPolicyRequest(t), fixedSigningKey("key", sigre.AlgorithmECDSASHA256, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, opts)
+		err := signer.SignRequest(newSignerPolicyRequest(t), fixedSigningKey("key", sigre.AlgorithmECDSASHA256, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, opts)
 		if !errors.Is(err, sigre.ErrInvalidSigningOptions) {
 			t.Fatalf("ECDSA error = %v, want ErrInvalidSigningOptions", err)
 		}
@@ -731,15 +748,11 @@ func TestCavageSignerExtensionAlgorithm(t *testing.T) {
 			t.Fatalf("algorithm = %q", label)
 		}
 		req.RequestURI = req.URL.RequestURI()
-		verifier, err := sigre.NewCavageRequestVerifier(req)
-		if err != nil {
-			t.Fatalf("verifier construction failed: %v", err)
-		}
-		verifier.Now = func() time.Time { return testFixedTime }
 		verificationOptions := &sigre.CavageVerificationOptions{Compatibility: &sigre.CavageVerificationCompatibility{
 			ExtensionAlgorithms: map[string]sigre.AlgorithmID{"example-rsa512": sigre.AlgorithmRSAPKCS1v15SHA512},
 		}}
-		if err := verifier.Verify(fixedPublicVerificationKey("extension-key", sigre.AlgorithmRSAPKCS1v15SHA512, &privateKey.PublicKey), verificationOptions); err != nil {
+		verifier, signature := parseSignerPolicyRequest(t, req, testFixedTime, verificationOptions)
+		if err := verifier.Verify(signature, fixedPublicVerificationKey("extension-key", sigre.AlgorithmRSAPKCS1v15SHA512, &privateKey.PublicKey)); err != nil {
 			t.Fatalf("extension verification failed: %v", err)
 		}
 	})

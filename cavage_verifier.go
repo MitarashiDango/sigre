@@ -11,121 +11,176 @@ import (
 	"encoding/base64"
 	"fmt"
 	"hash"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// CavageVerifier verifies a Cavage HTTP signature (draft-cavage-http-signatures-12).
-type CavageVerifier struct {
-	// Now overrides the clock used for created, expires, and Date validation.
-	// The current UTC time is used when Now is nil.
-	Now func() time.Time
-
-	host          string
-	method        string
-	requestTarget string
-	header        http.Header
-	params        *cavageParams
+var defaultCavageVerificationAlgorithms = []AlgorithmID{
+	AlgorithmRSAPKCS1v15SHA512,
+	AlgorithmECDSASHA512,
+	AlgorithmEd25519,
+	AlgorithmHMACSHA512,
 }
 
-// NewCavageRequestVerifier creates a [CavageVerifier] from req.
-// Returns an error if the Cavage signature is absent or malformed.
-func NewCavageRequestVerifier(req *http.Request) (*CavageVerifier, error) {
-	signatureValue, present, err := cavageSignatureValue(req.Header)
+type cavageVerifierIdentity struct {
+	value byte
+}
+
+type cavageVerificationConfig struct {
+	requestSource            CavageRequestSignatureSource
+	requiredHeaders          []string
+	allowedAlgorithms        map[AlgorithmID]struct{}
+	requireAlgorithm         bool
+	requireExplicitHeaders   bool
+	maxSignatureAge          time.Duration
+	maxDateAge               time.Duration
+	now                      func() time.Time
+	allowedCreatedFutureSkew time.Duration
+	allowedExpiredSkew       time.Duration
+	allowedLegacyAlgorithms  map[AlgorithmID]struct{}
+	extensionAlgorithms      map[string]AlgorithmID
+	allowHS2019WithSHA256    bool
+}
+
+// CavageVerifier parses and verifies immutable Cavage HTTP signature
+// snapshots. Construct it with [NewCavageVerifier]; its zero value is invalid.
+// A constructed verifier is immutable and may be used concurrently. It does
+// not parse or verify RFC 9421 HTTP Message Signatures.
+type CavageVerifier struct {
+	identity *cavageVerifierIdentity
+	config   cavageVerificationConfig
+}
+
+// CavageSignature is an immutable snapshot returned by ParseRequest or
+// ParseResponse. It owns the parsed parameters, signature bytes, effective
+// signed fields, signing string, and message values used to build that string.
+// A snapshot can be verified only by the CavageVerifier that parsed it.
+type CavageSignature struct {
+	origin            *cavageVerifierIdentity
+	keyID             string
+	placement         CavageSignaturePlacement
+	algorithmLabel    string
+	algorithmPresent  bool
+	created           time.Time
+	createdPresent    bool
+	expires           time.Time
+	expiresPresent    bool
+	signedHeaders     []string
+	headersExplicit   bool
+	signature         []byte
+	signingString     []byte
+	method            string
+	requestTarget     string
+	host              string
+	signedFieldValues map[string][]string
+}
+
+// NewCavageVerifier validates and copies opts. Passing nil selects the strict
+// zero-value policy. The constructor does not call opts.Now.
+func NewCavageVerifier(opts *CavageVerificationOptions) (*CavageVerifier, error) {
+	config, err := newCavageVerificationConfig(opts)
 	if err != nil {
 		return nil, wrapSigreError(err)
 	}
-	if !present {
+	return &CavageVerifier{
+		identity: &cavageVerifierIdentity{},
+		config:   config,
+	}, nil
+}
+
+// ParseRequest parses the configured request signature source and returns an
+// immutable snapshot. The request is not modified. The default source is only
+// the Signature field; RFC 9421 Signature-Input is always ignored.
+func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, error) {
+	if err := v.validateConstructed(); err != nil {
+		return nil, wrapSigreError(err)
+	}
+	if req == nil {
+		return nil, wrapSigreError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
+	}
+	candidate, err := requestCavageSignatureCandidate(req.Header, v.config.requestSource)
+	if err != nil {
+		return nil, wrapSigreError(err)
+	}
+	if candidate.placement == 0 {
 		return nil, wrapSigreError(ErrMissingSignature)
 	}
-	p, err := parseCavageParams(signatureValue)
-	if err != nil {
-		return nil, wrapSigreError(fmt.Errorf("failed to parse HTTP signature parameters from request: %w", err))
-	}
-	return &CavageVerifier{
+	snapshot := cavageMessageSnapshot{
+		isRequest:     true,
 		host:          req.Host,
 		method:        req.Method,
 		requestTarget: req.RequestURI,
 		header:        req.Header,
-		params:        p,
-	}, nil
+	}
+	signature, err := v.parse(candidate, snapshot)
+	return signature, wrapSigreError(err)
 }
 
-// NewCavageResponseVerifier creates a [CavageVerifier] from res.
-// Returns an error if the Cavage signature is absent or malformed.
-func NewCavageResponseVerifier(res *http.Response) (*CavageVerifier, error) {
-	signatureValue, present, err := cavageSignatureValue(res.Header)
+// ParseResponse parses only the response Signature field and returns an
+// immutable snapshot. Authorization and Signature-Input are ignored, and the
+// response is not modified.
+func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, error) {
+	if err := v.validateConstructed(); err != nil {
+		return nil, wrapSigreError(err)
+	}
+	if res == nil {
+		return nil, wrapSigreError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
+	}
+	candidate, err := signatureHeaderCandidate(res.Header)
 	if err != nil {
 		return nil, wrapSigreError(err)
 	}
-	if !present {
+	if candidate.placement == 0 {
 		return nil, wrapSigreError(ErrMissingSignature)
 	}
-	p, err := parseCavageParams(signatureValue)
-	if err != nil {
-		return nil, wrapSigreError(fmt.Errorf("failed to parse HTTP signature parameters from response: %w", err))
-	}
-
-	var host, method, requestTarget string
+	snapshot := cavageMessageSnapshot{header: res.Header}
 	if res.Request != nil {
-		host = res.Request.Host
-		method = res.Request.Method
-		requestTarget = associatedRequestTarget(res.Request)
+		snapshot.host = res.Request.Host
+		snapshot.method = res.Request.Method
+		snapshot.requestTarget = associatedRequestTarget(res.Request)
 	}
-
-	return &CavageVerifier{
-		host:          host,
-		method:        method,
-		requestTarget: requestTarget,
-		header:        res.Header,
-		params:        p,
-	}, nil
+	signature, err := v.parse(candidate, snapshot)
+	return signature, wrapSigreError(err)
 }
 
-// KeyId returns the opaque key identifier from the signature parameters.
-func (v *CavageVerifier) KeyId() string {
-	if v.params == nil {
-		return ""
+// Verify checks snapshot with an asymmetric trusted key. The received KeyID
+// and algorithm label are attacker-controlled inputs; callers must resolve the
+// KeyID to trusted metadata before calling Verify. Verification does not read
+// the original HTTP message and does not compare a Digest field with a body.
+func (v *CavageVerifier) Verify(signature *CavageSignature, key VerificationKey) error {
+	if err := v.validateSignature(signature); err != nil {
+		return wrapSigreError(err)
 	}
-	return v.params.KeyId
-}
-
-// Verify checks an RSA, ECDSA, or Ed25519 signature using the algorithm bound
-// to key.Metadata. The received algorithm parameter is used only for consistency checks.
-// Passing nil opts is equivalent to the strict zero-value [CavageVerificationOptions].
-func (v *CavageVerifier) Verify(key VerificationKey, opts *CavageVerificationOptions) error {
-	algorithm, err := v.validateMetadata(key.Metadata)
+	algorithm, err := validateVerificationMetadata(signature, key.Metadata)
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	if key.PublicKey == nil {
+	if isMissingPublicKey(key.PublicKey) {
 		return wrapSigreError(ErrMissingPublicKey)
 	}
 	if algorithm.keyKind == algorithmKeyHMAC {
 		return wrapSigreError(fmt.Errorf("%w: HMAC AlgorithmID must be used with VerifyHMAC", ErrAlgorithmMismatch))
 	}
-	if err := validatePublicKey(key.PublicKey, algorithm.keyKind); err != nil {
+	if err := validateVerificationPublicKey(key.PublicKey, algorithm.keyKind); err != nil {
 		return wrapSigreError(err)
 	}
-
-	options, err := validateCavageVerificationOptions(opts)
-	if err != nil {
+	if err := v.validateTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
 		return wrapSigreError(err)
 	}
-	message, signature, err := v.prepareVerification(key.Metadata.Algorithm, options)
-	if err != nil {
-		return wrapSigreError(err)
-	}
-	return wrapSigreError(verifyAsymmetric(key.PublicKey, algorithm, signature, message))
+	return wrapSigreError(verifyAsymmetric(key.PublicKey, algorithm, signature.signature, signature.signingString))
 }
 
-// VerifyHMAC checks an HMAC signature using the algorithm bound to key.Metadata.
-// The received algorithm parameter is used only for consistency checks.
-// Passing nil opts is equivalent to the strict zero-value [CavageVerificationOptions].
-func (v *CavageVerifier) VerifyHMAC(key HMACVerificationKey, opts *CavageVerificationOptions) error {
-	algorithm, err := v.validateMetadata(key.Metadata)
+// VerifyHMAC checks snapshot with trusted HMAC metadata and a shared secret.
+// It does not read the original HTTP message and never calls the verifier clock.
+func (v *CavageVerifier) VerifyHMAC(signature *CavageSignature, key HMACVerificationKey) error {
+	if err := v.validateSignature(signature); err != nil {
+		return wrapSigreError(err)
+	}
+	algorithm, err := validateVerificationMetadata(signature, key.Metadata)
 	if err != nil {
 		return wrapSigreError(err)
 	}
@@ -135,64 +190,629 @@ func (v *CavageVerifier) VerifyHMAC(key HMACVerificationKey, opts *CavageVerific
 	if algorithm.keyKind != algorithmKeyHMAC {
 		return wrapSigreError(fmt.Errorf("%w: asymmetric AlgorithmID must be used with Verify", ErrAlgorithmMismatch))
 	}
-
-	options, err := validateCavageVerificationOptions(opts)
-	if err != nil {
+	if err := v.validateTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
 		return wrapSigreError(err)
 	}
-	message, signature, err := v.prepareVerification(key.Metadata.Algorithm, options)
-	if err != nil {
-		return wrapSigreError(err)
-	}
-	return wrapSigreError(verifyHMAC(key.Secret, signature, message, algorithm.hash))
+	return wrapSigreError(verifyHMAC(key.Secret, signature.signature, signature.signingString, algorithm.hash))
 }
 
-func (v *CavageVerifier) validateMetadata(metadata TrustedKeyMetadata) (algorithmDefinition, error) {
-	if v.params == nil {
-		return algorithmDefinition{}, fmt.Errorf("signature parameters not available for verification")
+// KeyID returns the opaque, attacker-controlled keyId parameter.
+func (s *CavageSignature) KeyID() string {
+	if s == nil {
+		return ""
 	}
+	return s.keyID
+}
+
+// Placement returns the actual field from which the Cavage signature was parsed.
+func (s *CavageSignature) Placement() CavageSignaturePlacement {
+	if s == nil {
+		return 0
+	}
+	return s.placement
+}
+
+// AlgorithmLabel returns the exact, case-sensitive wire algorithm label and
+// whether the algorithm parameter was present.
+func (s *CavageSignature) AlgorithmLabel() (string, bool) {
+	if s == nil {
+		return "", false
+	}
+	return s.algorithmLabel, s.algorithmPresent
+}
+
+// Created returns the parsed created time and whether the parameter was present.
+func (s *CavageSignature) Created() (time.Time, bool) {
+	if s == nil {
+		return time.Time{}, false
+	}
+	return s.created, s.createdPresent
+}
+
+// Expires returns the parsed expires time and whether the parameter was present.
+func (s *CavageSignature) Expires() (time.Time, bool) {
+	if s == nil {
+		return time.Time{}, false
+	}
+	return s.expires, s.expiresPresent
+}
+
+// SignedHeaders returns a copy of the effective signed-header list. If the
+// headers parameter was omitted, the returned list contains only (created).
+func (s *CavageSignature) SignedHeaders() []string {
+	if s == nil {
+		return nil
+	}
+	return append([]string(nil), s.signedHeaders...)
+}
+
+// HeadersExplicit reports whether the wire signature contained a headers parameter.
+func (s *CavageSignature) HeadersExplicit() bool {
+	return s != nil && s.headersExplicit
+}
+
+func newCavageVerificationConfig(opts *CavageVerificationOptions) (cavageVerificationConfig, error) {
+	options := CavageVerificationOptions{}
+	if opts != nil {
+		options = *opts
+	}
+	if options.RequestSignatureSource > CavageRequestSignatureSourceSignatureOrAuthorization {
+		return cavageVerificationConfig{}, fmt.Errorf("%w: unsupported RequestSignatureSource %d", ErrInvalidVerificationOptions, options.RequestSignatureSource)
+	}
+	if options.MaxSignatureAge < 0 {
+		return cavageVerificationConfig{}, fmt.Errorf("%w: MaxSignatureAge must not be negative", ErrInvalidVerificationOptions)
+	}
+	if options.MaxDateAge < 0 {
+		return cavageVerificationConfig{}, fmt.Errorf("%w: MaxDateAge must not be negative", ErrInvalidVerificationOptions)
+	}
+
+	config := cavageVerificationConfig{
+		requestSource:          options.RequestSignatureSource,
+		requireAlgorithm:       options.RequireAlgorithm,
+		requireExplicitHeaders: options.RequireExplicitHeaders,
+		maxSignatureAge:        options.MaxSignatureAge,
+		maxDateAge:             options.MaxDateAge,
+		now:                    options.Now,
+	}
+	for _, configuredName := range options.RequiredHeaders {
+		name, err := normalizeCavageSignedHeaderName(configuredName)
+		if err != nil {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: invalid RequiredHeaders entry %q: %v", ErrInvalidVerificationOptions, configuredName, err)
+		}
+		config.requiredHeaders = append(config.requiredHeaders, name)
+	}
+
+	allowed := options.AllowedAlgorithms
+	if len(allowed) == 0 {
+		allowed = defaultCavageVerificationAlgorithms
+	}
+	config.allowedAlgorithms = make(map[AlgorithmID]struct{}, len(allowed))
+	for _, id := range allowed {
+		if _, err := algorithmDefinitionFor(id); err != nil {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: AllowedAlgorithms contains AlgorithmID %d", ErrInvalidVerificationOptions, id)
+		}
+		config.allowedAlgorithms[id] = struct{}{}
+	}
+
+	if options.Compatibility == nil {
+		return config, nil
+	}
+	compatibility := *options.Compatibility
+	if compatibility.AllowedCreatedFutureSkew < 0 {
+		return cavageVerificationConfig{}, fmt.Errorf("%w: AllowedCreatedFutureSkew must not be negative", ErrInvalidVerificationOptions)
+	}
+	if compatibility.AllowedExpiredSkew < 0 {
+		return cavageVerificationConfig{}, fmt.Errorf("%w: AllowedExpiredSkew must not be negative", ErrInvalidVerificationOptions)
+	}
+	config.allowedCreatedFutureSkew = compatibility.AllowedCreatedFutureSkew
+	config.allowedExpiredSkew = compatibility.AllowedExpiredSkew
+	config.allowHS2019WithSHA256 = compatibility.AllowHS2019WithSHA256
+	config.allowedLegacyAlgorithms = make(map[AlgorithmID]struct{}, len(compatibility.AllowedLegacyAlgorithms))
+	for _, id := range compatibility.AllowedLegacyAlgorithms {
+		if !isLegacyCavageAlgorithm(id) {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: AllowedLegacyAlgorithms contains non-legacy AlgorithmID %d", ErrInvalidVerificationOptions, id)
+		}
+		config.allowedLegacyAlgorithms[id] = struct{}{}
+	}
+	config.extensionAlgorithms = make(map[string]AlgorithmID, len(compatibility.ExtensionAlgorithms))
+	for label, id := range compatibility.ExtensionAlgorithms {
+		if label == "" {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: ExtensionAlgorithms contains an empty label", ErrInvalidVerificationOptions)
+		}
+		if err := validateCavageQuotedStringValue("algorithm", label); err != nil {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: invalid extension label %q: %v", ErrInvalidVerificationOptions, label, err)
+		}
+		if isReservedCavageAlgorithmLabel(label) {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: ExtensionAlgorithms must not override known label %q", ErrInvalidVerificationOptions, label)
+		}
+		if _, err := algorithmDefinitionFor(id); err != nil {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: extension label %q maps to unsupported AlgorithmID %d", ErrInvalidVerificationOptions, label, id)
+		}
+		config.extensionAlgorithms[label] = id
+	}
+	return config, nil
+}
+
+func (v *CavageVerifier) validateConstructed() error {
+	if v == nil || v.identity == nil {
+		return fmt.Errorf("%w: CavageVerifier was not created by NewCavageVerifier", ErrInvalidVerificationOptions)
+	}
+	return nil
+}
+
+func (v *CavageVerifier) validateSignature(signature *CavageSignature) error {
+	if err := v.validateConstructed(); err != nil {
+		return err
+	}
+	if signature == nil || signature.origin == nil || signature.origin != v.identity {
+		return fmt.Errorf("%w: CavageSignature was not parsed by this CavageVerifier", ErrInvalidHTTPMessage)
+	}
+	return nil
+}
+
+type cavageMessageSnapshot struct {
+	isRequest     bool
+	host          string
+	method        string
+	requestTarget string
+	header        http.Header
+}
+
+func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavageMessageSnapshot) (*CavageSignature, error) {
+	params, err := parseCavageParams(candidate.value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidSignatureParameters, err)
+	}
+	decodedSignature, err := base64.StdEncoding.Strict().DecodeString(params.Signature)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid signature Base64: %v", ErrInvalidSignatureParameters, err)
+	}
+
+	var created, expires time.Time
+	if params.CreatedPresent {
+		created, err = parseCavageCreated(params.Created)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if params.ExpiresPresent {
+		expires, err = parseCavageExpires(params.Expires)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	headers, err := effectiveCavageSignedHeaders(params)
+	if err != nil {
+		return nil, err
+	}
+	if v.config.requireExplicitHeaders && !params.HeadersPresent {
+		return nil, fmt.Errorf("%w: headers parameter is required", ErrRequiredHeaderMissing)
+	}
+	if err := requireCavageHeaders(headers, v.config.requiredHeaders); err != nil {
+		return nil, err
+	}
+	if v.config.maxSignatureAge > 0 && !slices.Contains(headers, Created) {
+		return nil, fmt.Errorf("%w: MaxSignatureAge requires %s", ErrRequiredHeaderMissing, Created)
+	}
+	if v.config.maxDateAge > 0 && !slices.Contains(headers, "date") {
+		return nil, fmt.Errorf("%w: MaxDateAge requires date", ErrRequiredHeaderMissing)
+	}
+
+	if slices.Contains(headers, Created) && !params.CreatedPresent {
+		return nil, fmt.Errorf("%w: %s requires a created parameter", ErrInvalidCreationTime, Created)
+	}
+	if slices.Contains(headers, Expires) && !params.ExpiresPresent {
+		return nil, fmt.Errorf("%w: %s requires an expires parameter", ErrInvalidExpirationTime, Expires)
+	}
+
+	if err := v.validateWireAlgorithmBeforeKey(params, headers); err != nil {
+		return nil, err
+	}
+	ownedHeaders, err := snapshotCavageSignedFields(message.header, message.host, headers, v.config.maxDateAge > 0)
+	if err != nil {
+		return nil, err
+	}
+	if slices.Contains(headers, RequestTarget) {
+		if message.method == "" {
+			return nil, fmt.Errorf("%w: method is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+		}
+		if message.requestTarget == "" {
+			return nil, fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+		}
+	}
+
+	var parsedDate time.Time
+	if v.config.maxDateAge > 0 {
+		dateValues := message.header.Values("Date")
+		if len(dateValues) != 1 {
+			return nil, fmt.Errorf("%w: MaxDateAge requires exactly one Date value, got %d", ErrInvalidDate, len(dateValues))
+		}
+		parsedDate, err = http.ParseTime(dateValues[0])
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidDate, err)
+		}
+		ownedHeaders["Date"] = append([]string(nil), dateValues...)
+	}
+
+	createdText, expiresText := "", ""
+	if params.CreatedPresent {
+		createdText = params.Created
+	}
+	if params.ExpiresPresent {
+		expiresText = params.Expires
+	}
+	buf, err := generateSignatureStringBuffer(
+		headers,
+		message.host,
+		message.method,
+		message.requestTarget,
+		ownedHeaders,
+		createdText,
+		expiresText,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to create signing string: %v", ErrInvalidHTTPMessage, err)
+	}
+
+	if params.CreatedPresent || params.ExpiresPresent || v.config.maxDateAge > 0 {
+		now := v.currentTime()
+		if params.CreatedPresent {
+			if timeAfterDuration(created, now, v.config.allowedCreatedFutureSkew) {
+				return nil, fmt.Errorf("%w: created is after the permitted future boundary", ErrInvalidCreationTime)
+			}
+			if v.config.maxSignatureAge > 0 && timeAfterDuration(now, created, v.config.maxSignatureAge) {
+				return nil, fmt.Errorf("%w: signature age exceeds MaxSignatureAge", ErrInvalidCreationTime)
+			}
+		}
+		if params.ExpiresPresent && timeAfterDuration(now, expires, v.config.allowedExpiredSkew) {
+			return nil, fmt.Errorf("%w: expires is before the permitted past boundary", ErrSignatureExpired)
+		}
+		if v.config.maxDateAge > 0 && (timeAfterDuration(parsedDate, now, v.config.maxDateAge) || timeAfterDuration(now, parsedDate, v.config.maxDateAge)) {
+			return nil, fmt.Errorf("%w: Date differs from current time by more than MaxDateAge", ErrInvalidDate)
+		}
+	}
+
+	return &CavageSignature{
+		origin:            v.identity,
+		keyID:             params.KeyID,
+		placement:         candidate.placement,
+		algorithmLabel:    params.Algorithm,
+		algorithmPresent:  params.AlgorithmPresent,
+		created:           created,
+		createdPresent:    params.CreatedPresent,
+		expires:           expires,
+		expiresPresent:    params.ExpiresPresent,
+		signedHeaders:     append([]string(nil), headers...),
+		headersExplicit:   params.HeadersPresent,
+		signature:         append([]byte(nil), decodedSignature...),
+		signingString:     append([]byte(nil), buf.Bytes()...),
+		method:            message.method,
+		requestTarget:     message.requestTarget,
+		host:              message.host,
+		signedFieldValues: cloneHeaderValues(ownedHeaders),
+	}, nil
+}
+
+func effectiveCavageSignedHeaders(params *cavageParams) ([]string, error) {
+	configured := params.Headers
+	if !params.HeadersPresent {
+		configured = []string{Created}
+	}
+	headers := make([]string, 0, len(configured))
+	for _, configuredName := range configured {
+		name, err := normalizeCavageSignedHeaderName(configuredName)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid signed header %q: %v", ErrInvalidSignatureParameters, configuredName, err)
+		}
+		headers = append(headers, name)
+	}
+	return headers, nil
+}
+
+func requireCavageHeaders(signed, required []string) error {
+	for _, name := range required {
+		if !slices.Contains(signed, name) {
+			return fmt.Errorf("%w: %q is not in the effective signed-header list", ErrRequiredHeaderMissing, name)
+		}
+	}
+	return nil
+}
+
+func (v *CavageVerifier) validateWireAlgorithmBeforeKey(params *cavageParams, headers []string) error {
+	if !params.AlgorithmPresent {
+		if v.config.requireAlgorithm {
+			return fmt.Errorf("%w: algorithm parameter is required", ErrInvalidSignatureAlgorithm)
+		}
+		return nil
+	}
+	label := params.Algorithm
+	if label == "" {
+		return fmt.Errorf("%w: algorithm label is empty", ErrInvalidSignatureAlgorithm)
+	}
+
+	switch label {
+	case hs2019:
+		for id := range v.config.allowedAlgorithms {
+			if isStrictCavageAlgorithm(id) || id == AlgorithmRSAPKCS1v15SHA256 && v.config.allowHS2019WithSHA256 {
+				return nil
+			}
+		}
+		return fmt.Errorf("%w: hs2019 has no permitted trusted algorithm", ErrInvalidSignatureAlgorithm)
+	default:
+		if legacyID, ok := legacyAlgorithmID(label); ok {
+			if _, ok := v.config.allowedLegacyAlgorithms[legacyID]; !ok {
+				return fmt.Errorf("%w: deprecated algorithm %q is not enabled", ErrInvalidSignatureAlgorithm, label)
+			}
+			if !v.isAlgorithmAllowed(legacyID) {
+				return fmt.Errorf("%w: AlgorithmID %d is not permitted", ErrInvalidSignatureAlgorithm, legacyID)
+			}
+		} else {
+			extensionID, ok := v.config.extensionAlgorithms[label]
+			if !ok {
+				return fmt.Errorf("%w: unregistered algorithm label %q", ErrInvalidSignatureAlgorithm, label)
+			}
+			if !v.isAlgorithmAllowed(extensionID) {
+				return fmt.Errorf("%w: extension AlgorithmID %d is not permitted", ErrInvalidSignatureAlgorithm, extensionID)
+			}
+		}
+	}
+	if family := legacyAlgorithmFamily(label); family != "" {
+		if err := validateCreatedExpiresWithAlgorithm(headers, family); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func snapshotCavageSignedFields(header http.Header, host string, signedHeaders []string, deferDate bool) (http.Header, error) {
+	owned := make(http.Header)
+	for _, name := range signedHeaders {
+		switch name {
+		case RequestTarget, Created, Expires:
+			continue
+		case "host":
+			values, ok := header[http.CanonicalHeaderKey(name)]
+			if ok && len(values) > 0 {
+				owned["Host"] = append([]string(nil), values...)
+				continue
+			}
+			if host != "" {
+				owned["Host"] = []string{host}
+				continue
+			}
+			return nil, fmt.Errorf("%w: host", ErrSignedHeaderMissing)
+		default:
+			values, ok := header[http.CanonicalHeaderKey(name)]
+			if !ok || len(values) == 0 {
+				if deferDate && name == "date" {
+					continue
+				}
+				return nil, fmt.Errorf("%w: %s", ErrSignedHeaderMissing, name)
+			}
+			owned[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
+		}
+	}
+	return owned, nil
+}
+
+func cloneHeaderValues(header http.Header) map[string][]string {
+	cloned := make(map[string][]string, len(header))
+	for name, values := range header {
+		cloned[name] = append([]string(nil), values...)
+	}
+	return cloned
+}
+
+func parseCavageCreated(value string) (time.Time, error) {
+	if !isSignedDecimalInteger(value) {
+		return time.Time{}, fmt.Errorf("%w: created must be -?[0-9]+", ErrInvalidCreationTime)
+	}
+	seconds, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: created is outside the int64 range", ErrInvalidCreationTime)
+	}
+	created := time.Unix(seconds, 0)
+	if created.Unix() != seconds || created.Nanosecond() != 0 {
+		return time.Time{}, fmt.Errorf("%w: created is outside the time.Time range", ErrInvalidCreationTime)
+	}
+	return created, nil
+}
+
+func parseCavageExpires(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, fmt.Errorf("%w: expires is empty", ErrInvalidExpirationTime)
+	}
+	negative := value[0] == '-'
+	digits := value
+	if negative {
+		digits = value[1:]
+	}
+	whole, fraction, hasFraction := strings.Cut(digits, ".")
+	if whole == "" || !allDecimalDigits(whole) || hasFraction && (fraction == "" || len(fraction) > 9 || !allDecimalDigits(fraction)) {
+		return time.Time{}, fmt.Errorf("%w: expires must be -?[0-9]+ or -?[0-9]+.[0-9]{1,9}", ErrInvalidExpirationTime)
+	}
+	magnitude, err := strconv.ParseUint(whole, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
+	}
+	var fractionalNanoseconds int64
+	if hasFraction {
+		padded := fraction + strings.Repeat("0", 9-len(fraction))
+		fractionalNanoseconds, _ = strconv.ParseInt(padded, 10, 32)
+	}
+
+	var seconds, nanoseconds int64
+	if !negative {
+		if magnitude > uint64(^uint64(0)>>1) {
+			return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
+		}
+		seconds = int64(magnitude)
+		nanoseconds = fractionalNanoseconds
+	} else if fractionalNanoseconds == 0 {
+		if magnitude > uint64(^uint64(0)>>1)+1 {
+			return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
+		}
+		if magnitude == uint64(^uint64(0)>>1)+1 {
+			seconds = -1 << 63
+		} else {
+			seconds = -int64(magnitude)
+		}
+	} else {
+		if magnitude > uint64(^uint64(0)>>1) {
+			return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
+		}
+		seconds = -int64(magnitude) - 1
+		nanoseconds = int64(time.Second) - fractionalNanoseconds
+	}
+
+	expires := time.Unix(seconds, nanoseconds)
+	if expires.Unix() != seconds || int64(expires.Nanosecond()) != nanoseconds {
+		return time.Time{}, fmt.Errorf("%w: expires is outside the time.Time range", ErrInvalidExpirationTime)
+	}
+	return expires, nil
+}
+
+func isSignedDecimalInteger(value string) bool {
+	if value == "" {
+		return false
+	}
+	if value[0] == '-' {
+		value = value[1:]
+	}
+	return value != "" && allDecimalDigits(value)
+}
+
+func allDecimalDigits(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// timeAfterDuration reports whether value is strictly later than base plus
+// duration without converting the difference to time.Duration. All callers
+// provide a non-negative duration validated by NewCavageVerifier.
+func timeAfterDuration(value, base time.Time, duration time.Duration) bool {
+	boundarySeconds := base.Unix()
+	boundaryNanoseconds := int64(base.Nanosecond()) + int64(duration%time.Second)
+	secondsToAdd := int64(duration / time.Second)
+	if boundaryNanoseconds >= int64(time.Second) {
+		boundaryNanoseconds -= int64(time.Second)
+		secondsToAdd++
+	}
+	if boundarySeconds > math.MaxInt64-secondsToAdd {
+		return false
+	}
+	boundarySeconds += secondsToAdd
+
+	valueSeconds := value.Unix()
+	if valueSeconds != boundarySeconds {
+		return valueSeconds > boundarySeconds
+	}
+	return int64(value.Nanosecond()) > boundaryNanoseconds
+}
+
+func (v *CavageVerifier) currentTime() time.Time {
+	if v.config.now == nil {
+		return time.Now().UTC()
+	}
+	return v.config.now().UTC()
+}
+
+func validateVerificationMetadata(signature *CavageSignature, metadata TrustedKeyMetadata) (algorithmDefinition, error) {
 	if metadata.KeyID == "" {
 		return algorithmDefinition{}, fmt.Errorf("%w: KeyID is empty", ErrInvalidKeyMetadata)
 	}
-	if v.params.KeyId != metadata.KeyID {
-		return algorithmDefinition{}, fmt.Errorf("%w: received %q, trusted %q", ErrKeyIDMismatch, v.params.KeyId, metadata.KeyID)
+	algorithm, err := algorithmDefinitionFor(metadata.Algorithm)
+	if err != nil {
+		return algorithmDefinition{}, err
 	}
-	return algorithmDefinitionFor(metadata.Algorithm)
+	if signature.keyID != metadata.KeyID {
+		return algorithmDefinition{}, fmt.Errorf("%w: received %q, trusted %q", ErrKeyIDMismatch, signature.keyID, metadata.KeyID)
+	}
+	return algorithm, nil
 }
 
-func validatePublicKey(key crypto.PublicKey, expected algorithmKeyKind) error {
+func (v *CavageVerifier) validateTrustedAlgorithm(signature *CavageSignature, id AlgorithmID) error {
+	if !v.isAlgorithmAllowed(id) {
+		return fmt.Errorf("%w: trusted AlgorithmID %d is not permitted", ErrInvalidSignatureAlgorithm, id)
+	}
+	if !signature.algorithmPresent {
+		return nil
+	}
+	label := signature.algorithmLabel
+	if label == hs2019 {
+		if isStrictCavageAlgorithm(id) || id == AlgorithmRSAPKCS1v15SHA256 && v.config.allowHS2019WithSHA256 {
+			return nil
+		}
+		return fmt.Errorf("%w: algorithm %q does not identify trusted AlgorithmID %d", ErrAlgorithmMismatch, label, id)
+	}
+	if legacyID, ok := legacyAlgorithmID(label); ok {
+		if legacyID != id {
+			return fmt.Errorf("%w: algorithm %q identifies AlgorithmID %d, trusted metadata specifies %d", ErrAlgorithmMismatch, label, legacyID, id)
+		}
+		return nil
+	}
+	extensionID, ok := v.config.extensionAlgorithms[label]
+	if !ok || extensionID != id {
+		return fmt.Errorf("%w: extension label %q does not identify trusted AlgorithmID %d", ErrAlgorithmMismatch, label, id)
+	}
+	return nil
+}
+
+func (v *CavageVerifier) isAlgorithmAllowed(id AlgorithmID) bool {
+	_, ok := v.config.allowedAlgorithms[id]
+	return ok
+}
+
+func isMissingPublicKey(key crypto.PublicKey) bool {
+	if key == nil {
+		return true
+	}
+	switch publicKey := key.(type) {
+	case *rsa.PublicKey:
+		return publicKey == nil
+	case *ecdsa.PublicKey:
+		return publicKey == nil
+	case ed25519.PublicKey:
+		return len(publicKey) == 0
+	case *ed25519.PublicKey:
+		return publicKey == nil || len(*publicKey) == 0
+	default:
+		return false
+	}
+}
+
+func validateVerificationPublicKey(key crypto.PublicKey, expected algorithmKeyKind) error {
 	switch expected {
 	case algorithmKeyRSA:
-		pub, ok := key.(*rsa.PublicKey)
+		publicKey, ok := key.(*rsa.PublicKey)
 		if !ok {
 			return fmt.Errorf("%w: AlgorithmID requires RSA, public key is %T", ErrAlgorithmMismatch, key)
 		}
-		if pub == nil {
-			return ErrMissingPublicKey
+		if publicKey.N == nil || publicKey.N.Sign() <= 0 || publicKey.N.Bit(0) == 0 || publicKey.E < 2 || publicKey.E&1 == 0 || publicKey.E > math.MaxInt32 {
+			return fmt.Errorf("%w: invalid RSA public key", ErrUnsupportedKeyFormat)
 		}
 	case algorithmKeyECDSA:
-		pub, ok := key.(*ecdsa.PublicKey)
+		publicKey, ok := key.(*ecdsa.PublicKey)
 		if !ok {
 			return fmt.Errorf("%w: AlgorithmID requires ECDSA, public key is %T", ErrAlgorithmMismatch, key)
 		}
-		if pub == nil {
-			return ErrMissingPublicKey
+		if publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil || !publicKey.Curve.IsOnCurve(publicKey.X, publicKey.Y) {
+			return fmt.Errorf("%w: invalid ECDSA public key", ErrUnsupportedKeyFormat)
 		}
 	case algorithmKeyEd25519:
-		switch pub := key.(type) {
+		switch publicKey := key.(type) {
 		case ed25519.PublicKey:
-			if len(pub) == 0 {
-				return ErrMissingPublicKey
-			}
-			if len(pub) != ed25519.PublicKeySize {
-				return fmt.Errorf("%w: invalid Ed25519 public key length %d", ErrUnsupportedKeyFormat, len(pub))
+			if len(publicKey) != ed25519.PublicKeySize {
+				return fmt.Errorf("%w: invalid Ed25519 public key length %d", ErrUnsupportedKeyFormat, len(publicKey))
 			}
 		case *ed25519.PublicKey:
-			if pub == nil || len(*pub) == 0 {
-				return ErrMissingPublicKey
-			}
-			if len(*pub) != ed25519.PublicKeySize {
-				return fmt.Errorf("%w: invalid Ed25519 public key length %d", ErrUnsupportedKeyFormat, len(*pub))
+			if len(*publicKey) != ed25519.PublicKeySize {
+				return fmt.Errorf("%w: invalid Ed25519 public key length %d", ErrUnsupportedKeyFormat, len(*publicKey))
 			}
 		default:
 			return fmt.Errorf("%w: AlgorithmID requires Ed25519, public key is %T", ErrAlgorithmMismatch, key)
@@ -203,252 +823,6 @@ func validatePublicKey(key crypto.PublicKey, expected algorithmKeyKind) error {
 	return nil
 }
 
-func validateCavageVerificationOptions(opts *CavageVerificationOptions) (CavageVerificationOptions, error) {
-	if opts == nil {
-		return CavageVerificationOptions{}, nil
-	}
-	options := *opts
-	if options.MaxSignatureAge < 0 {
-		return CavageVerificationOptions{}, fmt.Errorf("%w: MaxSignatureAge must not be negative", ErrInvalidVerificationOptions)
-	}
-	if options.MaxDateAge < 0 {
-		return CavageVerificationOptions{}, fmt.Errorf("%w: MaxDateAge must not be negative", ErrInvalidVerificationOptions)
-	}
-	for _, id := range options.AllowedAlgorithms {
-		if _, err := algorithmDefinitionFor(id); err != nil {
-			return CavageVerificationOptions{}, fmt.Errorf("%w: AllowedAlgorithms contains AlgorithmID %d", ErrInvalidVerificationOptions, id)
-		}
-	}
-
-	compatibility := options.Compatibility
-	if compatibility == nil {
-		return options, nil
-	}
-	if compatibility.AllowedCreatedFutureSkew < 0 {
-		return CavageVerificationOptions{}, fmt.Errorf("%w: AllowedCreatedFutureSkew must not be negative", ErrInvalidVerificationOptions)
-	}
-	if compatibility.AllowedExpiredSkew < 0 {
-		return CavageVerificationOptions{}, fmt.Errorf("%w: AllowedExpiredSkew must not be negative", ErrInvalidVerificationOptions)
-	}
-	for _, id := range compatibility.AllowedLegacyAlgorithms {
-		if !isLegacyCavageAlgorithm(id) {
-			return CavageVerificationOptions{}, fmt.Errorf("%w: AllowedLegacyAlgorithms contains non-legacy AlgorithmID %d", ErrInvalidVerificationOptions, id)
-		}
-	}
-	for label, id := range compatibility.ExtensionAlgorithms {
-		if label == "" {
-			return CavageVerificationOptions{}, fmt.Errorf("%w: ExtensionAlgorithms contains an empty label", ErrInvalidVerificationOptions)
-		}
-		if isReservedCavageAlgorithmLabel(label) {
-			return CavageVerificationOptions{}, fmt.Errorf("%w: ExtensionAlgorithms must not override known label %q", ErrInvalidVerificationOptions, label)
-		}
-		if _, err := algorithmDefinitionFor(id); err != nil {
-			return CavageVerificationOptions{}, fmt.Errorf("%w: extension label %q maps to unsupported AlgorithmID %d", ErrInvalidVerificationOptions, label, id)
-		}
-	}
-	return options, nil
-}
-
-func (v *CavageVerifier) prepareVerification(id AlgorithmID, opts CavageVerificationOptions) (message, signature []byte, err error) {
-	if err := v.validateWireAlgorithm(id, opts); err != nil {
-		return nil, nil, err
-	}
-
-	headers := v.effectiveHeaders()
-	if opts.RequireExplicitHeaders && !v.params.HeadersPresent {
-		return nil, nil, fmt.Errorf("%w: headers parameter is required", ErrRequiredHeaderMissing)
-	}
-	if family := legacyAlgorithmFamily(v.params.Algorithm); family != "" {
-		if err := validateCreatedExpiresWithAlgorithm(headers, family); err != nil {
-			return nil, nil, err
-		}
-	}
-	if err := validateRequiredHeaders(headers, opts.RequiredHeaders); err != nil {
-		return nil, nil, err
-	}
-
-	now := v.currentTime()
-	createdFutureSkew, expiredSkew := time.Duration(0), time.Duration(0)
-	if opts.Compatibility != nil {
-		createdFutureSkew = opts.Compatibility.AllowedCreatedFutureSkew
-		expiredSkew = opts.Compatibility.AllowedExpiredSkew
-	}
-	if err := v.checkCreated(now, headers, createdFutureSkew, opts.MaxSignatureAge); err != nil {
-		return nil, nil, err
-	}
-	if err := v.checkExpires(now, headers, expiredSkew); err != nil {
-		return nil, nil, err
-	}
-	if err := v.checkDate(now, headers, opts.MaxDateAge); err != nil {
-		return nil, nil, err
-	}
-
-	message, err = v.buildVerificationString(headers)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create verification string: %w", err)
-	}
-	signature, err = base64.StdEncoding.Strict().DecodeString(v.params.Signature)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decode signature: %w", err)
-	}
-	return message, signature, nil
-}
-
-func (v *CavageVerifier) validateWireAlgorithm(id AlgorithmID, opts CavageVerificationOptions) error {
-	if len(opts.AllowedAlgorithms) > 0 && !slices.Contains(opts.AllowedAlgorithms, id) {
-		return fmt.Errorf("%w: trusted AlgorithmID %d is not permitted by AllowedAlgorithms", ErrInvalidSignatureAlgorithm, id)
-	}
-
-	label := v.params.Algorithm
-	compatibility := opts.Compatibility
-	if label == "" {
-		if opts.RequireAlgorithm {
-			return fmt.Errorf("%w: algorithm parameter is required", ErrInvalidSignatureAlgorithm)
-		}
-		if isStrictCavageAlgorithm(id) {
-			return nil
-		}
-		if compatibility != nil && slices.Contains(compatibility.AllowedLegacyAlgorithms, id) {
-			return nil
-		}
-		return fmt.Errorf("%w: trusted AlgorithmID %d requires explicit compatibility", ErrInvalidSignatureAlgorithm, id)
-	}
-
-	if label == hs2019 {
-		if isStrictCavageAlgorithm(id) {
-			return nil
-		}
-		if id == AlgorithmRSAPKCS1v15SHA256 && compatibility != nil && compatibility.AllowHS2019WithSHA256 {
-			return nil
-		}
-		return fmt.Errorf("%w: algorithm %q does not identify trusted AlgorithmID %d", ErrAlgorithmMismatch, label, id)
-	}
-
-	if legacyID, ok := legacyAlgorithmID(label); ok {
-		if legacyID != id {
-			return fmt.Errorf("%w: algorithm %q identifies AlgorithmID %d, trusted metadata specifies %d", ErrAlgorithmMismatch, label, legacyID, id)
-		}
-		if compatibility == nil || !slices.Contains(compatibility.AllowedLegacyAlgorithms, id) {
-			return fmt.Errorf("%w: deprecated algorithm %q is not enabled", ErrInvalidSignatureAlgorithm, label)
-		}
-		return nil
-	}
-
-	if compatibility == nil {
-		return fmt.Errorf("%w: unregistered algorithm label %q", ErrInvalidSignatureAlgorithm, label)
-	}
-	extensionID, ok := compatibility.ExtensionAlgorithms[label]
-	if !ok {
-		return fmt.Errorf("%w: unregistered algorithm label %q", ErrInvalidSignatureAlgorithm, label)
-	}
-	if extensionID != id {
-		return fmt.Errorf("%w: extension label %q identifies AlgorithmID %d, trusted metadata specifies %d", ErrAlgorithmMismatch, label, extensionID, id)
-	}
-	return nil
-}
-
-func (v *CavageVerifier) effectiveHeaders() []string {
-	if len(v.params.Headers) == 0 {
-		return []string{Created}
-	}
-	return v.params.Headers
-}
-
-func validateRequiredHeaders(signedHeaders, requiredHeaders []string) error {
-	for _, required := range requiredHeaders {
-		name, err := normalizeCavageSignedHeaderName(required)
-		if err != nil {
-			return fmt.Errorf("%w: invalid RequiredHeaders entry %q: %v", ErrInvalidVerificationOptions, required, err)
-		}
-		if !slices.Contains(signedHeaders, name) {
-			return fmt.Errorf("%w: %q is not in the effective signed-header list", ErrRequiredHeaderMissing, required)
-		}
-	}
-	return nil
-}
-
-func (v *CavageVerifier) currentTime() time.Time {
-	if v.Now == nil {
-		return time.Now().UTC()
-	}
-	return v.Now().UTC()
-}
-
-func (v *CavageVerifier) checkCreated(now time.Time, headers []string, futureSkew, maxAge time.Duration) error {
-	isSigned := slices.Contains(headers, Created)
-	if maxAge > 0 && !isSigned {
-		return fmt.Errorf("%w: MaxSignatureAge requires %s", ErrRequiredHeaderMissing, Created)
-	}
-	if v.params.Created == "" {
-		if isSigned || maxAge > 0 {
-			return fmt.Errorf("%w: signature requires a valid created parameter", ErrInvalidCreationTime)
-		}
-		return nil
-	}
-
-	createdUnix, err := strconv.ParseInt(v.params.Created, 10, 64)
-	if err != nil {
-		return fmt.Errorf("%w: invalid created parameter: %v", ErrInvalidCreationTime, err)
-	}
-	created := time.Unix(createdUnix, 0)
-	if created.After(now.Add(futureSkew)) {
-		return fmt.Errorf("%w: created %s is after the permitted future boundary %s", ErrInvalidCreationTime, created, now.Add(futureSkew))
-	}
-	if maxAge > 0 && now.Sub(created) > maxAge {
-		return fmt.Errorf("%w: signature age %s exceeds MaxSignatureAge %s", ErrInvalidCreationTime, now.Sub(created), maxAge)
-	}
-	return nil
-}
-
-func (v *CavageVerifier) checkExpires(now time.Time, headers []string, expiredSkew time.Duration) error {
-	isSigned := slices.Contains(headers, Expires)
-	if v.params.Expires == "" {
-		if isSigned {
-			return fmt.Errorf("%w: signature requires a valid expires parameter", ErrSignatureExpired)
-		}
-		return nil
-	}
-
-	expiresUnix, err := strconv.ParseInt(v.params.Expires, 10, 64)
-	if err != nil {
-		return fmt.Errorf("%w: invalid expires parameter: %v", ErrSignatureExpired, err)
-	}
-	expires := time.Unix(expiresUnix, 0)
-	if expires.Before(now.Add(-expiredSkew)) {
-		return fmt.Errorf("%w: expires %s is before the permitted past boundary %s", ErrSignatureExpired, expires, now.Add(-expiredSkew))
-	}
-	return nil
-}
-
-func (v *CavageVerifier) checkDate(now time.Time, headers []string, maxAge time.Duration) error {
-	if maxAge == 0 {
-		return nil
-	}
-	if !slices.Contains(headers, "date") {
-		return fmt.Errorf("%w: MaxDateAge requires date", ErrRequiredHeaderMissing)
-	}
-	values := v.header.Values("Date")
-	if len(values) != 1 {
-		return fmt.Errorf("%w: MaxDateAge requires exactly one Date value, got %d", ErrInvalidDate, len(values))
-	}
-	date, err := http.ParseTime(values[0])
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidDate, err)
-	}
-	if date.Before(now.Add(-maxAge)) || date.After(now.Add(maxAge)) {
-		return fmt.Errorf("%w: Date %s differs from current time %s by more than %s", ErrInvalidDate, date, now, maxAge)
-	}
-	return nil
-}
-
-func (v *CavageVerifier) buildVerificationString(headers []string) ([]byte, error) {
-	buf, err := generateSignatureStringBuffer(headers, v.host, v.method, v.requestTarget, v.header, v.params.Created, v.params.Expires)
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
 func verifyAsymmetric(key crypto.PublicKey, algorithm algorithmDefinition, sig, data []byte) error {
 	switch algorithm.keyKind {
 	case algorithmKeyRSA:
@@ -456,40 +830,40 @@ func verifyAsymmetric(key crypto.PublicKey, algorithm algorithmDefinition, sig, 
 	case algorithmKeyECDSA:
 		return verifyECDSA(key.(*ecdsa.PublicKey), sig, data, algorithm.hash)
 	case algorithmKeyEd25519:
-		switch pub := key.(type) {
+		switch publicKey := key.(type) {
 		case ed25519.PublicKey:
-			return verifyEd25519(pub, sig, data)
+			return verifyEd25519(publicKey, sig, data)
 		case *ed25519.PublicKey:
-			return verifyEd25519(*pub, sig, data)
+			return verifyEd25519(*publicKey, sig, data)
 		}
 	}
 	return fmt.Errorf("%w: unsupported asymmetric AlgorithmID %d", ErrAlgorithmMismatch, algorithm.id)
 }
 
-func verifyRSA(pub *rsa.PublicKey, sig, data []byte, hashID crypto.Hash) error {
+func verifyRSA(publicKey *rsa.PublicKey, sig, data []byte, hashID crypto.Hash) error {
 	digest, err := hashMessage(hashID, data)
 	if err != nil {
 		return err
 	}
-	if err := rsa.VerifyPKCS1v15(pub, hashID, digest, sig); err != nil {
+	if err := rsa.VerifyPKCS1v15(publicKey, hashID, digest, sig); err != nil {
 		return fmt.Errorf("%w: RSA PKCS #1 v1.5 verification failed: %v", ErrVerification, err)
 	}
 	return nil
 }
 
-func verifyECDSA(pub *ecdsa.PublicKey, sig, data []byte, hashID crypto.Hash) error {
+func verifyECDSA(publicKey *ecdsa.PublicKey, sig, data []byte, hashID crypto.Hash) error {
 	digest, err := hashMessage(hashID, data)
 	if err != nil {
 		return err
 	}
-	if !ecdsa.VerifyASN1(pub, digest, sig) {
+	if !ecdsa.VerifyASN1(publicKey, digest, sig) {
 		return fmt.Errorf("%w: ECDSA verification failed", ErrVerification)
 	}
 	return nil
 }
 
-func verifyEd25519(pub ed25519.PublicKey, sig, data []byte) error {
-	if !ed25519.Verify(pub, data, sig) {
+func verifyEd25519(publicKey ed25519.PublicKey, sig, data []byte) error {
+	if !ed25519.Verify(publicKey, data, sig) {
 		return fmt.Errorf("%w: Ed25519 verification failed", ErrVerification)
 	}
 	return nil
@@ -519,7 +893,7 @@ func hashMessage(hashID crypto.Hash, data []byte) ([]byte, error) {
 		digest := sha512.Sum512(data)
 		return digest[:], nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported trusted hash %v", ErrUnsupportedHashAlgorithm, hashID)
+		return nil, fmt.Errorf("unsupported trusted hash %v", hashID)
 	}
 }
 
@@ -530,6 +904,6 @@ func hmacHash(hashID crypto.Hash) (func() hash.Hash, error) {
 	case crypto.SHA512:
 		return sha512.New, nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported trusted HMAC hash %v", ErrUnsupportedHashAlgorithm, hashID)
+		return nil, fmt.Errorf("unsupported trusted HMAC hash %v", hashID)
 	}
 }

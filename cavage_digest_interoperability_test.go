@@ -40,15 +40,19 @@ func TestActivityPubRawBodyDigestBeforeProcessing(t *testing.T) {
 		t.Fatalf("raw body and Digest comparison failed: %v", err)
 	}
 
-	verifier, err := sigre.NewCavageRequestVerifier(req)
+	opts := fixture.verificationOptions(t)
+	opts.RequiredHeaders = []string{"digest"}
+	opts.Now = func() time.Time { return fixture.verificationTime(t) }
+	verifier, err := sigre.NewCavageVerifier(opts)
 	if err != nil {
 		t.Fatalf("failed to construct HTTP signature verifier: %v", err)
 	}
-	verifier.Now = func() time.Time { return fixture.verificationTime(t) }
-	opts := fixture.verificationOptions(t)
-	opts.RequiredHeaders = []string{"digest"}
+	signature, err := verifier.ParseRequest(req)
+	if err != nil {
+		t.Fatalf("failed to parse HTTP signature: %v", err)
+	}
 	key := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
-	if err := verifier.Verify(key, opts); err != nil {
+	if err := verifier.Verify(signature, key); err != nil {
 		t.Fatalf("HTTP signature verification with signed Digest requirement failed: %v", err)
 	}
 
@@ -80,14 +84,18 @@ func TestActivityPubDigestRejectsChangedRawBodyEvenWhenSignatureIsValid(t *testi
 	req := fixture.newRequest(t, true)
 	req.Body = io.NopCloser(bytes.NewReader(changedRawBody))
 	key := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
-	verifier, err := sigre.NewCavageRequestVerifier(req)
+	opts := fixture.verificationOptions(t)
+	opts.RequiredHeaders = []string{"digest"}
+	opts.Now = func() time.Time { return fixture.verificationTime(t) }
+	verifier, err := sigre.NewCavageVerifier(opts)
 	if err != nil {
 		t.Fatalf("failed to construct verifier for request with changed raw body: %v", err)
 	}
-	verifier.Now = func() time.Time { return fixture.verificationTime(t) }
-	opts := fixture.verificationOptions(t)
-	opts.RequiredHeaders = []string{"digest"}
-	if err := verifier.Verify(key, opts); err != nil {
+	signature, err := verifier.ParseRequest(req)
+	if err != nil {
+		t.Fatalf("failed to parse signature for request with changed raw body: %v", err)
+	}
+	if err := verifier.Verify(signature, key); err != nil {
 		t.Fatalf("fixed HTTP signature should remain valid because it signs the Digest field value: %v", err)
 	}
 
@@ -115,15 +123,18 @@ func TestActivityPubDigestMustBeSignedByCallerPolicy(t *testing.T) {
 	})
 	key := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
 
-	verifier := newCavageInteroperabilityVerifier(t, fixture, fixture.verificationTime(t))
-	if err := verifier.Verify(key, fixture.verificationOptions(t)); err != nil {
+	verifier, signature, err := parseCavageInteroperability(t, fixture, fixture.verificationTime(t), fixture.verificationOptions(t))
+	if err != nil {
+		t.Fatalf("signature should parse when an unsigned Digest field is merely present: %v", err)
+	}
+	if err := verifier.Verify(signature, key); err != nil {
 		t.Fatalf("signature should remain valid when an unsigned Digest field is merely present: %v", err)
 	}
 
-	verifier = newCavageInteroperabilityVerifier(t, fixture, fixture.verificationTime(t))
 	opts := fixture.verificationOptions(t)
 	opts.RequiredHeaders = []string{"digest"}
-	if err := verifier.Verify(key, opts); !errors.Is(err, sigre.ErrRequiredHeaderMissing) {
+	_, _, err = parseCavageInteroperability(t, fixture, fixture.verificationTime(t), opts)
+	if !errors.Is(err, sigre.ErrRequiredHeaderMissing) {
 		t.Fatalf("RequiredHeaders did not reject unsigned Digest: %v", err)
 	}
 }

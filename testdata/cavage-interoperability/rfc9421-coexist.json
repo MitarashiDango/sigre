@@ -1,0 +1,6 @@
+{
+  "format_version": 1,
+  "base_fixture_id": "oci-authorization-get-rsa-sha256",
+  "rfc_9421_signature": "sig1=:YWJj:",
+  "rfc_9421_signature_input": "sig1=(\"@method\" \"@authority\" \"@path\");created=1618884473;keyid=\"rfc9421-key\""
+}

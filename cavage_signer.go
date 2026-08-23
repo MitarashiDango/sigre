@@ -135,13 +135,7 @@ func (s *CavageSigner) SignRequest(
 	if header == nil {
 		header = make(http.Header)
 	}
-	message := cavageSigningMessage{
-		isRequest:     true,
-		host:          req.Host,
-		method:        req.Method,
-		requestTarget: outgoingRequestTarget(req.URL),
-		header:        header,
-	}
+	message := requestSigningMessage(req, header)
 	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signAsymmetric(key.PrivateKey, algorithm, data)
 	})
@@ -171,8 +165,7 @@ func (s *CavageSigner) SignResponse(
 	if header == nil {
 		header = make(http.Header)
 	}
-	message := responseSigningMessage(res)
-	message.header = header
+	message := responseSigningMessage(res, header)
 	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signAsymmetric(key.PrivateKey, algorithm, data)
 	})
@@ -202,13 +195,7 @@ func (s *CavageSigner) SignRequestWithHMAC(
 	if header == nil {
 		header = make(http.Header)
 	}
-	message := cavageSigningMessage{
-		isRequest:     true,
-		host:          req.Host,
-		method:        req.Method,
-		requestTarget: outgoingRequestTarget(req.URL),
-		header:        header,
-	}
+	message := requestSigningMessage(req, header)
 	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signHMAC(key.Secret, algorithm.hash, data)
 	})
@@ -238,8 +225,7 @@ func (s *CavageSigner) SignResponseWithHMAC(
 	if header == nil {
 		header = make(http.Header)
 	}
-	message := responseSigningMessage(res)
-	message.header = header
+	message := responseSigningMessage(res, header)
 	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signHMAC(key.Secret, algorithm.hash, data)
 	})
@@ -255,14 +241,31 @@ type cavageSigningMessage struct {
 	method        string
 	requestTarget string
 	header        http.Header
+	resolveFields func([]string) (string, http.Header, error)
 }
 
-func responseSigningMessage(res *http.Response) cavageSigningMessage {
-	message := cavageSigningMessage{header: res.Header}
+func requestSigningMessage(req *http.Request, header http.Header) cavageSigningMessage {
+	return cavageSigningMessage{
+		isRequest:     true,
+		host:          req.Host,
+		method:        req.Method,
+		requestTarget: outgoingRequestTarget(req.URL),
+		header:        header,
+		resolveFields: func(headers []string) (string, http.Header, error) {
+			return resolveOutgoingRequestFields(req, header, headers)
+		},
+	}
+}
+
+func responseSigningMessage(res *http.Response, header http.Header) cavageSigningMessage {
+	message := cavageSigningMessage{header: header}
 	if res.Request != nil {
 		message.host = res.Request.Host
 		message.method = res.Request.Method
 		message.requestTarget = associatedRequestTarget(res.Request)
+	}
+	message.resolveFields = func(headers []string) (string, http.Header, error) {
+		return resolveOutgoingResponseFields(res, message.host, header, headers)
 	}
 	return message
 }
@@ -292,15 +295,23 @@ func (s *CavageSigner) signMessage(
 	if err := ensureCavageSignatureAbsent(message.header); err != nil {
 		return err
 	}
+	signingHost := message.host
+	signingHeader := message.header
+	if message.resolveFields != nil {
+		signingHost, signingHeader, err = message.resolveFields(configuration.headers)
+		if err != nil {
+			return fmt.Errorf("failed to create signing string: %w", err)
+		}
+	}
 
 	now := s.currentTime()
 	created, expires := signingTimestamps(now, configuration.headers, configuration.expiresAfter)
 	buf, err := generateSignatureStringBuffer(
 		configuration.headers,
-		message.host,
+		signingHost,
 		message.method,
 		message.requestTarget,
-		message.header,
+		signingHeader,
 		created,
 		expires,
 	)

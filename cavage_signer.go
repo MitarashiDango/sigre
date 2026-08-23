@@ -131,19 +131,23 @@ func (s *CavageSigner) SignRequest(
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	if req.Header == nil {
-		req.Header = make(http.Header)
+	header := req.Header
+	if header == nil {
+		header = make(http.Header)
 	}
 	message := cavageSigningMessage{
 		isRequest:     true,
 		host:          req.Host,
 		method:        req.Method,
 		requestTarget: outgoingRequestTarget(req.URL),
-		header:        req.Header,
+		header:        header,
 	}
 	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signAsymmetric(key.PrivateKey, algorithm, data)
 	})
+	if err == nil {
+		req.Header = header
+	}
 	return wrapSigreError(err)
 }
 
@@ -163,13 +167,18 @@ func (s *CavageSigner) SignResponse(
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	if res.Header == nil {
-		res.Header = make(http.Header)
+	header := res.Header
+	if header == nil {
+		header = make(http.Header)
 	}
 	message := responseSigningMessage(res)
+	message.header = header
 	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signAsymmetric(key.PrivateKey, algorithm, data)
 	})
+	if err == nil {
+		res.Header = header
+	}
 	return wrapSigreError(err)
 }
 
@@ -189,19 +198,23 @@ func (s *CavageSigner) SignRequestWithHMAC(
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	if req.Header == nil {
-		req.Header = make(http.Header)
+	header := req.Header
+	if header == nil {
+		header = make(http.Header)
 	}
 	message := cavageSigningMessage{
 		isRequest:     true,
 		host:          req.Host,
 		method:        req.Method,
 		requestTarget: outgoingRequestTarget(req.URL),
-		header:        req.Header,
+		header:        header,
 	}
 	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signHMAC(key.Secret, algorithm.hash, data)
 	})
+	if err == nil {
+		req.Header = header
+	}
 	return wrapSigreError(err)
 }
 
@@ -221,13 +234,18 @@ func (s *CavageSigner) SignResponseWithHMAC(
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	if res.Header == nil {
-		res.Header = make(http.Header)
+	header := res.Header
+	if header == nil {
+		header = make(http.Header)
 	}
 	message := responseSigningMessage(res)
+	message.header = header
 	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signHMAC(key.Secret, algorithm.hash, data)
 	})
+	if err == nil {
+		res.Header = header
+	}
 	return wrapSigreError(err)
 }
 

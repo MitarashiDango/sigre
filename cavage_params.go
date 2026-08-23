@@ -133,10 +133,8 @@ func validateCavageKeyID(keyID string) error {
 }
 
 func validateCavageQuotedStringValue(name, value string) error {
-	for i := 0; i < len(value); i++ {
-		if isForbiddenHeaderValueByte(value[i]) {
-			return fmt.Errorf("'%s' contains a byte that cannot be written to an HTTP header", name)
-		}
+	if _, ok := forbiddenHeaderValueByteIndex(value); ok {
+		return fmt.Errorf("'%s' contains a byte that cannot be written to an HTTP header", name)
 	}
 	return nil
 }
@@ -391,6 +389,15 @@ func isForbiddenHeaderValueByte(b byte) bool {
 	return b < ' ' && b != '\t' || b == 0x7f
 }
 
+func forbiddenHeaderValueByteIndex(value string) (int, bool) {
+	for i := 0; i < len(value); i++ {
+		if isForbiddenHeaderValueByte(value[i]) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
 // validateCreatedExpiresWithAlgorithm enforces the Section 2.3 restriction:
 // the (created) and (expires) pseudo-headers MUST NOT appear in the headers list
 // when the algorithm starts with "rsa", "hmac", or "ecdsa".
@@ -455,13 +462,20 @@ func normalizeCavageSignedHeaderName(name string) (string, error) {
 	return lowerName, nil
 }
 
-func appendCavageHeaderValues(buf *bytes.Buffer, values []string) {
+func appendCavageHeaderValues(buf *bytes.Buffer, name string, values []string) error {
+	for valueIndex, value := range values {
+		if byteIndex, ok := forbiddenHeaderValueByteIndex(value); ok {
+			return fmt.Errorf("%w: HTTP field %q value index %d contains a forbidden control byte at byte position %d", ErrInvalidHTTPMessage, name, valueIndex, byteIndex+1)
+		}
+	}
+
 	for i, value := range values {
 		if i > 0 {
 			buf.WriteString(", ")
 		}
 		buf.WriteString(trimCavageOWS(value))
 	}
+	return nil
 }
 
 // generateSignatureStringBuffer builds the signature string as defined in
@@ -516,9 +530,13 @@ func generateSignatureStringBuffer(
 				if len(values) == 0 {
 					return nil, fmt.Errorf("missing header in message for signing string: %s", name)
 				}
-				appendCavageHeaderValues(buf, values)
+				if err := appendCavageHeaderValues(buf, name, values); err != nil {
+					return nil, err
+				}
 			} else if host != "" {
-				buf.WriteString(trimCavageOWS(host))
+				if err := appendCavageHeaderValues(buf, name, []string{host}); err != nil {
+					return nil, err
+				}
 			} else {
 				return nil, fmt.Errorf("failed to get host value for signing string: 'Host' header missing and no fallback host provided")
 			}
@@ -527,7 +545,9 @@ func generateSignatureStringBuffer(
 			if !ok || len(vals) == 0 {
 				return nil, fmt.Errorf("missing header in message for signing string: %s (canonical: %s)", name, http.CanonicalHeaderKey(name))
 			}
-			appendCavageHeaderValues(buf, vals)
+			if err := appendCavageHeaderValues(buf, name, vals); err != nil {
+				return nil, err
+			}
 		}
 	}
 

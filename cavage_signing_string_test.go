@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 var signingStringTestSecret = []byte("signing-string-test-secret")
@@ -215,6 +216,269 @@ func TestCavageSignerNormalHeaderCanonicalization(t *testing.T) {
 				t.Fatalf("signing failed: %v", err)
 			}
 			assertCavageHMACSignature(t, header.Get(Signature), want)
+		})
+	}
+}
+
+func TestCavageSignerRejectsAuthorizationSelfReference(t *testing.T) {
+	tests := []struct {
+		name   string
+		header http.Header
+		opts   *CavageSigningOptions
+	}{
+		{
+			name: "ExactHeaders with existing Bearer authorization",
+			header: http.Header{
+				Authorization: []string{"Bearer token"},
+				"X-Unrelated": []string{"unchanged"},
+			},
+			opts: signingStringOptions([]string{"authorization"}),
+		},
+		{
+			name: "mixed-case AdditionalHeaders",
+			header: http.Header{
+				Authorization: []string{"Bearer token"},
+				"X-Unrelated": []string{"unchanged"},
+			},
+			opts: &CavageSigningOptions{
+				AdditionalHeaders: []string{"AuThOrIzAtIoN"},
+				Compatibility: &CavageSigningCompatibility{
+					AlgorithmField: AlgorithmFieldOmitted,
+				},
+			},
+		},
+		{
+			name:   "missing authorization with nil Header",
+			header: nil,
+			opts:   signingStringOptions([]string{"AUTHORIZATION"}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &http.Request{
+				Method: "GET",
+				URL:    &url.URL{Scheme: "https", Host: "example.test", Path: "/resource"},
+				Host:   "example.test",
+				Header: tt.header,
+				Body:   http.NoBody,
+			}
+			beforeHeader := tt.header.Clone()
+			beforeURL := *req.URL
+			beforeBody := req.Body
+
+			err := NewCavageSigner().SignRequestWithHMAC(
+				req,
+				signingStringHMACSigningKey("self-reference-key"),
+				CavageSignaturePlacementAuthorization,
+				tt.opts,
+			)
+			assertInvalidPlacementError(t, err, "self-reference")
+
+			if !reflect.DeepEqual(req.Header, beforeHeader) {
+				t.Fatalf("Header changed after failed signing\ngot:  %#v\nwant: %#v", req.Header, beforeHeader)
+			}
+			if req.Header.Get(Authorization) != tt.header.Get(Authorization) {
+				t.Fatalf("Authorization = %q, want %q", req.Header.Get(Authorization), tt.header.Get(Authorization))
+			}
+			if req.Header.Get(Signature) != "" {
+				t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(Signature))
+			}
+			if req.Host != "example.test" || !reflect.DeepEqual(req.URL, &beforeURL) || req.Body != beforeBody {
+				t.Fatal("request fields changed after failed signing")
+			}
+		})
+	}
+}
+
+func TestCavageSignerRejectsResponseAuthorizationPlacement(t *testing.T) {
+	privateKey := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	asymmetricKey := SigningKey{
+		Metadata:   TrustedKeyMetadata{KeyID: "response-asymmetric-key", Algorithm: AlgorithmEd25519},
+		PrivateKey: privateKey,
+	}
+	hmacKey := HMACSigningKey{
+		Metadata: TrustedKeyMetadata{KeyID: "response-hmac-key", Algorithm: AlgorithmHMACSHA512},
+		Secret:   []byte("response-placement-secret"),
+	}
+
+	tests := []struct {
+		name   string
+		header http.Header
+		sign   func(*http.Response) error
+	}{
+		{
+			name: "asymmetric",
+			header: http.Header{
+				Authorization: []string{"Bearer token"},
+				"X-Unrelated": []string{"unchanged"},
+			},
+			sign: func(res *http.Response) error {
+				return NewCavageSigner().SignResponse(res, asymmetricKey, CavageSignaturePlacementAuthorization, nil)
+			},
+		},
+		{
+			name: "HMAC with existing signature",
+			header: http.Header{
+				Authorization: []string{"Bearer token"},
+				Signature:     []string{`keyId="existing"`},
+				"X-Unrelated": []string{"first", "second"},
+			},
+			sign: func(res *http.Response) error {
+				return NewCavageSigner().SignResponseWithHMAC(res, hmacKey, CavageSignaturePlacementAuthorization, nil)
+			},
+		},
+		{
+			name:   "HMAC with nil Header",
+			header: nil,
+			sign: func(res *http.Response) error {
+				return NewCavageSigner().SignResponseWithHMAC(res, hmacKey, CavageSignaturePlacementAuthorization, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			associatedRequest := &http.Request{Host: "example.test", Body: http.NoBody}
+			res := &http.Response{
+				Status:        "200 OK",
+				StatusCode:    http.StatusOK,
+				Header:        tt.header,
+				Body:          http.NoBody,
+				ContentLength: 17,
+				Request:       associatedRequest,
+			}
+			beforeHeader := tt.header.Clone()
+			beforeBody := res.Body
+			beforeRequest := res.Request
+
+			err := tt.sign(res)
+			assertInvalidPlacementError(t, err, "response")
+
+			if !reflect.DeepEqual(res.Header, beforeHeader) {
+				t.Fatalf("Header changed after failed signing\ngot:  %#v\nwant: %#v", res.Header, beforeHeader)
+			}
+			if res.Status != "200 OK" || res.StatusCode != http.StatusOK || res.ContentLength != 17 {
+				t.Fatal("response fields changed after failed signing")
+			}
+			if res.Body != beforeBody || res.Request != beforeRequest || res.Request != associatedRequest {
+				t.Fatal("response Body or associated Request changed after failed signing")
+			}
+		})
+	}
+}
+
+func TestCavageSignerAllowsNonSelfReferentialPlacement(t *testing.T) {
+	const created = int64(1700000000)
+	signer := &CavageSigner{Now: func() time.Time { return time.Unix(created, 0) }}
+
+	t.Run("Authorization placement with default signed headers", func(t *testing.T) {
+		req := &http.Request{
+			Method: "POST",
+			URL:    &url.URL{Scheme: "https", Host: "example.test", Path: "/resource", RawQuery: "x=1"},
+			Host:   "example.test",
+			Header: http.Header{"X-Unrelated": []string{"unchanged"}},
+		}
+		opts := &CavageSigningOptions{Compatibility: &CavageSigningCompatibility{AlgorithmField: AlgorithmFieldOmitted}}
+
+		if err := signer.SignRequestWithHMAC(req, signingStringHMACSigningKey("authorization-output-key"), CavageSignaturePlacementAuthorization, opts); err != nil {
+			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
+		}
+		authorization := req.Header.Get(Authorization)
+		if !strings.HasPrefix(authorization, "Signature keyId=") {
+			t.Fatalf("Authorization = %q, want Signature scheme", authorization)
+		}
+		if req.Header.Get(Signature) != "" || req.Header.Get("X-Unrelated") != "unchanged" {
+			t.Fatalf("unexpected final Header: %#v", req.Header)
+		}
+		assertCavageHMACSignature(t, authorization, "(request-target): post /resource?x=1\n(created): 1700000000")
+	})
+
+	t.Run("Signature placement signs existing Bearer authorization", func(t *testing.T) {
+		req := &http.Request{
+			Method: "GET",
+			URL:    &url.URL{Scheme: "https", Host: "example.test", Path: "/"},
+			Host:   "example.test",
+			Header: http.Header{Authorization: []string{"Bearer token"}},
+		}
+
+		if err := signer.SignRequestWithHMAC(req, signingStringHMACSigningKey("authorization-input-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"Authorization"})); err != nil {
+			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
+		}
+		if req.Header.Get(Authorization) != "Bearer token" {
+			t.Fatalf("Authorization = %q, want existing Bearer value", req.Header.Get(Authorization))
+		}
+		if req.Header.Get(Signature) == "" {
+			t.Fatal("Signature header is missing")
+		}
+		assertCavageHMACSignature(t, req.Header.Get(Signature), "authorization: Bearer token")
+	})
+
+	t.Run("response Signature placement", func(t *testing.T) {
+		res := &http.Response{Header: http.Header{"X-Response": []string{"signed value"}}}
+		if err := signer.SignResponseWithHMAC(res, signingStringHMACSigningKey("response-signature-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"X-Response"})); err != nil {
+			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
+		}
+		if res.Header.Get(Signature) == "" || res.Header.Get(Authorization) != "" {
+			t.Fatalf("unexpected final Header: %#v", res.Header)
+		}
+		assertCavageHMACSignature(t, res.Header.Get(Signature), "x-response: signed value")
+	})
+}
+
+func TestCavageSignerRejectsInvalidPlacementBeforeSigningWork(t *testing.T) {
+	algorithm, err := algorithmDefinitionFor(AlgorithmHMACSHA256)
+	if err != nil {
+		t.Fatalf("algorithmDefinitionFor() failed: %v", err)
+	}
+
+	for _, tt := range []struct {
+		name      string
+		isRequest bool
+		detail    string
+	}{
+		{name: "request self-reference", isRequest: true, detail: "self-reference"},
+		{name: "response Authorization placement", detail: "response"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			header := http.Header{Authorization: []string{"Bearer token"}}
+			beforeHeader := header.Clone()
+			resolveCalls := 0
+			timeCalls := 0
+			signCalls := 0
+			message := cavageSigningMessage{
+				isRequest: tt.isRequest,
+				header:    header,
+				resolveFields: func([]string) (string, http.Header, error) {
+					resolveCalls++
+					return "", header, nil
+				},
+			}
+			signer := &CavageSigner{Now: func() time.Time {
+				timeCalls++
+				return time.Unix(1700000000, 0)
+			}}
+
+			err := signer.signMessage(
+				message,
+				TrustedKeyMetadata{KeyID: "callback-key", Algorithm: AlgorithmHMACSHA256},
+				algorithm,
+				CavageSignaturePlacementAuthorization,
+				signingStringOptions([]string{"authorization"}),
+				func([]byte) ([]byte, error) {
+					signCalls++
+					return []byte("signature"), nil
+				},
+			)
+			if !errors.Is(err, ErrInvalidSignaturePlacement) || !strings.Contains(err.Error(), tt.detail) {
+				t.Fatalf("signMessage() error = %v, want ErrInvalidSignaturePlacement containing %q", err, tt.detail)
+			}
+			if resolveCalls != 0 || timeCalls != 0 || signCalls != 0 {
+				t.Fatalf("calls after placement rejection: resolveFields=%d, Now=%d, sign=%d; want all zero", resolveCalls, timeCalls, signCalls)
+			}
+			if !reflect.DeepEqual(header, beforeHeader) {
+				t.Fatalf("Header changed after placement rejection\ngot:  %#v\nwant: %#v", header, beforeHeader)
+			}
 		})
 	}
 }
@@ -436,7 +700,7 @@ func TestCavageSignerRejectsForbiddenHostFallbackWithoutMutation(t *testing.T) {
 		err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("invalid-host-key"),
-			CavageSignaturePlacementAuthorization,
+			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"host"}),
 		)
 		if !errors.Is(err, ErrInvalidHTTPMessage) {
@@ -489,7 +753,7 @@ func TestCavageSignerNilHeaderContract(t *testing.T) {
 		},
 		{
 			name:      "asymmetric response",
-			placement: CavageSignaturePlacementAuthorization,
+			placement: CavageSignaturePlacementSignature,
 			sign: func(_ *http.Request, res *http.Response, placement CavageSignaturePlacement) error {
 				return NewCavageSigner().SignResponse(res, asymmetricKey, placement, signingStringOptions([]string{"host"}))
 			},
@@ -1304,5 +1568,19 @@ func assertCavageHMACSignature(t *testing.T, headerValue, signingString string) 
 	}
 	if !hmac.Equal(got, mac.Sum(nil)) {
 		t.Fatalf("signature does not cover fixed signing string %q", signingString)
+	}
+}
+
+func assertInvalidPlacementError(t *testing.T, err error, detail string) {
+	t.Helper()
+	if !errors.Is(err, ErrInvalidSignaturePlacement) {
+		t.Fatalf("signing error = %v, want ErrInvalidSignaturePlacement", err)
+	}
+	var sigreErr *SigreError
+	if !errors.As(err, &sigreErr) {
+		t.Fatalf("signing error type = %T, want *SigreError", err)
+	}
+	if !strings.Contains(err.Error(), detail) {
+		t.Fatalf("signing error = %q, want it to contain %q", err, detail)
 	}
 }

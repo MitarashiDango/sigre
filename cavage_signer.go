@@ -40,7 +40,8 @@ type CavageSignaturePlacement uint8
 const (
 	// CavageSignaturePlacementSignature writes the signature to the Signature header.
 	CavageSignaturePlacementSignature CavageSignaturePlacement = iota + 1
-	// CavageSignaturePlacementAuthorization writes the signature as Authorization: Signature.
+	// CavageSignaturePlacementAuthorization writes a request signature as Authorization: Signature.
+	// It is invalid for responses and when authorization is among the signed fields.
 	CavageSignaturePlacementAuthorization
 )
 
@@ -116,8 +117,9 @@ func NewCavageSigner() *CavageSigner {
 }
 
 // SignRequest signs req with the algorithm bound to key.Metadata and writes the
-// result to placement. Passing nil opts is equivalent to a zero-value
-// [CavageSigningOptions].
+// result to placement. Authorization placement is invalid when authorization is
+// among the effective signed fields. Passing nil opts is equivalent to a
+// zero-value [CavageSigningOptions].
 func (s *CavageSigner) SignRequest(
 	req *http.Request,
 	key SigningKey,
@@ -146,8 +148,9 @@ func (s *CavageSigner) SignRequest(
 }
 
 // SignResponse signs res with the algorithm bound to key.Metadata and writes
-// the result to placement. Passing nil opts is equivalent to a zero-value
-// [CavageSigningOptions].
+// the result to the Signature header. Placement must be
+// [CavageSignaturePlacementSignature]. Passing nil opts is equivalent to a
+// zero-value [CavageSigningOptions].
 func (s *CavageSigner) SignResponse(
 	res *http.Response,
 	key SigningKey,
@@ -176,8 +179,9 @@ func (s *CavageSigner) SignResponse(
 }
 
 // SignRequestWithHMAC signs req with the HMAC algorithm bound to key.Metadata
-// and writes the result to placement. Passing nil opts is equivalent to a
-// zero-value [CavageSigningOptions].
+// and writes the result to placement. Authorization placement is invalid when
+// authorization is among the effective signed fields. Passing nil opts is
+// equivalent to a zero-value [CavageSigningOptions].
 func (s *CavageSigner) SignRequestWithHMAC(
 	req *http.Request,
 	key HMACSigningKey,
@@ -206,7 +210,8 @@ func (s *CavageSigner) SignRequestWithHMAC(
 }
 
 // SignResponseWithHMAC signs res with the HMAC algorithm bound to key.Metadata
-// and writes the result to placement. Passing nil opts is equivalent to a
+// and writes the result to the Signature header. Placement must be
+// [CavageSignaturePlacementSignature]. Passing nil opts is equivalent to a
 // zero-value [CavageSigningOptions].
 func (s *CavageSigner) SignResponseWithHMAC(
 	res *http.Response,
@@ -288,9 +293,15 @@ func (s *CavageSigner) signMessage(
 	if err := validateCavageSignaturePlacement(placement); err != nil {
 		return err
 	}
+	if !message.isRequest && placement == CavageSignaturePlacementAuthorization {
+		return fmt.Errorf("%w: Authorization placement cannot be used for a response", ErrInvalidSignaturePlacement)
+	}
 	configuration, err := resolveCavageSigningConfiguration(message.isRequest, metadata.Algorithm, opts)
 	if err != nil {
 		return err
+	}
+	if message.isRequest && placement == CavageSignaturePlacementAuthorization && slices.Contains(configuration.headers, "authorization") {
+		return fmt.Errorf("%w: request Authorization placement creates a self-reference when authorization is a signed field", ErrInvalidSignaturePlacement)
 	}
 	if err := ensureCavageSignatureAbsent(message.header); err != nil {
 		return err

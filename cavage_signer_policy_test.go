@@ -2,6 +2,7 @@ package sigre_test
 
 import (
 	"crypto"
+	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/sha512"
 	"encoding/base64"
@@ -479,15 +480,84 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 	key := fixedSigningKey("expires-key", sigre.AlgorithmEd25519, privateKey)
 	now := time.Unix(100, 900_000_000)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return now }}
-
-	t.Run("duration is added before Unix conversion", func(t *testing.T) {
-		req := newSignerPolicyRequest(t)
-		opts := &sigre.CavageSigningOptions{
-			ExpiresAfter: 200 * time.Millisecond,
+	requestOptions := func(expiresAfter time.Duration) *sigre.CavageSigningOptions {
+		return &sigre.CavageSigningOptions{
+			ExpiresAfter: expiresAfter,
 			Compatibility: &sigre.CavageSigningCompatibility{
 				ExactHeaders: []string{sigre.RequestTarget, sigre.Created, sigre.Expires},
 			},
 		}
+	}
+
+	t.Run("short expiration is accepted immediately", func(t *testing.T) {
+		req := newSignerPolicyRequest(t)
+		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, requestOptions(50*time.Millisecond)); err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+		req.RequestURI = req.URL.RequestURI()
+		verifier, signature := parseSignerPolicyRequest(t, req, now, nil)
+		if err := verifier.Verify(signature, fixedPublicVerificationKey("expires-key", sigre.AlgorithmEd25519, privateKey.Public())); err != nil {
+			t.Fatalf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("asymmetric request preserves fractional expiration", func(t *testing.T) {
+		req := newSignerPolicyRequest(t)
+		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, requestOptions(50*time.Millisecond)); err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+		value := req.Header.Get(sigre.Signature)
+		if created, _ := signerPolicyParameter(t, value, "created"); created != "100" {
+			t.Fatalf("created = %q, want 100", created)
+		}
+		if expires, _ := signerPolicyParameter(t, value, "expires"); expires != "100.95" {
+			t.Fatalf("expires = %q, want 100.95", expires)
+		}
+
+		const signingString = "(request-target): post /signer?fixed=1\n(created): 100\n(expires): 100.95"
+		if !ed25519.Verify(privateKey.Public().(ed25519.PublicKey), []byte(signingString), signerPolicySignatureBytes(t, value)) {
+			t.Fatalf("generated Ed25519 signature does not cover %q", signingString)
+		}
+
+		req.RequestURI = req.URL.RequestURI()
+		for _, tt := range []struct {
+			name    string
+			now     time.Time
+			wantErr error
+		}{
+			{name: "before expiration", now: time.Unix(100, 949_999_999)},
+			{name: "at expiration", now: time.Unix(100, 950_000_000)},
+			{name: "after expiration", now: time.Unix(100, 950_000_001), wantErr: sigre.ErrSignatureExpired},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				verifier, err := sigre.NewCavageVerifier(&sigre.CavageVerificationOptions{Now: func() time.Time { return tt.now }})
+				if err != nil {
+					t.Fatalf("NewCavageVerifier() failed: %v", err)
+				}
+				signature, err := verifier.ParseRequest(req)
+				if tt.wantErr != nil {
+					if !errors.Is(err, tt.wantErr) {
+						t.Fatalf("ParseRequest() error = %v, want errors.Is(_, %v)", err, tt.wantErr)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("ParseRequest() failed: %v", err)
+				}
+				expires, ok := signature.Expires()
+				if !ok || !expires.Equal(time.Unix(100, 950_000_000)) {
+					t.Fatalf("Expires() = %v/%t, want %v/true", expires, ok, time.Unix(100, 950_000_000))
+				}
+				if err := verifier.Verify(signature, fixedPublicVerificationKey("expires-key", sigre.AlgorithmEd25519, privateKey.Public())); err != nil {
+					t.Fatalf("Verify() failed: %v", err)
+				}
+			})
+		}
+	})
+
+	t.Run("duration is added before Unix conversion", func(t *testing.T) {
+		req := newSignerPolicyRequest(t)
+		opts := requestOptions(200 * time.Millisecond)
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
@@ -495,8 +565,54 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 		if created, _ := signerPolicyParameter(t, value, "created"); created != "100" {
 			t.Fatalf("created = %q, want 100", created)
 		}
-		if expires, _ := signerPolicyParameter(t, value, "expires"); expires != "101" {
-			t.Fatalf("expires = %q, want 101", expires)
+		if expires, _ := signerPolicyParameter(t, value, "expires"); expires != "101.1" {
+			t.Fatalf("expires = %q, want 101.1", expires)
+		}
+	})
+
+	t.Run("HMAC response preserves fractional expiration", func(t *testing.T) {
+		secret := []byte(testHMACSecret)
+		res := newSignerPolicyResponse()
+		opts := &sigre.CavageSigningOptions{
+			ExpiresAfter: 50 * time.Millisecond,
+			Compatibility: &sigre.CavageSigningCompatibility{
+				ExactHeaders: []string{sigre.Created, sigre.Expires},
+			},
+		}
+		if err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey("expires-hmac-key", sigre.AlgorithmHMACSHA512, secret), sigre.CavageSignaturePlacementSignature, opts); err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+		value := res.Header.Get(sigre.Signature)
+		if expires, _ := signerPolicyParameter(t, value, "expires"); expires != "100.95" {
+			t.Fatalf("expires = %q, want 100.95", expires)
+		}
+		assertSignerPolicyHMAC(t, value, "(created): 100\n(expires): 100.95", secret)
+
+		verifier, signature := parseSignerPolicyResponse(t, res, now, nil)
+		if err := verifier.VerifyHMAC(signature, fixedHMACVerificationKey("expires-hmac-key", sigre.AlgorithmHMACSHA512, secret)); err != nil {
+			t.Fatalf("verification failed: %v", err)
+		}
+	})
+
+	t.Run("Now is called once for created and expires", func(t *testing.T) {
+		nowCalls := 0
+		countingSigner := &sigre.CavageSigner{Now: func() time.Time {
+			nowCalls++
+			return now
+		}}
+		req := newSignerPolicyRequest(t)
+		if err := countingSigner.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, requestOptions(50*time.Millisecond)); err != nil {
+			t.Fatalf("signing failed: %v", err)
+		}
+		if nowCalls != 1 {
+			t.Fatalf("Now calls = %d, want 1", nowCalls)
+		}
+		value := req.Header.Get(sigre.Signature)
+		if created, _ := signerPolicyParameter(t, value, "created"); created != "100" {
+			t.Fatalf("created = %q, want 100", created)
+		}
+		if expires, _ := signerPolicyParameter(t, value, "expires"); expires != "100.95" {
+			t.Fatalf("expires = %q, want 100.95", expires)
 		}
 	})
 

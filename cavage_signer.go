@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -56,8 +57,9 @@ type CavageSigningOptions struct {
 	// AdditionalHeaders appends fields to the strict request or response defaults.
 	// It does not replace those defaults.
 	AdditionalHeaders []string
-	// ExpiresAfter sets expires to the current time plus this duration. A positive
-	// value is valid only when (expires) is in the effective signed-header list.
+	// ExpiresAfter sets expires to the current time plus this duration. Whole-second
+	// deadlines use integer notation, and subsecond deadlines use decimal notation.
+	// A positive value is valid only when (expires) is in the effective signed-header list.
 	ExpiresAfter time.Duration
 
 	// Compatibility explicitly selects non-default wire representations or headers.
@@ -662,9 +664,28 @@ func signingTimestamps(now time.Time, headers []string, expiresAfter time.Durati
 		created = strconv.FormatInt(now.Unix(), 10)
 	}
 	if slices.Contains(headers, Expires) {
-		expires = strconv.FormatInt(now.Add(expiresAfter).Unix(), 10)
+		deadline := now.Add(expiresAfter)
+		expires = formatCavageExpires(deadline)
 	}
 	return created, expires
+}
+
+func formatCavageExpires(deadline time.Time) string {
+	seconds := deadline.Unix()
+	nanoseconds := int64(deadline.Nanosecond())
+	if nanoseconds == 0 {
+		return strconv.FormatInt(seconds, 10)
+	}
+
+	prefix := ""
+	if seconds < 0 {
+		prefix = "-"
+		seconds = -(seconds + 1)
+		nanoseconds = int64(time.Second) - nanoseconds
+	}
+	fraction := strconv.FormatInt(int64(time.Second)+nanoseconds, 10)[1:]
+	fraction = strings.TrimRight(fraction, "0")
+	return prefix + strconv.FormatInt(seconds, 10) + "." + fraction
 }
 
 func signAsymmetric(key crypto.PrivateKey, algorithm algorithmDefinition, data []byte) ([]byte, error) {

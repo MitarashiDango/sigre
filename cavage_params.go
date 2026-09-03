@@ -158,21 +158,22 @@ func parseCavageParams(input string) (*cavageParams, error) {
 		}
 
 		name, valueStart, wellFormedName := parseCavageAuthParamName(segment)
-		canonicalName, known := knownCavageParamName(name)
-		if known {
-			if seen[canonicalName] {
-				return nil, fmt.Errorf("duplicate parameter name '%s' found", name)
-			}
-			seen[canonicalName] = true
+		if !wellFormedName {
+			continue
 		}
-		if !wellFormedName || !known {
+		canonicalName, known := knownCavageParamName(name)
+		if !known {
 			continue
 		}
 
 		value, wellFormedValue := parseCavageAuthParamValue(segment, valueStart)
 		if !wellFormedValue {
-			return nil, fmt.Errorf("malformed known parameter %q", name)
+			continue
 		}
+		if seen[canonicalName] {
+			return nil, fmt.Errorf("duplicate parameter name '%s' found", name)
+		}
+		seen[canonicalName] = true
 
 		switch canonicalName {
 		case "keyid":

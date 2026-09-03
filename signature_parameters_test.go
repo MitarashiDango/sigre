@@ -1,6 +1,8 @@
 package sigre_test
 
 import (
+	"errors"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -74,6 +76,84 @@ func TestParseCavageParams(t *testing.T) {
 			},
 		},
 		{
+			name:  "malformed known optional parameter is ignored",
+			input: `keyId="k",signature="AA==",algorithm=@`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:     "k",
+				Signature: "AA==",
+			},
+		},
+		{
+			name:  "malformed required parameter before valid parameter is ignored",
+			input: `keyId,keyId="k",signature="AA=="`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:     "k",
+				Signature: "AA==",
+			},
+		},
+		{
+			name:  "malformed required parameter after valid parameter is ignored",
+			input: `keyId="k",keyId,signature="AA=="`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:     "k",
+				Signature: "AA==",
+			},
+		},
+		{
+			name:  "malformed optional parameter before valid parameter is ignored",
+			input: `keyId="k",signature="AA==",algorithm=@,algorithm=hs2019`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:            "k",
+				Signature:        "AA==",
+				Algorithm:        "hs2019",
+				AlgorithmPresent: true,
+			},
+		},
+		{
+			name:  "malformed optional parameter after valid parameter is ignored",
+			input: `keyId="k",signature="AA==",algorithm=hs2019,algorithm=@`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:            "k",
+				Signature:        "AA==",
+				Algorithm:        "hs2019",
+				AlgorithmPresent: true,
+			},
+		},
+		{
+			name:  "malformed created after valid parameter is ignored",
+			input: `keyId=one,signature=c2ln,created=1,created=@`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:          "one",
+				Signature:      "c2ln",
+				Created:        "1",
+				CreatedPresent: true,
+			},
+		},
+		{
+			name:  "two malformed optional parameters remain absent",
+			input: `keyId="k",signature="AA==",algorithm=@,algorithm=@`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:     "k",
+				Signature: "AA==",
+			},
+		},
+		{
+			name:  "malformed headers parameter remains absent",
+			input: `keyId="k",signature="AA==",headers=@`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:     "k",
+				Signature: "AA==",
+			},
+		},
+		{
+			name:  "malformed unknown parameter is ignored",
+			input: `keyId="k",signature="AA==",bogus=@`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:     "k",
+				Signature: "AA==",
+			},
+		},
+		{
 			name:  "malformed parameters with safe boundaries are ignored",
 			input: `bad=@,missing-equals value,keyId=key-6,signature=c2ln`,
 			expected: &sigre.ExportForTesting_cavageParams{
@@ -90,6 +170,21 @@ func TestParseCavageParams(t *testing.T) {
 				Created:        "not-a-number",
 				CreatedPresent: true,
 			},
+		},
+		{
+			name:  "expires syntax is retained for verifier policy validation",
+			input: `expires=not-a-number,keyId=key-8,signature=c2ln`,
+			expected: &sigre.ExportForTesting_cavageParams{
+				KeyID:          "key-8",
+				Signature:      "c2ln",
+				Expires:        "not-a-number",
+				ExpiresPresent: true,
+			},
+		},
+		{
+			name:          "two malformed required parameters remain missing",
+			input:         `keyId,keyId,signature="AA=="`,
+			errorContains: "missing required parameter: keyId",
 		},
 		{
 			name:          "missing keyId",
@@ -144,7 +239,7 @@ func TestParseCavageParams(t *testing.T) {
 		{
 			name:          "missing comma does not recover a hidden parameter",
 			input:         `keyId=key-1 signature=c2ln`,
-			errorContains: "malformed known parameter",
+			errorContains: "missing required parameter: keyId",
 		},
 	}
 
@@ -175,14 +270,13 @@ func TestParseCavageParamsRejectsDuplicateKnownParameters(t *testing.T) {
 		name  string
 		input string
 	}{
-		{name: "keyId", input: `keyId=one,keyId=two,signature=c2ln`},
+		{name: "keyId", input: `keyId="first",keyId="second",signature="AA=="`},
 		{name: "signature", input: `keyId=one,signature=c2ln,signature=c2ln`},
 		{name: "algorithm", input: `keyId=one,algorithm=hs2019,algorithm=hs2019,signature=c2ln`},
 		{name: "headers", input: `keyId=one,headers=host,headers=date,signature=c2ln`},
 		{name: "created at end", input: `keyId=one,signature=c2ln,created=1,created=2`},
 		{name: "expires at end", input: `keyId=one,signature=c2ln,expires=1,expires=2`},
 		{name: "case only difference", input: `keyId=one,signature=c2ln,created=1,CREATED=2`},
-		{name: "malformed second value", input: `keyId=one,signature=c2ln,created=1,created=@`},
 		{name: "unknown content cannot hide duplicate", input: `unknown="created=1,created=2",created=1,CREATED=2,keyId=one,signature=c2ln`},
 	}
 
@@ -191,6 +285,72 @@ func TestParseCavageParamsRejectsDuplicateKnownParameters(t *testing.T) {
 			_, err := sigre.ExportForTesting_parseCavageParams(tc.input)
 			if err == nil || !strings.Contains(err.Error(), "duplicate parameter name") {
 				t.Fatalf("expected duplicate parameter error, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestCavageVerifierRejectsSemanticallyInvalidParameters(t *testing.T) {
+	testCases := []struct {
+		name      string
+		input     string
+		wantError error
+	}{
+		{
+			name:      "created is not a number",
+			input:     `keyId="k",signature="AA==",headers="x-test",created=not-a-number`,
+			wantError: sigre.ErrInvalidCreationTime,
+		},
+		{
+			name:      "expires is not a number",
+			input:     `keyId="k",signature="AA==",headers="x-test",expires=not-a-number`,
+			wantError: sigre.ErrInvalidExpirationTime,
+		},
+		{
+			name:      "algorithm is not allowed",
+			input:     `keyId="k",signature="AA==",headers="x-test",algorithm=unknown-algorithm`,
+			wantError: sigre.ErrInvalidSignatureAlgorithm,
+		},
+		{
+			name:      "headers is empty",
+			input:     `keyId="k",signature="AA==",headers=""`,
+			wantError: sigre.ErrInvalidSignatureParameters,
+		},
+		{
+			name:      "signature is not Base64",
+			input:     `keyId="k",signature="not@base64",headers="x-test"`,
+			wantError: sigre.ErrInvalidSignatureParameters,
+		},
+		{
+			name:      "keyId is empty",
+			input:     `keyId="",signature="AA==",headers="x-test"`,
+			wantError: sigre.ErrInvalidSignatureParameters,
+		},
+		{
+			name:      "signature is empty",
+			input:     `keyId="k",signature="",headers="x-test"`,
+			wantError: sigre.ErrInvalidSignatureParameters,
+		},
+	}
+
+	verifier, err := sigre.NewCavageVerifier(nil)
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &http.Request{
+				Method:     http.MethodGet,
+				RequestURI: "/",
+				Host:       "example.test",
+				Header: http.Header{
+					"Signature": {tc.input},
+					"X-Test":    {"test value"},
+				},
+			}
+			_, err := verifier.ParseRequest(req)
+			if !errors.Is(err, tc.wantError) {
+				t.Fatalf("ParseRequest() error = %v, want errors.Is(_, %v)", err, tc.wantError)
 			}
 		})
 	}
@@ -298,7 +458,13 @@ func FuzzParseCavageParams(f *testing.F) {
 		`keyId="key\"quote\\slash",signature=c2ln`,
 		`unknown=token,extension="value,with,commas",keyId=key,signature=c2ln`,
 		`bad=@,keyId=key,signature=c2ln`,
+		`keyId="k",signature="AA==",algorithm=@`,
+		`keyId,keyId="k",signature="AA=="`,
+		`keyId="k",keyId,signature="AA=="`,
+		`keyId="first",keyId="second",signature="AA=="`,
+		`keyId="k",signature="AA==",bogus=@`,
 		`created=@,created=1,keyId=key,signature=c2ln`,
+		`created=1,created=@,keyId=key,signature=c2ln`,
 		`keYId="0",0,eXpires="",signAture="0000"`,
 		`keyId="unterminated,signature=c2ln`,
 		`keyId="unterminated\`,

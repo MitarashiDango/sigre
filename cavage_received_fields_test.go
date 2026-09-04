@@ -553,7 +553,7 @@ func TestCavageVerifierReceivedManagedSnapshotIsImmutable(t *testing.T) {
 	})
 
 	t.Run("response", func(t *testing.T) {
-		want := "host: Associated.Example:9443\n" +
+		want := "host: Response.Example:9443\n" +
 			"transfer-encoding: chunked\n" +
 			"trailer: X-Alpha,X-Zeta\n" +
 			"x-test: response-original"
@@ -564,6 +564,7 @@ func TestCavageVerifierReceivedManagedSnapshotIsImmutable(t *testing.T) {
 			Header: http.Header{
 				"Signature": {fixedCavageHMACHeader(t, want, "host transfer-encoding trailer x-test")},
 				"X-Test":    {"response-original"},
+				"Host":      {"Response.Example:9443"},
 			},
 			Body:             body,
 			ContentLength:    -1,
@@ -615,6 +616,8 @@ func TestCavageVerifierReceivedManagedSnapshotIsImmutable(t *testing.T) {
 		}
 
 		res.Request.Host = "changed.example"
+		res.Header["Host"][0] = "changed-slice.example"
+		res.Header["Host"] = []string{"changed-map.example"}
 		res.ContentLength = 99
 		res.Header.Set("X-Test", "changed")
 		res.Header.Set(Signature, "malformed")

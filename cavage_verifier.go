@@ -151,7 +151,6 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 		trailer:          res.Trailer,
 	}
 	if res.Request != nil {
-		snapshot.host = res.Request.Host
 		snapshot.method = res.Request.Method
 		snapshot.resolveRequestTarget = func() (string, error) {
 			return associatedRequestTarget(res.Request)
@@ -602,17 +601,6 @@ func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []s
 				owned["Host"] = []string{message.host}
 				continue
 			}
-
-			values, ok := message.header[http.CanonicalHeaderKey(name)]
-			if ok && len(values) > 0 {
-				owned["Host"] = append([]string(nil), values...)
-				continue
-			}
-			if message.host != "" {
-				owned["Host"] = []string{message.host}
-				continue
-			}
-			return nil, fmt.Errorf("%w: host", ErrSignedHeaderMissing)
 		case "transfer-encoding":
 			if len(message.transferEncoding) == 0 {
 				return nil, fmt.Errorf("%w: transfer-encoding", ErrSignedHeaderMissing)

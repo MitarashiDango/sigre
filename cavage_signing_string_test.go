@@ -84,6 +84,18 @@ func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
 			want:   "/",
 		},
 		{
+			name:   "server-wide OPTIONS",
+			method: http.MethodOptions,
+			url:    &url.URL{Scheme: "https", Host: "example.test", Path: "*"},
+			want:   "*",
+		},
+		{
+			name:   "CONNECT comparison is case-sensitive",
+			method: "connect",
+			url:    &url.URL{Scheme: "https", Host: "example.test"},
+			want:   "/",
+		},
+		{
 			name:   "root path without query",
 			method: "GET",
 			url:    &url.URL{Scheme: "https", Host: "example.test", Path: "/"},
@@ -99,21 +111,25 @@ func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := outgoingRequestTarget(tt.url); got != tt.want {
-				t.Fatalf("outgoingRequestTarget() = %q, want %q", got, tt.want)
-			}
-			if got := outgoingRequestTarget(tt.url); got != tt.url.RequestURI() {
-				t.Fatalf("outgoingRequestTarget() = %q, net/url URL.RequestURI() = %q", got, tt.url.RequestURI())
-			}
-
 			req := &http.Request{
 				Method: tt.method,
 				URL:    tt.url,
 				Host:   tt.url.Host,
 				Header: make(http.Header),
 			}
+			gotTarget, err := outgoingRequestTarget(req)
+			if err != nil {
+				t.Fatalf("outgoingRequestTarget() failed: %v", err)
+			}
+			if gotTarget != tt.want {
+				t.Fatalf("outgoingRequestTarget() = %q, want %q", gotTarget, tt.want)
+			}
+			if gotTarget != tt.url.RequestURI() {
+				t.Fatalf("outgoingRequestTarget() = %q, net/url URL.RequestURI() = %q", gotTarget, tt.url.RequestURI())
+			}
+
 			signer := NewCavageSigner()
-			err := signer.SignRequestWithHMAC(
+			err = signer.SignRequestWithHMAC(
 				req,
 				signingStringHMACSigningKey("request-target-key"),
 				CavageSignaturePlacementSignature,
@@ -156,8 +172,170 @@ func TestCavageRequestSignerRejectsOpaqueRequestTarget(t *testing.T) {
 		CavageSignaturePlacementSignature,
 		signingStringOptions([]string{RequestTarget}),
 	)
-	if err == nil || !strings.Contains(err.Error(), "request-target is missing") {
-		t.Fatalf("SignRequestWithHMAC() error = %v, want a missing request-target error", err)
+	if !errors.Is(err, ErrInvalidHTTPMessage) || !strings.Contains(err.Error(), "request-target is missing") {
+		t.Fatalf("SignRequestWithHMAC() error = %v, want ErrInvalidHTTPMessage for a missing request-target", err)
+	}
+}
+
+func TestCavageRequestSignerRejectsNilURLRequestTarget(t *testing.T) {
+	req := &http.Request{
+		Method: http.MethodGet,
+		Header: http.Header{"X-Unrelated": {"unchanged"}},
+	}
+	headerBefore := req.Header.Clone()
+
+	err := NewCavageSigner().SignRequestWithHMAC(
+		req,
+		signingStringHMACSigningKey("nil-url-key"),
+		CavageSignaturePlacementSignature,
+		signingStringOptions([]string{RequestTarget}),
+	)
+	if !errors.Is(err, ErrInvalidHTTPMessage) {
+		t.Fatalf("SignRequestWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
+	}
+	if !reflect.DeepEqual(req.Header, headerBefore) || req.Header.Get(Signature) != "" {
+		t.Fatalf("failed signing changed Header: %#v", req.Header)
+	}
+}
+
+func TestRequestTargetResolversRejectUnresolvableInputs(t *testing.T) {
+	tests := []struct {
+		name       string
+		resolve    func() (string, error)
+		wantDetail string
+	}{
+		{
+			name: "received authority-form without CONNECT",
+			resolve: func() (string, error) {
+				return receivedRequestTarget(&http.Request{Method: http.MethodGet, RequestURI: "example.test:443"})
+			},
+			wantDetail: "authority-form",
+		},
+		{
+			name: "missing associated request",
+			resolve: func() (string, error) {
+				return associatedRequestTarget(nil)
+			},
+			wantDetail: "associated request",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target, err := tt.resolve()
+			if target != "" || !errors.Is(err, ErrInvalidHTTPMessage) || !strings.Contains(err.Error(), tt.wantDetail) {
+				t.Fatalf("resolver result = %q, %v; want empty target and ErrInvalidHTTPMessage containing %q", target, err, tt.wantDetail)
+			}
+		})
+	}
+}
+
+func TestCavageRequestSignerRejectsCONNECTRequestTarget(t *testing.T) {
+	privateKey := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
+	tests := []struct {
+		name    string
+		urlPath string
+		sign    func(*http.Request) error
+	}{
+		{
+			name: "asymmetric",
+			sign: func(req *http.Request) error {
+				return NewCavageSigner().SignRequest(
+					req,
+					SigningKey{
+						Metadata:   TrustedKeyMetadata{KeyID: "connect-asymmetric-key", Algorithm: AlgorithmEd25519},
+						PrivateKey: privateKey,
+					},
+					CavageSignaturePlacementSignature,
+					signingStringOptions([]string{RequestTarget}),
+				)
+			},
+		},
+		{
+			name:    "HMAC with path-form URL",
+			urlPath: "/_goRPC_",
+			sign: func(req *http.Request) error {
+				return NewCavageSigner().SignRequestWithHMAC(
+					req,
+					signingStringHMACSigningKey("connect-hmac-key"),
+					CavageSignaturePlacementAuthorization,
+					signingStringOptions([]string{RequestTarget}),
+				)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := &receivedCountingBody{}
+			req := &http.Request{
+				Method: http.MethodConnect,
+				URL:    &url.URL{Host: "Tunnel.Example:443", Path: tt.urlPath},
+				Host:   "Tunnel.Example:443",
+				Header: http.Header{
+					"Authorization": {"Bearer unchanged"},
+					"X-Unrelated":   {"unchanged"},
+				},
+				Body: body,
+			}
+			headerBefore := req.Header.Clone()
+			urlBefore := *req.URL
+
+			err := tt.sign(req)
+			assertInvalidRequestTargetError(t, err, "CONNECT")
+			if !reflect.DeepEqual(req.Header, headerBefore) || !reflect.DeepEqual(req.URL, &urlBefore) || req.Body != body || req.Method != http.MethodConnect || req.RequestURI != "" {
+				t.Fatal("failed CONNECT signing modified the request")
+			}
+			if req.Header.Get(Signature) != "" || req.Header.Get(Authorization) != "Bearer unchanged" {
+				t.Fatalf("failed CONNECT signing changed signature fields: %#v", req.Header)
+			}
+			if body.reads != 0 || body.closes != 0 {
+				t.Fatalf("failed CONNECT signing accessed Body: reads=%d closes=%d", body.reads, body.closes)
+			}
+		})
+	}
+}
+
+func TestCavageResponseSignerRejectsAssociatedCONNECTRequestTarget(t *testing.T) {
+	raw := "CONNECT Tunnel.Example:443 HTTP/1.1\r\nHost: Tunnel.Example:443\r\n\r\n"
+	req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+	if err != nil {
+		t.Fatalf("http.ReadRequest() failed: %v", err)
+	}
+	defer req.Body.Close()
+	reqBody := &receivedCountingBody{}
+	req.Body = reqBody
+	resBody := &receivedCountingBody{}
+	res := &http.Response{
+		Request: req,
+		Header: http.Header{
+			"Authorization": {"Bearer unchanged"},
+			"X-Unrelated":   {"unchanged"},
+		},
+		Body: resBody,
+	}
+	headerBefore := res.Header.Clone()
+	requestHeaderBefore := req.Header.Clone()
+	requestURLBefore := *req.URL
+
+	err = NewCavageSigner().SignResponseWithHMAC(
+		res,
+		signingStringHMACSigningKey("response-connect-key"),
+		CavageSignaturePlacementSignature,
+		signingStringOptions([]string{RequestTarget}),
+	)
+	assertInvalidRequestTargetError(t, err, "CONNECT")
+	if !reflect.DeepEqual(res.Header, headerBefore) || res.Body != resBody || res.Request != req {
+		t.Fatal("failed response signing modified the response")
+	}
+	if !reflect.DeepEqual(req.Header, requestHeaderBefore) || !reflect.DeepEqual(req.URL, &requestURLBefore) || req.Body != reqBody || req.Method != http.MethodConnect || req.RequestURI != "Tunnel.Example:443" {
+		t.Fatal("failed response signing modified the associated CONNECT request")
+	}
+	if res.Header.Get(Signature) != "" || res.Header.Get(Authorization) != "Bearer unchanged" {
+		t.Fatalf("failed response signing changed signature fields: %#v", res.Header)
+	}
+	if reqBody.reads != 0 || reqBody.closes != 0 || resBody.reads != 0 || resBody.closes != 0 {
+		t.Fatalf("failed response signing accessed a Body: request=(%d,%d) response=(%d,%d)", reqBody.reads, reqBody.closes, resBody.reads, resBody.closes)
 	}
 }
 
@@ -480,6 +658,48 @@ func TestCavageSignerRejectsInvalidPlacementBeforeSigningWork(t *testing.T) {
 				t.Fatalf("Header changed after placement rejection\ngot:  %#v\nwant: %#v", header, beforeHeader)
 			}
 		})
+	}
+}
+
+func TestCavageSignerRejectsCONNECTBeforeCryptographicWork(t *testing.T) {
+	algorithm, err := algorithmDefinitionFor(AlgorithmHMACSHA256)
+	if err != nil {
+		t.Fatalf("algorithmDefinitionFor() failed: %v", err)
+	}
+	header := http.Header{"X-Unrelated": {"unchanged"}}
+	headerBefore := header.Clone()
+	req := &http.Request{
+		Method: http.MethodConnect,
+		URL:    &url.URL{Host: "Tunnel.Example:443"},
+		Host:   "Tunnel.Example:443",
+		Header: header,
+	}
+	timeCalls := 0
+	signCalls := 0
+	signer := &CavageSigner{Now: func() time.Time {
+		timeCalls++
+		return time.Unix(1700000000, 0)
+	}}
+
+	err = signer.signMessage(
+		requestSigningMessage(req, header),
+		TrustedKeyMetadata{KeyID: "connect-callback-key", Algorithm: AlgorithmHMACSHA256},
+		algorithm,
+		CavageSignaturePlacementSignature,
+		signingStringOptions([]string{RequestTarget}),
+		func([]byte) ([]byte, error) {
+			signCalls++
+			return []byte("signature"), nil
+		},
+	)
+	if !errors.Is(err, ErrInvalidHTTPMessage) {
+		t.Fatalf("signMessage() error = %v, want ErrInvalidHTTPMessage", err)
+	}
+	if timeCalls != 0 || signCalls != 0 {
+		t.Fatalf("calls after CONNECT rejection: Now=%d, sign=%d; want both zero", timeCalls, signCalls)
+	}
+	if !reflect.DeepEqual(header, headerBefore) {
+		t.Fatalf("Header changed after CONNECT rejection\ngot:  %#v\nwant: %#v", header, headerBefore)
 	}
 }
 
@@ -1100,6 +1320,18 @@ func TestCavageRequestVerifierUsesRequestURI(t *testing.T) {
 			requestURI: "/Case%2fPath?A=1",
 			want:       "(request-target): custom /Case%2fPath?A=1",
 		},
+		{
+			name:       "asterisk form",
+			method:     http.MethodOptions,
+			requestURI: "*",
+			want:       "(request-target): options *",
+		},
+		{
+			name:       "origin-form OPTIONS root",
+			method:     http.MethodOptions,
+			requestURI: "/",
+			want:       "(request-target): options /",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1120,6 +1352,326 @@ func TestCavageRequestVerifierUsesRequestURI(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCavageRequestVerifierHandlesAbsoluteFormRequestTarget(t *testing.T) {
+	readAbsoluteRequest := func(t *testing.T, method, rawRequestTarget string) *http.Request {
+		t.Helper()
+		raw := method + " " + rawRequestTarget + " HTTP/1.1\r\n" +
+			"Host: ignored.example\r\n\r\n"
+		req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+		if err != nil {
+			t.Fatalf("http.ReadRequest() failed: %v", err)
+		}
+		return req
+	}
+
+	tests := []struct {
+		name             string
+		method           string
+		rawRequestTarget string
+		wantScheme       string
+		wantPath         string
+		wantRawPath      string
+		wantRawQuery     string
+		wantForceQuery   bool
+		wantTarget       string
+	}{
+		{
+			name:             "empty path",
+			method:           http.MethodGet,
+			rawRequestTarget: "http://example.test",
+			wantScheme:       "http",
+			wantTarget:       "/",
+		},
+		{
+			name:             "empty path and trailing empty query",
+			method:           http.MethodGet,
+			rawRequestTarget: "http://example.test?",
+			wantScheme:       "http",
+			wantForceQuery:   true,
+			wantTarget:       "/?",
+		},
+		{
+			name:             "empty path and raw query",
+			method:           http.MethodGet,
+			rawRequestTarget: "http://example.test?x=1",
+			wantScheme:       "http",
+			wantRawQuery:     "x=1",
+			wantTarget:       "/?x=1",
+		},
+		{
+			name:             "escaped path and ordered raw query",
+			method:           http.MethodGet,
+			rawRequestTarget: "http://Proxy.Example/a%2Fb?b=2&a=%2F&a=0",
+			wantScheme:       "http",
+			wantPath:         "/a/b",
+			wantRawPath:      "/a%2Fb",
+			wantRawQuery:     "b=2&a=%2F&a=0",
+			wantTarget:       "/a%2Fb?b=2&a=%2F&a=0",
+		},
+		{
+			name:             "server-wide OPTIONS over HTTP",
+			method:           http.MethodOptions,
+			rawRequestTarget: "http://example.test",
+			wantScheme:       "http",
+			wantTarget:       "*",
+		},
+		{
+			name:             "server-wide OPTIONS over HTTPS",
+			method:           http.MethodOptions,
+			rawRequestTarget: "https://example.test",
+			wantScheme:       "https",
+			wantTarget:       "*",
+		},
+		{
+			name:             "server-wide OPTIONS with port",
+			method:           http.MethodOptions,
+			rawRequestTarget: "http://example.test:8001",
+			wantScheme:       "http",
+			wantTarget:       "*",
+		},
+		{
+			name:             "OPTIONS with non-HTTP scheme",
+			method:           http.MethodOptions,
+			rawRequestTarget: "ftp://example.test",
+			wantScheme:       "ftp",
+			wantTarget:       "/",
+		},
+		{
+			name:             "lowercase options method",
+			method:           "options",
+			rawRequestTarget: "http://example.test",
+			wantScheme:       "http",
+			wantTarget:       "/",
+		},
+		{
+			name:             "OPTIONS with explicit root path",
+			method:           http.MethodOptions,
+			rawRequestTarget: "http://example.test/",
+			wantScheme:       "http",
+			wantPath:         "/",
+			wantTarget:       "/",
+		},
+		{
+			name:             "OPTIONS with query component",
+			method:           http.MethodOptions,
+			rawRequestTarget: "http://example.test?x=1",
+			wantScheme:       "http",
+			wantRawQuery:     "x=1",
+			wantTarget:       "/?x=1",
+		},
+		{
+			name:             "OPTIONS with empty query component",
+			method:           http.MethodOptions,
+			rawRequestTarget: "http://example.test?",
+			wantScheme:       "http",
+			wantForceQuery:   true,
+			wantTarget:       "/?",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := readAbsoluteRequest(t, tt.method, tt.rawRequestTarget)
+			defer req.Body.Close()
+
+			if req.RequestURI != tt.rawRequestTarget {
+				t.Fatalf("RequestURI = %q, want %q", req.RequestURI, tt.rawRequestTarget)
+			}
+			if req.URL.Scheme != tt.wantScheme || req.URL.Path != tt.wantPath || req.URL.RawPath != tt.wantRawPath || req.URL.RawQuery != tt.wantRawQuery || req.URL.ForceQuery != tt.wantForceQuery {
+				t.Fatalf("parsed URL = %#v, want Scheme=%q Path=%q RawPath=%q RawQuery=%q ForceQuery=%t", req.URL, tt.wantScheme, tt.wantPath, tt.wantRawPath, tt.wantRawQuery, tt.wantForceQuery)
+			}
+
+			wantSigningString := "(request-target): " + strings.ToLower(tt.method) + " " + tt.wantTarget
+			req.Header.Set(Signature, fixedCavageHMACHeader(t, wantSigningString, RequestTarget))
+			verifier, signature := parseSigningStringRequest(t, req)
+			if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+				t.Fatalf("VerifyHMAC() failed: %v", err)
+			}
+		})
+	}
+
+	t.Run("snapshot is independent from the request", func(t *testing.T) {
+		const rawRequestTarget = "http://Proxy.Example/a%2Fb?b=2&a=%2F&a=0"
+		const wantSigningString = "(request-target): get /a%2Fb?b=2&a=%2F&a=0"
+		req := readAbsoluteRequest(t, http.MethodGet, rawRequestTarget)
+		defer req.Body.Close()
+		req.Header.Set(Signature, fixedCavageHMACHeader(t, wantSigningString, RequestTarget))
+		headerBefore := req.Header.Clone()
+		urlBefore := *req.URL
+		bodyBefore := req.Body
+
+		verifier, signature := parseSigningStringRequest(t, req)
+		if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+			t.Fatalf("VerifyHMAC() failed: %v", err)
+		}
+		if !reflect.DeepEqual(req.Header, headerBefore) || !reflect.DeepEqual(req.URL, &urlBefore) || req.Body != bodyBefore || req.Method != http.MethodGet || req.RequestURI != rawRequestTarget {
+			t.Fatal("ParseRequest() modified the absolute-form request")
+		}
+
+		req.Method = http.MethodPost
+		req.RequestURI = "/changed"
+		req.URL.Path = "/changed"
+		req.URL.RawPath = ""
+		req.URL.RawQuery = "changed=true"
+		req.URL.ForceQuery = false
+		if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+			t.Fatalf("request mutation changed the parsed snapshot: %v", err)
+		}
+	})
+}
+
+func TestCavageRequestVerifierRejectsAbsoluteURIRequestTargetSignature(t *testing.T) {
+	const rawRequestTarget = "http://Proxy.Example/a%2Fb?b=2&a=%2F&a=0"
+	raw := "GET " + rawRequestTarget + " HTTP/1.1\r\nHost: ignored.example\r\n\r\n"
+	req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+	if err != nil {
+		t.Fatalf("http.ReadRequest() failed: %v", err)
+	}
+	defer req.Body.Close()
+
+	oldSigningString := "(request-target): get " + rawRequestTarget
+	req.Header.Set(Signature, fixedCavageHMACHeader(t, oldSigningString, RequestTarget))
+	verifier, signature := parseSigningStringRequest(t, req)
+	if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); !errors.Is(err, ErrVerification) {
+		t.Fatalf("VerifyHMAC() error = %v, want ErrVerification for the absolute-URI signing form", err)
+	}
+}
+
+func TestCavageRequestVerifierRejectsCONNECTRequestTarget(t *testing.T) {
+	for _, rawRequestTarget := range []string{"Tunnel.Example:443", "/_goRPC_"} {
+		t.Run(rawRequestTarget, func(t *testing.T) {
+			raw := "CONNECT " + rawRequestTarget + " HTTP/1.1\r\n" +
+				"Host: Tunnel.Example:443\r\n\r\n"
+			req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+			if err != nil {
+				t.Fatalf("http.ReadRequest() failed: %v", err)
+			}
+			defer req.Body.Close()
+			body := &receivedCountingBody{}
+			req.Body = body
+			req.Header.Set(Signature, fixedCavageHMACHeader(t, "(request-target): connect invalid", RequestTarget))
+			headerBefore := req.Header.Clone()
+			urlBefore := *req.URL
+
+			verifier, err := NewCavageVerifier(signingStringVerificationOptions())
+			if err != nil {
+				t.Fatalf("NewCavageVerifier() failed: %v", err)
+			}
+			signature, err := verifier.ParseRequest(req)
+			if signature != nil {
+				t.Fatal("ParseRequest() returned a snapshot for CONNECT")
+			}
+			assertInvalidRequestTargetError(t, err, "CONNECT")
+			if !reflect.DeepEqual(req.Header, headerBefore) || !reflect.DeepEqual(req.URL, &urlBefore) || req.Body != body || req.Method != http.MethodConnect || req.RequestURI != rawRequestTarget {
+				t.Fatal("failed CONNECT parsing modified the request")
+			}
+			if body.reads != 0 || body.closes != 0 {
+				t.Fatalf("failed CONNECT parsing accessed Body: reads=%d closes=%d", body.reads, body.closes)
+			}
+		})
+	}
+}
+
+func TestCavageResponseVerifierRejectsAssociatedCONNECTRequestTarget(t *testing.T) {
+	body := &receivedCountingBody{}
+	req := &http.Request{
+		Method: http.MethodConnect,
+		URL:    &url.URL{Host: "Tunnel.Example:443"},
+		Host:   "Tunnel.Example:443",
+		Body:   body,
+	}
+	res := &http.Response{
+		Request: req,
+		Header: http.Header{
+			Signature: {fixedCavageHMACHeader(t, "(request-target): connect invalid", RequestTarget)},
+		},
+		Body: body,
+	}
+	headerBefore := res.Header.Clone()
+	urlBefore := *req.URL
+
+	verifier, err := NewCavageVerifier(signingStringVerificationOptions())
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	signature, err := verifier.ParseResponse(res)
+	if signature != nil {
+		t.Fatal("ParseResponse() returned a snapshot for an associated CONNECT request")
+	}
+	assertInvalidRequestTargetError(t, err, "CONNECT")
+	if !reflect.DeepEqual(res.Header, headerBefore) || res.Body != body || res.Request != req || !reflect.DeepEqual(req.URL, &urlBefore) || req.Method != http.MethodConnect || req.RequestURI != "" {
+		t.Fatal("failed response parsing modified the response or associated CONNECT request")
+	}
+	if body.reads != 0 || body.closes != 0 {
+		t.Fatalf("failed response parsing accessed Body: reads=%d closes=%d", body.reads, body.closes)
+	}
+}
+
+func TestCavageCONNECTAllowedWithoutRequestTarget(t *testing.T) {
+	const wantSigningString = "x-test: value"
+	opts := signingStringOptions([]string{"x-test"})
+
+	t.Run("request signer", func(t *testing.T) {
+		req := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Host: "Tunnel.Example:443"},
+			Host:   "Tunnel.Example:443",
+			Header: http.Header{"X-Test": {"value"}},
+		}
+		if err := NewCavageSigner().SignRequestWithHMAC(req, signingStringHMACSigningKey("connect-no-target-key"), CavageSignaturePlacementSignature, opts); err != nil {
+			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
+		}
+		assertCavageHMACSignature(t, req.Header.Get(Signature), wantSigningString)
+	})
+
+	t.Run("response signer", func(t *testing.T) {
+		req := &http.Request{
+			Method:     http.MethodConnect,
+			RequestURI: "Tunnel.Example:443",
+			URL:        &url.URL{Host: "Tunnel.Example:443"},
+			Host:       "Tunnel.Example:443",
+		}
+		res := &http.Response{Request: req, Header: http.Header{"X-Test": {"value"}}}
+		if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("response-connect-no-target-key"), CavageSignaturePlacementSignature, opts); err != nil {
+			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
+		}
+		assertCavageHMACSignature(t, res.Header.Get(Signature), wantSigningString)
+	})
+
+	t.Run("request verifier", func(t *testing.T) {
+		raw := "CONNECT Tunnel.Example:443 HTTP/1.1\r\nHost: Tunnel.Example:443\r\nX-Test: value\r\n\r\n"
+		req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+		if err != nil {
+			t.Fatalf("http.ReadRequest() failed: %v", err)
+		}
+		defer req.Body.Close()
+		req.Header.Set(Signature, fixedCavageHMACHeader(t, wantSigningString, "x-test"))
+		verifier, signature := parseSigningStringRequest(t, req)
+		if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+			t.Fatalf("VerifyHMAC() failed: %v", err)
+		}
+	})
+
+	t.Run("response verifier", func(t *testing.T) {
+		req := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Host: "Tunnel.Example:443"},
+			Host:   "Tunnel.Example:443",
+		}
+		res := &http.Response{
+			Request: req,
+			Header: http.Header{
+				"X-Test":  {"value"},
+				Signature: {fixedCavageHMACHeader(t, wantSigningString, "x-test")},
+			},
+		}
+		verifier, signature := parseSigningStringResponse(t, res)
+		if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+			t.Fatalf("VerifyHMAC() failed: %v", err)
+		}
+	})
 }
 
 func TestCavageRequestVerifierDoesNotRebuildMissingRequestURI(t *testing.T) {
@@ -1203,6 +1755,111 @@ func TestCavageResponseRequestTargetUsesAssociatedRequestURI(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestCavageResponseRequestTargetUsesReceivedAbsoluteForm(t *testing.T) {
+	const rawRequestTarget = "http://Proxy.Example/a%2Fb?b=2&a=%2F&a=0"
+	const wantSigningString = "(request-target): patch /a%2Fb?b=2&a=%2F&a=0"
+
+	newAssociatedRequest := func(t *testing.T) *http.Request {
+		t.Helper()
+		raw := "PaTcH " + rawRequestTarget + " HTTP/1.1\r\nHost: ignored.example\r\n\r\n"
+		req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+		if err != nil {
+			t.Fatalf("http.ReadRequest() failed: %v", err)
+		}
+		return req
+	}
+
+	t.Run("signer", func(t *testing.T) {
+		req := newAssociatedRequest(t)
+		defer req.Body.Close()
+		requestHeaderBefore := req.Header.Clone()
+		requestURLBefore := *req.URL
+		requestBodyBefore := req.Body
+		res := &http.Response{Request: req, Header: make(http.Header)}
+
+		err := NewCavageSigner().SignResponseWithHMAC(
+			res,
+			signingStringHMACSigningKey("response-absolute-form-key"),
+			CavageSignaturePlacementSignature,
+			signingStringOptions([]string{RequestTarget}),
+		)
+		if err != nil {
+			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
+		}
+		assertCavageHMACSignature(t, res.Header.Get(Signature), wantSigningString)
+		if !reflect.DeepEqual(req.Header, requestHeaderBefore) || !reflect.DeepEqual(req.URL, &requestURLBefore) || req.Body != requestBodyBefore || req.Method != "PaTcH" || req.RequestURI != rawRequestTarget {
+			t.Fatal("SignResponseWithHMAC() modified the associated request")
+		}
+	})
+
+	t.Run("verifier snapshot", func(t *testing.T) {
+		req := newAssociatedRequest(t)
+		defer req.Body.Close()
+		res := &http.Response{
+			Request: req,
+			Header: http.Header{
+				Signature: {fixedCavageHMACHeader(t, wantSigningString, RequestTarget)},
+			},
+		}
+		verifier, signature := parseSigningStringResponse(t, res)
+		if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+			t.Fatalf("VerifyHMAC() failed: %v", err)
+		}
+
+		req.Method = http.MethodDelete
+		req.RequestURI = "/changed"
+		req.URL.Path = "/changed"
+		req.URL.RawPath = ""
+		req.URL.RawQuery = "changed=true"
+		if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+			t.Fatalf("associated request mutation changed the parsed response snapshot: %v", err)
+		}
+	})
+
+	t.Run("server-wide OPTIONS", func(t *testing.T) {
+		const optionsSigningString = "(request-target): options *"
+		newOptionsRequest := func(t *testing.T) *http.Request {
+			t.Helper()
+			raw := "OPTIONS http://example.test HTTP/1.1\r\nHost: example.test\r\n\r\n"
+			req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+			if err != nil {
+				t.Fatalf("http.ReadRequest() failed: %v", err)
+			}
+			return req
+		}
+
+		t.Run("signer", func(t *testing.T) {
+			req := newOptionsRequest(t)
+			defer req.Body.Close()
+			res := &http.Response{Request: req, Header: make(http.Header)}
+			if err := NewCavageSigner().SignResponseWithHMAC(
+				res,
+				signingStringHMACSigningKey("response-options-key"),
+				CavageSignaturePlacementSignature,
+				signingStringOptions([]string{RequestTarget}),
+			); err != nil {
+				t.Fatalf("SignResponseWithHMAC() failed: %v", err)
+			}
+			assertCavageHMACSignature(t, res.Header.Get(Signature), optionsSigningString)
+		})
+
+		t.Run("verifier", func(t *testing.T) {
+			req := newOptionsRequest(t)
+			defer req.Body.Close()
+			res := &http.Response{
+				Request: req,
+				Header: http.Header{
+					Signature: {fixedCavageHMACHeader(t, optionsSigningString, RequestTarget)},
+				},
+			}
+			verifier, signature := parseSigningStringResponse(t, res)
+			if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+				t.Fatalf("VerifyHMAC() failed: %v", err)
+			}
+		})
+	})
 }
 
 func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
@@ -1455,19 +2112,31 @@ func TestCavageVerifierRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 }
 
 func FuzzOutgoingRequestTarget(f *testing.F) {
-	f.Add("/a/b", "/a%2Fb", "x=%2F", false)
-	f.Add("", "", "", false)
-	f.Add("/empty", "", "", true)
-	f.Add("/search", "invalid%zz", "b=2&a=1&a=0", false)
+	f.Add(http.MethodGet, "/a/b", "/a%2Fb", "x=%2F", false)
+	f.Add(http.MethodGet, "", "", "", false)
+	f.Add(http.MethodHead, "/empty", "", "", true)
+	f.Add(http.MethodGet, "/search", "invalid%zz", "b=2&a=1&a=0", false)
+	f.Add(http.MethodOptions, "*", "", "", false)
+	f.Add(http.MethodConnect, "", "", "", false)
 
-	f.Fuzz(func(t *testing.T, path, rawPath, rawQuery string, forceQuery bool) {
+	f.Fuzz(func(t *testing.T, method, path, rawPath, rawQuery string, forceQuery bool) {
 		u := &url.URL{
 			Path:       path,
 			RawPath:    rawPath,
 			RawQuery:   rawQuery,
 			ForceQuery: forceQuery,
 		}
-		if got, want := outgoingRequestTarget(u), u.RequestURI(); got != want {
+		got, err := outgoingRequestTarget(&http.Request{Method: method, URL: u})
+		if method == http.MethodConnect {
+			if !errors.Is(err, ErrInvalidHTTPMessage) || got != "" {
+				t.Fatalf("outgoingRequestTarget() = %q, %v; want empty target and ErrInvalidHTTPMessage for CONNECT", got, err)
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("outgoingRequestTarget() failed: %v", err)
+		}
+		if want := u.RequestURI(); got != want {
 			t.Fatalf("outgoingRequestTarget() = %q, net/url URL.RequestURI() = %q", got, want)
 		}
 	})
@@ -1568,6 +2237,20 @@ func assertCavageHMACSignature(t *testing.T, headerValue, signingString string) 
 	}
 	if !hmac.Equal(got, mac.Sum(nil)) {
 		t.Fatalf("signature does not cover fixed signing string %q", signingString)
+	}
+}
+
+func assertInvalidRequestTargetError(t *testing.T, err error, form string) {
+	t.Helper()
+	if !errors.Is(err, ErrInvalidHTTPMessage) {
+		t.Fatalf("error = %v, want ErrInvalidHTTPMessage", err)
+	}
+	var sigreErr *SigreError
+	if !errors.As(err, &sigreErr) {
+		t.Fatalf("error type = %T, want *SigreError", err)
+	}
+	if !strings.Contains(err.Error(), form) {
+		t.Errorf("error = %q, want it to contain %q", err, form)
 	}
 }
 

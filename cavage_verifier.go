@@ -112,10 +112,12 @@ func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, erro
 		return nil, wrapSigreError(ErrMissingSignature)
 	}
 	snapshot := cavageMessageSnapshot{
-		isRequest:        true,
-		host:             req.Host,
-		method:           req.Method,
-		requestTarget:    req.RequestURI,
+		isRequest: true,
+		host:      req.Host,
+		method:    req.Method,
+		resolveRequestTarget: func() (string, error) {
+			return receivedRequestTarget(req)
+		},
 		header:           req.Header,
 		transferEncoding: req.TransferEncoding,
 		trailer:          req.Trailer,
@@ -151,7 +153,9 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 	if res.Request != nil {
 		snapshot.host = res.Request.Host
 		snapshot.method = res.Request.Method
-		snapshot.requestTarget = associatedRequestTarget(res.Request)
+		snapshot.resolveRequestTarget = func() (string, error) {
+			return associatedRequestTarget(res.Request)
+		}
 	}
 	signature, err := v.parse(candidate, snapshot)
 	return signature, wrapSigreError(err)
@@ -361,13 +365,13 @@ func (v *CavageVerifier) validateSignature(signature *CavageSignature) error {
 }
 
 type cavageMessageSnapshot struct {
-	isRequest        bool
-	host             string
-	method           string
-	requestTarget    string
-	header           http.Header
-	transferEncoding []string
-	trailer          http.Header
+	isRequest            bool
+	host                 string
+	method               string
+	resolveRequestTarget func() (string, error)
+	header               http.Header
+	transferEncoding     []string
+	trailer              http.Header
 }
 
 func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavageMessageSnapshot) (*CavageSignature, error) {
@@ -425,11 +429,18 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 	if err != nil {
 		return nil, err
 	}
+	requestTarget := ""
 	if slices.Contains(headers, RequestTarget) {
 		if message.method == "" {
 			return nil, fmt.Errorf("%w: method is required by %s", ErrInvalidHTTPMessage, RequestTarget)
 		}
-		if message.requestTarget == "" {
+		if message.resolveRequestTarget != nil {
+			requestTarget, err = message.resolveRequestTarget()
+			if err != nil {
+				return nil, err
+			}
+		}
+		if requestTarget == "" {
 			return nil, fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
 		}
 	}
@@ -458,7 +469,7 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 		headers,
 		message.host,
 		message.method,
-		message.requestTarget,
+		requestTarget,
 		ownedHeaders,
 		createdText,
 		expiresText,
@@ -500,7 +511,7 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 		signature:         append([]byte(nil), decodedSignature...),
 		signingString:     append([]byte(nil), buf.Bytes()...),
 		method:            message.method,
-		requestTarget:     message.requestTarget,
+		requestTarget:     requestTarget,
 		host:              message.host,
 		signedFieldValues: cloneHeaderValues(ownedHeaders),
 	}, nil

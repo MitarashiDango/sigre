@@ -415,34 +415,80 @@ func validateCreatedExpiresWithAlgorithm(headers []string, keyType string) error
 	return nil
 }
 
-// outgoingRequestTarget returns the origin-form that net/http sends for a
-// client URL without reparsing or re-encoding its query.
-func outgoingRequestTarget(u *url.URL) string {
-	if u == nil || u.Opaque != "" {
-		return ""
+// requestTargetFromURL returns the :path-equivalent value of a hierarchical
+// URL without reparsing or re-encoding its query.
+func requestTargetFromURL(u *url.URL) (string, error) {
+	if u == nil {
+		return "", fmt.Errorf("%w: %s is included, but request-target is missing because the request URL is nil", ErrInvalidHTTPMessage, RequestTarget)
 	}
-
+	if u.Opaque != "" {
+		return "", fmt.Errorf("%w: %s is included, but request-target is missing because an opaque URL does not define :path", ErrInvalidHTTPMessage, RequestTarget)
+	}
 	path := u.EscapedPath()
 	if path == "" {
 		path = "/"
 	}
 	if u.ForceQuery || u.RawQuery != "" {
-		return path + "?" + u.RawQuery
+		return path + "?" + u.RawQuery, nil
 	}
-	return path
+	return path, nil
 }
 
-// associatedRequestTarget handles the request associated with a response.
-// Server-side responses retain the received RequestURI, while client-side
-// responses refer to the URL of the request that was sent.
-func associatedRequestTarget(req *http.Request) string {
+func invalidCONNECTRequestTarget() error {
+	return fmt.Errorf("%w: CONNECT request-target does not define the :path required by %s", ErrInvalidHTTPMessage, RequestTarget)
+}
+
+// outgoingRequestTarget resolves the :path-equivalent value that is signed
+// for a request sent from its URL.
+func outgoingRequestTarget(req *http.Request) (string, error) {
 	if req == nil {
-		return ""
+		return "", fmt.Errorf("%w: %s is included, but request-target is missing", ErrInvalidHTTPMessage, RequestTarget)
+	}
+	if req.Method == http.MethodConnect {
+		return "", invalidCONNECTRequestTarget()
+	}
+	return requestTargetFromURL(req.URL)
+}
+
+// receivedRequestTarget resolves the :path-equivalent value from the raw
+// request-target and parsed URL retained by net/http.
+func receivedRequestTarget(req *http.Request) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+	}
+	if req.Method == http.MethodConnect {
+		return "", invalidCONNECTRequestTarget()
+	}
+	if req.RequestURI == "" {
+		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+	}
+	if req.RequestURI == "*" {
+		return "*", nil
+	}
+	if strings.HasPrefix(req.RequestURI, "/") {
+		return req.RequestURI, nil
+	}
+	if req.URL != nil && req.URL.IsAbs() {
+		if req.Method == http.MethodOptions &&
+			(req.URL.Scheme == "http" || req.URL.Scheme == "https") &&
+			req.URL.Path == "" && req.URL.RawQuery == "" && !req.URL.ForceQuery {
+			return "*", nil
+		}
+		return requestTargetFromURL(req.URL)
+	}
+	return "", fmt.Errorf("%w: authority-form request-target does not define the :path required by %s", ErrInvalidHTTPMessage, RequestTarget)
+}
+
+// associatedRequestTarget distinguishes a received server-side request from
+// a client-side request associated with a response.
+func associatedRequestTarget(req *http.Request) (string, error) {
+	if req == nil {
+		return "", fmt.Errorf("%w: associated request is required by %s", ErrInvalidHTTPMessage, RequestTarget)
 	}
 	if req.RequestURI != "" {
-		return req.RequestURI
+		return receivedRequestTarget(req)
 	}
-	return outgoingRequestTarget(req.URL)
+	return outgoingRequestTarget(req)
 }
 
 func normalizeCavageSignedHeaderName(name string) (string, error) {

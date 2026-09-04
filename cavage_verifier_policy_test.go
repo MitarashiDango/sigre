@@ -193,6 +193,7 @@ func TestCavageVerifierSnapshotIsImmutable(t *testing.T) {
 		Header:  make(http.Header),
 	}
 	response.Header.Set("X-Test", "response")
+	response.Header.Set("Host", "response.example")
 	if err := signer.SignResponseWithHMAC(
 		response,
 		fixedHMACSigningKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, secret),
@@ -210,6 +211,7 @@ func TestCavageVerifierSnapshotIsImmutable(t *testing.T) {
 		t.Fatalf("ParseResponse() failed: %v", err)
 	}
 	response.Header.Set("X-Test", "changed")
+	response.Header.Set("Host", "changed-response.example")
 	response.Request.Method = http.MethodDelete
 	response.Request.RequestURI = "/changed"
 	response.Request.Host = "changed.example"

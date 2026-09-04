@@ -89,16 +89,20 @@ func resolveOutgoingRequestFields(req *http.Request, header http.Header, signedH
 	return host, resolved, nil
 }
 
-func resolveOutgoingResponseFields(res *http.Response, host string, header http.Header, signedHeaders []string) (string, http.Header, error) {
+func resolveOutgoingResponseFields(res *http.Response, header http.Header, signedHeaders []string) (http.Header, error) {
+	// Response Host is an ordinary field and must be present in the response itself.
+	if slices.Contains(signedHeaders, outgoingHost) && len(header["Host"]) == 0 {
+		return nil, fmt.Errorf("%w: host", ErrSignedHeaderMissing)
+	}
 	transferFieldsNeeded := slices.Contains(signedHeaders, outgoingContentLength) ||
 		slices.Contains(signedHeaders, outgoingTransferEncoding) ||
 		slices.Contains(signedHeaders, outgoingTrailer)
 	if !transferFieldsNeeded {
-		return host, header, nil
+		return header, nil
 	}
 	transfer, err := outgoingResponseTransferFields(res, slices.Contains(signedHeaders, outgoingTrailer))
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
 
 	resolved := header.Clone()
@@ -116,10 +120,10 @@ func resolveOutgoingResponseFields(res *http.Response, host string, header http.
 		}
 		resolved, err = resolveOutgoingField(header, resolved, name, field, nil)
 		if err != nil {
-			return "", nil, err
+			return nil, err
 		}
 	}
-	return host, resolved, nil
+	return resolved, nil
 }
 
 func resolveOutgoingField(

@@ -269,14 +269,14 @@ func requestSigningMessage(req *http.Request, header http.Header) cavageSigningM
 func responseSigningMessage(res *http.Response, header http.Header) cavageSigningMessage {
 	message := cavageSigningMessage{header: header}
 	if res.Request != nil {
-		message.host = res.Request.Host
 		message.method = res.Request.Method
 		message.resolveRequestTarget = func() (string, error) {
 			return associatedRequestTarget(res.Request)
 		}
 	}
 	message.resolveFields = func(headers []string) (string, http.Header, error) {
-		return resolveOutgoingResponseFields(res, message.host, header, headers)
+		resolved, err := resolveOutgoingResponseFields(res, header, headers)
+		return "", resolved, err
 	}
 	return message
 }

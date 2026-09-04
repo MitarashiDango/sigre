@@ -95,6 +95,8 @@ func NewCavageVerifier(opts *CavageVerificationOptions) (*CavageVerifier, error)
 // ParseRequest parses the configured request signature source and returns an
 // immutable snapshot. The request is not modified. The default source is only
 // the Signature field; RFC 9421 Signature-Input is always ignored.
+// If trailer is signed, call ParseRequest before Body reaches EOF because
+// net/http then merges received fields and the declaration cannot be recovered.
 func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, error) {
 	if err := v.validateConstructed(); err != nil {
 		return nil, wrapSigreError(err)
@@ -110,11 +112,13 @@ func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, erro
 		return nil, wrapSigreError(ErrMissingSignature)
 	}
 	snapshot := cavageMessageSnapshot{
-		isRequest:     true,
-		host:          req.Host,
-		method:        req.Method,
-		requestTarget: req.RequestURI,
-		header:        req.Header,
+		isRequest:        true,
+		host:             req.Host,
+		method:           req.Method,
+		requestTarget:    req.RequestURI,
+		header:           req.Header,
+		transferEncoding: req.TransferEncoding,
+		trailer:          req.Trailer,
 	}
 	signature, err := v.parse(candidate, snapshot)
 	return signature, wrapSigreError(err)
@@ -123,6 +127,8 @@ func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, erro
 // ParseResponse parses only the response Signature field and returns an
 // immutable snapshot. Authorization and Signature-Input are ignored, and the
 // response is not modified.
+// If trailer is signed, call ParseResponse before Body reaches EOF because
+// net/http then merges received fields and the declaration cannot be recovered.
 func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, error) {
 	if err := v.validateConstructed(); err != nil {
 		return nil, wrapSigreError(err)
@@ -137,7 +143,11 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 	if candidate.placement == 0 {
 		return nil, wrapSigreError(ErrMissingSignature)
 	}
-	snapshot := cavageMessageSnapshot{header: res.Header}
+	snapshot := cavageMessageSnapshot{
+		header:           res.Header,
+		transferEncoding: res.TransferEncoding,
+		trailer:          res.Trailer,
+	}
 	if res.Request != nil {
 		snapshot.host = res.Request.Host
 		snapshot.method = res.Request.Method
@@ -351,11 +361,13 @@ func (v *CavageVerifier) validateSignature(signature *CavageSignature) error {
 }
 
 type cavageMessageSnapshot struct {
-	isRequest     bool
-	host          string
-	method        string
-	requestTarget string
-	header        http.Header
+	isRequest        bool
+	host             string
+	method           string
+	requestTarget    string
+	header           http.Header
+	transferEncoding []string
+	trailer          http.Header
 }
 
 func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavageMessageSnapshot) (*CavageSignature, error) {
@@ -409,7 +421,7 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 	if err := v.validateWireAlgorithmBeforeKey(params, headers); err != nil {
 		return nil, err
 	}
-	ownedHeaders, err := snapshotCavageSignedFields(message.header, message.host, headers, v.config.maxDateAge > 0)
+	ownedHeaders, err := snapshotCavageSignedFields(message, headers, v.config.maxDateAge > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -565,35 +577,75 @@ func (v *CavageVerifier) validateWireAlgorithmBeforeKey(params *cavageParams, he
 	return nil
 }
 
-func snapshotCavageSignedFields(header http.Header, host string, signedHeaders []string, deferDate bool) (http.Header, error) {
+func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []string, deferDate bool) (http.Header, error) {
 	owned := make(http.Header)
 	for _, name := range signedHeaders {
 		switch name {
 		case RequestTarget, Created, Expires:
 			continue
 		case "host":
-			values, ok := header[http.CanonicalHeaderKey(name)]
+			if message.isRequest {
+				if message.host == "" {
+					return nil, fmt.Errorf("%w: host", ErrSignedHeaderMissing)
+				}
+				owned["Host"] = []string{message.host}
+				continue
+			}
+
+			values, ok := message.header[http.CanonicalHeaderKey(name)]
 			if ok && len(values) > 0 {
 				owned["Host"] = append([]string(nil), values...)
 				continue
 			}
-			if host != "" {
-				owned["Host"] = []string{host}
+			if message.host != "" {
+				owned["Host"] = []string{message.host}
 				continue
 			}
 			return nil, fmt.Errorf("%w: host", ErrSignedHeaderMissing)
-		default:
-			values, ok := header[http.CanonicalHeaderKey(name)]
-			if !ok || len(values) == 0 {
-				if deferDate && name == "date" {
-					continue
-				}
-				return nil, fmt.Errorf("%w: %s", ErrSignedHeaderMissing, name)
+		case "transfer-encoding":
+			if len(message.transferEncoding) == 0 {
+				return nil, fmt.Errorf("%w: transfer-encoding", ErrSignedHeaderMissing)
 			}
-			owned[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
+			owned["Transfer-Encoding"] = append([]string(nil), message.transferEncoding...)
+			continue
+		case "trailer":
+			if len(message.trailer) > 0 {
+				if cavageTrailerValuesReceived(message.trailer) {
+					return nil, fmt.Errorf("%w: trailer", ErrSignedHeaderMissing)
+				}
+				owned["Trailer"] = []string{cavageTrailerDeclaration(message.trailer)}
+				continue
+			}
 		}
+
+		values, ok := message.header[http.CanonicalHeaderKey(name)]
+		if !ok || len(values) == 0 {
+			if deferDate && name == "date" {
+				continue
+			}
+			return nil, fmt.Errorf("%w: %s", ErrSignedHeaderMissing, name)
+		}
+		owned[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
 	}
 	return owned, nil
+}
+
+func cavageTrailerValuesReceived(trailer http.Header) bool {
+	for _, values := range trailer {
+		if values != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func cavageTrailerDeclaration(trailer http.Header) string {
+	keys := make([]string, 0, len(trailer))
+	for key := range trailer {
+		keys = append(keys, http.CanonicalHeaderKey(key))
+	}
+	slices.Sort(keys)
+	return strings.Join(keys, ",")
 }
 
 func cloneHeaderValues(header http.Header) map[string][]string {

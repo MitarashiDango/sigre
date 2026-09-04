@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -1934,6 +1935,86 @@ func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func TestCavageVerifierPreservesExpiresDecimalSignature(t *testing.T) {
+	const signingString = "(expires): 1.1234567890"
+	privateKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
+	mac := hmac.New(sha512.New, signingStringTestSecret)
+	if _, err := mac.Write([]byte(signingString)); err != nil {
+		t.Fatalf("failed to calculate fixed HMAC: %v", err)
+	}
+	verifier, err := NewCavageVerifier(&CavageVerificationOptions{
+		Now: func() time.Time { return time.Unix(1, 123456789) },
+	})
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+
+	for _, test := range []struct {
+		name      string
+		signature []byte
+		parse     func(http.Header) (*CavageSignature, error)
+		verify    func(*CavageSignature) error
+	}{
+		{
+			name:      "Ed25519 request",
+			signature: ed25519.Sign(privateKey, []byte(signingString)),
+			parse: func(header http.Header) (*CavageSignature, error) {
+				return verifier.ParseRequest(&http.Request{Header: header})
+			},
+			verify: func(signature *CavageSignature) error {
+				return verifier.Verify(signature, VerificationKey{
+					Metadata:  TrustedKeyMetadata{KeyID: "test-key", Algorithm: AlgorithmEd25519},
+					PublicKey: privateKey.Public(),
+				})
+			},
+		},
+		{
+			name:      "HMAC response",
+			signature: mac.Sum(nil),
+			parse: func(header http.Header) (*CavageSignature, error) {
+				return verifier.ParseResponse(&http.Response{Header: header})
+			},
+			verify: func(signature *CavageSignature) error {
+				return verifier.VerifyHMAC(signature, HMACVerificationKey{
+					Metadata: TrustedKeyMetadata{KeyID: "test-key", Algorithm: AlgorithmHMACSHA512},
+					Secret:   signingStringTestSecret,
+				})
+			},
+		},
+	} {
+		for _, value := range []string{"1.1234567890", "1.123456789"} {
+			t.Run(test.name+"/"+value, func(t *testing.T) {
+				parameters := `keyId="test-key",algorithm="hs2019",headers="(expires)",expires=` + value +
+					`,signature="` + base64.StdEncoding.EncodeToString(test.signature) + `"`
+				header := http.Header{Signature: {parameters}}
+				signature, err := test.parse(header)
+				if err != nil {
+					t.Fatalf("parse failed: %v", err)
+				}
+				expires, present := signature.Expires()
+				if !present || !expires.Equal(time.Unix(1, 123456789)) {
+					t.Fatalf("Expires() = %v/%t, want %v/true", expires, present, time.Unix(1, 123456789))
+				}
+				if header.Get(Signature) != parameters {
+					t.Fatal("parsing modified the received Signature field")
+				}
+				err = test.verify(signature)
+				if value == "1.123456789" {
+					if !errors.Is(err, ErrVerification) {
+						t.Fatalf("verification error = %v, want ErrVerification", err)
+					}
+					var packageError *SigreError
+					if !errors.As(err, &packageError) {
+						t.Fatalf("verification error is not wrapped by *SigreError: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("verification failed: %v", err)
+				}
+			})
+		}
 	}
 }
 

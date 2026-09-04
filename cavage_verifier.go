@@ -692,8 +692,12 @@ func parseCavageExpires(value string) (time.Time, error) {
 		digits = value[1:]
 	}
 	whole, fraction, hasFraction := strings.Cut(digits, ".")
-	if whole == "" || !allDecimalDigits(whole) || hasFraction && (fraction == "" || len(fraction) > 9 || !allDecimalDigits(fraction)) {
-		return time.Time{}, fmt.Errorf("%w: expires must be -?[0-9]+ or -?[0-9]+.[0-9]{1,9}", ErrInvalidExpirationTime)
+	if whole == "" || !allDecimalDigits(whole) || hasFraction && (fraction == "" || !allDecimalDigits(fraction)) {
+		return time.Time{}, fmt.Errorf("%w: expires must be -?[0-9]+ or -?[0-9]+\\.[0-9]+", ErrInvalidExpirationTime)
+	}
+	fraction = strings.TrimRight(fraction, "0")
+	if len(fraction) > 9 {
+		return time.Time{}, fmt.Errorf("%w: expires must have at most 9 fractional digits after trailing zeros are removed", ErrInvalidExpirationTime)
 	}
 	magnitude, err := strconv.ParseUint(whole, 10, 64)
 	if err != nil {

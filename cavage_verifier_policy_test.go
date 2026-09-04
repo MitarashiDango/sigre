@@ -323,19 +323,33 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 		})
 	}
 
-	expiresInvalid := []string{"", "+1", ".5", "1.", "1.1234567890", "1e3", "9223372036854775808", "-9223372036854775808.1"}
+	expiresInvalid := []string{
+		"", ".", "+1", ".5", "1.", "1e3", "1.2x000", "1. 000", "1.2\t000", "1.-000", "1.２000",
+		"1.1234567891", "1.12345678910", "0.0000000001",
+		"9223372036854775808", "9223372036854775808.0000000000",
+		"-9223372036854775808.1", "-9223372036854775808.0000000010",
+		"-9223372036854775809.0000000000", "18446744073709551616.0000000000",
+	}
 	for _, value := range expiresInvalid {
 		t.Run("expires/"+value, func(t *testing.T) {
-			parameter := ",expires=" + value
-			if value == "" {
-				parameter = `,expires=""`
-			}
+			parameter := `,expires="` + value + `"`
 			nowCalls := 0
 			params := verifierPolicyParameters("hs2019", "x-test", parameter)
 			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { nowCalls++; return time.Unix(0, 0) }})
 			assertVerifierPolicyError(t, err, sigre.ErrInvalidExpirationTime)
 			if nowCalls != 0 {
 				t.Fatalf("syntax failure called Now %d times", nowCalls)
+			}
+		})
+	}
+	for _, value := range []string{"1.1234567891", "9223372036854775808"} {
+		t.Run("expires/bare/"+value, func(t *testing.T) {
+			nowCalls := 0
+			params := verifierPolicyParameters("hs2019", "x-test", ",expires="+value)
+			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { nowCalls++; return time.Unix(0, 0) }})
+			assertVerifierPolicyError(t, err, sigre.ErrInvalidExpirationTime)
+			if nowCalls != 0 {
+				t.Fatalf("invalid expires called Now %d times", nowCalls)
 			}
 		})
 	}
@@ -778,9 +792,81 @@ func TestCavageVerifierErrorPriority(t *testing.T) {
 	})
 }
 
+func TestCavageVerifierExpiresDecimalPrecision(t *testing.T) {
+	for _, test := range []struct {
+		value       string
+		seconds     int64
+		nanoseconds int
+	}{
+		{value: "1.1234567890", seconds: 1, nanoseconds: 123456789},
+		{value: "1.123456789000", seconds: 1, nanoseconds: 123456789},
+		{value: "0.0000000010", nanoseconds: 1},
+		{value: "1.0000000000", seconds: 1},
+		{value: "0"},
+		{value: "0.0000000000"},
+		{value: "-0.0000000000"},
+		{value: "-0.0000000010", seconds: -1, nanoseconds: 999999999},
+		{value: "-1.1234567890", seconds: -2, nanoseconds: 876543211},
+		{value: "9223372036854775807.0000000000", seconds: 1<<63 - 1},
+		{value: "-9223372036854775808.0000000000", seconds: -1 << 63},
+		{value: "-9223372036854775807.9999999990", seconds: -1 << 63, nanoseconds: 1},
+	} {
+		t.Run(test.value, func(t *testing.T) {
+			params := verifierPolicyParameters("hs2019", "(expires)", ",expires="+test.value)
+			_, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+				Now: func() time.Time { return time.Unix(test.seconds, int64(test.nanoseconds)) },
+			})
+			if err != nil {
+				t.Fatalf("ParseRequest() failed: %v", err)
+			}
+			expires, present := signature.Expires()
+			if !present || expires.Unix() != test.seconds || expires.Nanosecond() != test.nanoseconds {
+				t.Fatalf("Expires() = (%d, %d)/%t, want (%d, %d)/true", expires.Unix(), expires.Nanosecond(), present, test.seconds, test.nanoseconds)
+			}
+		})
+	}
+}
+
+func TestCavageVerifierExpiresDecimalBoundary(t *testing.T) {
+	for _, value := range []string{"1.123456789", "1.1234567890"} {
+		for _, headers := range []string{"(expires)", "x-test"} {
+			for _, test := range []struct {
+				name    string
+				now     time.Time
+				wantErr error
+			}{
+				{name: "before", now: time.Unix(1, 123456788)},
+				{name: "equal", now: time.Unix(1, 123456789)},
+				{name: "after", now: time.Unix(1, 123456790), wantErr: sigre.ErrSignatureExpired},
+			} {
+				t.Run(value+"/"+headers+"/"+test.name, func(t *testing.T) {
+					params := verifierPolicyParameters("hs2019", headers, ",expires="+value)
+					_, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+						Now: func() time.Time { return test.now },
+					})
+					if test.wantErr != nil {
+						assertVerifierPolicyError(t, err, test.wantErr)
+						return
+					}
+					if err != nil {
+						t.Fatalf("ParseRequest() failed: %v", err)
+					}
+					expires, present := signature.Expires()
+					if !present || !expires.Equal(time.Unix(1, 123456789)) {
+						t.Fatalf("Expires() = %v/%t, want %v/true", expires, present, time.Unix(1, 123456789))
+					}
+				})
+			}
+		}
+	}
+}
+
 func FuzzCavageVerifierParseRequest(f *testing.F) {
 	f.Add(`keyId="key",signature="c2ln",algorithm="hs2019",headers="x-test"`)
 	f.Add(`keyId="key",signature="not-base64"`)
+	f.Add(`keyId="key",signature="c2ln",algorithm="hs2019",headers="(expires)",expires=1.1234567890`)
+	f.Add(`keyId="key",signature="c2ln",algorithm="hs2019",headers="x-test",expires=-0.0000000000`)
+	f.Add(`keyId="key",signature="c2ln",algorithm="hs2019",headers="x-test",expires=1.12345678910`)
 	f.Add("")
 	f.Fuzz(func(t *testing.T, parameters string) {
 		verifier, err := sigre.NewCavageVerifier(nil)

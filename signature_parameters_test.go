@@ -387,10 +387,41 @@ func TestSerializeCavageParamsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSerializeCavageParamsPreservesExpiresDecimal(t *testing.T) {
+	for _, value := range []string{"1.1234567890", "1.0000000000", "0", "-0.0000000000"} {
+		t.Run(value, func(t *testing.T) {
+			params := &sigre.ExportForTesting_cavageParams{
+				KeyID:          "key",
+				Signature:      "c2ln",
+				Expires:        value,
+				ExpiresPresent: true,
+			}
+			wire, err := sigre.ExportForTesting_serializeCavageParams(params)
+			if err != nil {
+				t.Fatalf("serialization failed: %v", err)
+			}
+			if want := `keyId="key",signature="c2ln",expires=` + value; wire != want {
+				t.Fatalf("serialized parameters = %q, want %q", wire, want)
+			}
+			if params.Expires != value || !params.ExpiresPresent {
+				t.Fatalf("serialization modified expires: %q/%t", params.Expires, params.ExpiresPresent)
+			}
+			parsed, err := sigre.ExportForTesting_parseCavageParams(wire)
+			if err != nil {
+				t.Fatalf("failed to parse serialized parameters: %v", err)
+			}
+			if parsed.Expires != value || !parsed.ExpiresPresent {
+				t.Fatalf("round trip changed expires: %q/%t", parsed.Expires, parsed.ExpiresPresent)
+			}
+		})
+	}
+}
+
 func TestSerializeCavageParamsRejectsUnsafeValues(t *testing.T) {
 	testCases := []struct {
-		name   string
-		params *sigre.ExportForTesting_cavageParams
+		name    string
+		params  *sigre.ExportForTesting_cavageParams
+		wantErr error
 	}{
 		{name: "nil parameters", params: nil},
 		{name: "empty keyId", params: &sigre.ExportForTesting_cavageParams{Signature: "c2ln"}},
@@ -402,7 +433,10 @@ func TestSerializeCavageParamsRejectsUnsafeValues(t *testing.T) {
 		{name: "DEL in keyId", params: &sigre.ExportForTesting_cavageParams{KeyID: "key\x7fvalue", Signature: "c2ln"}},
 		{name: "control in algorithm", params: &sigre.ExportForTesting_cavageParams{KeyID: "key", Signature: "c2ln", Algorithm: "hs2019\n"}},
 		{name: "invalid created", params: &sigre.ExportForTesting_cavageParams{KeyID: "key", Signature: "c2ln", Created: "invalid"}},
-		{name: "invalid expires", params: &sigre.ExportForTesting_cavageParams{KeyID: "key", Signature: "c2ln", Expires: "1.1234567890"}},
+		{name: "decimal created", params: &sigre.ExportForTesting_cavageParams{KeyID: "key", Signature: "c2ln", Created: "1.0000000000"}},
+		{name: "invalid expires", params: &sigre.ExportForTesting_cavageParams{KeyID: "key", Signature: "c2ln", Expires: "1.1234567891"}, wantErr: sigre.ErrInvalidExpirationTime},
+		{name: "excess expires precision with trailing zero", params: &sigre.ExportForTesting_cavageParams{KeyID: "key", Signature: "c2ln", Expires: "1.12345678910"}, wantErr: sigre.ErrInvalidExpirationTime},
+		{name: "subnanosecond expires", params: &sigre.ExportForTesting_cavageParams{KeyID: "key", Signature: "c2ln", Expires: "0.0000000001"}, wantErr: sigre.ErrInvalidExpirationTime},
 		{name: "empty header name", params: &sigre.ExportForTesting_cavageParams{KeyID: "key", Signature: "c2ln", Headers: []string{""}}},
 	}
 
@@ -410,6 +444,8 @@ func TestSerializeCavageParamsRejectsUnsafeValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := sigre.ExportForTesting_serializeCavageParams(tc.params); err == nil {
 				t.Fatal("expected serialization to fail")
+			} else if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("serialization error = %v, want %v", err, tc.wantErr)
 			}
 		})
 	}
@@ -465,6 +501,9 @@ func FuzzParseCavageParams(f *testing.F) {
 		`keyId="k",signature="AA==",bogus=@`,
 		`created=@,created=1,keyId=key,signature=c2ln`,
 		`created=1,created=@,keyId=key,signature=c2ln`,
+		`keyId=key,signature=c2ln,expires=1.1234567890`,
+		`keyId=key,signature=c2ln,expires=-0.0000000000`,
+		`keyId=key,signature=c2ln,expires=1.12345678910`,
 		`keYId="0",0,eXpires="",signAture="0000"`,
 		`keyId="unterminated,signature=c2ln`,
 		`keyId="unterminated\`,

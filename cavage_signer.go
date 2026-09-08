@@ -252,10 +252,15 @@ type cavageSigningMessage struct {
 }
 
 func requestSigningMessage(req *http.Request, header http.Header) cavageSigningMessage {
+	method := req.Method
+	if method == "" {
+		// For client requests, net/http defines an empty method as GET.
+		method = http.MethodGet
+	}
 	return cavageSigningMessage{
 		isRequest: true,
 		host:      req.Host,
-		method:    req.Method,
+		method:    method,
 		header:    header,
 		resolveRequestTarget: func() (string, error) {
 			return outgoingRequestTarget(req)
@@ -270,6 +275,10 @@ func responseSigningMessage(res *http.Response, header http.Header) cavageSignin
 	message := cavageSigningMessage{header: header}
 	if res.Request != nil {
 		message.method = res.Request.Method
+		// Use the same client-side branch as associatedRequestTarget.
+		if res.Request.RequestURI == "" && message.method == "" {
+			message.method = http.MethodGet
+		}
 		message.resolveRequestTarget = func() (string, error) {
 			return associatedRequestTarget(res.Request)
 		}

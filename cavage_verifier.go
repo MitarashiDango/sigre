@@ -152,6 +152,10 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 	}
 	if res.Request != nil {
 		snapshot.method = res.Request.Method
+		// Use the same client-side branch as associatedRequestTarget.
+		if res.Request.RequestURI == "" && snapshot.method == "" {
+			snapshot.method = http.MethodGet
+		}
 		snapshot.resolveRequestTarget = func() (string, error) {
 			return associatedRequestTarget(res.Request)
 		}

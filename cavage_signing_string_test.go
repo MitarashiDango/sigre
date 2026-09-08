@@ -156,6 +156,60 @@ func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
 	}
 }
 
+func TestCavageRequestSignerDefaultsEmptyMethodToGET(t *testing.T) {
+	const wantSigningString = "(request-target): get /resource?x=%2F\n(created): 100"
+	mac := hmac.New(sha512.New, signingStringTestSecret)
+	if _, err := mac.Write([]byte(wantSigningString)); err != nil {
+		t.Fatalf("failed to calculate fixed HMAC: %v", err)
+	}
+	wantSignature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	key := HMACSigningKey{
+		Metadata: TrustedKeyMetadata{KeyID: "test-key", Algorithm: AlgorithmHMACSHA512},
+		Secret:   signingStringTestSecret,
+	}
+	signer := &CavageSigner{Now: func() time.Time { return time.Unix(100, 0) }}
+
+	for _, method := range []string{"", http.MethodGet} {
+		t.Run("method="+method, func(t *testing.T) {
+			req := &http.Request{
+				Method: method,
+				URL:    parseSigningStringTestURL(t, "https://example.test/resource?x=%2F"),
+				Header: http.Header{"X-Unrelated": {"unchanged"}},
+				Body:   http.NoBody,
+			}
+			urlBefore := req.URL
+			urlValueBefore := *req.URL
+			headerBefore := req.Header.Clone()
+			if err := signer.SignRequestWithHMAC(req, key, CavageSignaturePlacementSignature, nil); err != nil {
+				t.Fatalf("SignRequestWithHMAC() failed: %v", err)
+			}
+			params, err := parseCavageParams(req.Header.Get(Signature))
+			if err != nil {
+				t.Fatalf("parseCavageParams() failed: %v", err)
+			}
+			if params.Signature != wantSignature || params.Created != "100" || !reflect.DeepEqual(params.Headers, []string{RequestTarget, Created}) {
+				t.Fatalf("signature parameters = %+v, want the fixed HMAC over %q with default headers", params, wantSigningString)
+			}
+			headerBefore.Set(Signature, req.Header.Get(Signature))
+			if req.Method != method || req.RequestURI != "" || req.URL != urlBefore || *req.URL != urlValueBefore || !reflect.DeepEqual(req.Header, headerBefore) || req.Body != http.NoBody {
+				t.Fatal("SignRequestWithHMAC() modified the request beyond its Signature field")
+			}
+
+			var wire bytes.Buffer
+			if err := req.Write(&wire); err != nil {
+				t.Fatalf("Request.Write() failed: %v", err)
+			}
+			requestLine := strings.SplitN(wire.String(), "\r\n", 2)[0]
+			if requestLine != "GET /resource?x=%2F HTTP/1.1" {
+				t.Fatalf("request line = %q, want GET /resource?x=%%2F HTTP/1.1", requestLine)
+			}
+			if req.Method != method {
+				t.Fatalf("Request.Write() changed Method from %q to %q", method, req.Method)
+			}
+		})
+	}
+}
+
 func TestCavageRequestSignerRejectsOpaqueRequestTarget(t *testing.T) {
 	req := &http.Request{
 		Method: "GET",
@@ -1954,6 +2008,110 @@ func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestCavageResponseRequestTargetDefaultsEmptyOutgoingMethodToGET(t *testing.T) {
+	const wantSigningString = "(request-target): get /resource?x=%2F"
+	mac := hmac.New(sha512.New, signingStringTestSecret)
+	if _, err := mac.Write([]byte(wantSigningString)); err != nil {
+		t.Fatalf("failed to calculate fixed HMAC: %v", err)
+	}
+	wantSignature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+	key := HMACSigningKey{
+		Metadata: TrustedKeyMetadata{KeyID: "test-key", Algorithm: AlgorithmHMACSHA512},
+		Secret:   signingStringTestSecret,
+	}
+	verifier, err := NewCavageVerifier(nil)
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+
+	for _, method := range []string{"", http.MethodGet} {
+		t.Run("method="+method, func(t *testing.T) {
+			body := &receivedCountingBody{}
+			req := &http.Request{
+				Method: method,
+				URL:    parseSigningStringTestURL(t, "https://example.test/resource?x=%2F"),
+				Header: http.Header{"X-Unrelated": {"unchanged"}},
+				Body:   body,
+			}
+			urlBefore := req.URL
+			urlValueBefore := *req.URL
+			headerBefore := req.Header.Clone()
+
+			t.Run("signer", func(t *testing.T) {
+				res := &http.Response{Request: req, Header: make(http.Header)}
+				if err := NewCavageSigner().SignResponseWithHMAC(res, key, CavageSignaturePlacementSignature, signingStringOptions([]string{RequestTarget})); err != nil {
+					t.Fatalf("SignResponseWithHMAC() failed: %v", err)
+				}
+				params, err := parseCavageParams(res.Header.Get(Signature))
+				if err != nil {
+					t.Fatalf("parseCavageParams() failed: %v", err)
+				}
+				if params.Signature != wantSignature {
+					t.Fatalf("signature = %q, want the fixed HMAC over %q", params.Signature, wantSigningString)
+				}
+				if res.Request != req {
+					t.Fatal("SignResponseWithHMAC() replaced the associated request")
+				}
+			})
+
+			t.Run("verifier", func(t *testing.T) {
+				res := &http.Response{
+					Request: req,
+					Header:  http.Header{Signature: {`keyId="test-key",algorithm="hs2019",headers="(request-target)",signature="` + wantSignature + `"`}},
+				}
+				signature, err := verifier.ParseResponse(res)
+				if err != nil {
+					t.Fatalf("ParseResponse() failed: %v", err)
+				}
+				if string(signature.signingString) != wantSigningString {
+					t.Fatalf("signing string = %q, want %q", signature.signingString, wantSigningString)
+				}
+				if err := verifier.VerifyHMAC(signature, HMACVerificationKey{Metadata: key.Metadata, Secret: key.Secret}); err != nil {
+					t.Fatalf("VerifyHMAC() failed: %v", err)
+				}
+				if res.Request != req {
+					t.Fatal("ParseResponse() replaced the associated request")
+				}
+			})
+
+			if req.Method != method || req.RequestURI != "" || req.URL != urlBefore || *req.URL != urlValueBefore || !reflect.DeepEqual(req.Header, headerBefore) || req.Body != body {
+				t.Fatal("response signing or parsing modified the associated request")
+			}
+			if body.reads != 0 || body.closes != 0 {
+				t.Fatalf("response signing or parsing accessed the associated request Body: reads=%d closes=%d", body.reads, body.closes)
+			}
+		})
+	}
+}
+
+func TestCavageResponseRequestTargetRejectsEmptyReceivedMethod(t *testing.T) {
+	req := &http.Request{
+		RequestURI: "/resource?x=%2F",
+		URL:        parseSigningStringTestURL(t, "https://example.test/resource?x=%2F"),
+	}
+	t.Run("signer", func(t *testing.T) {
+		res := &http.Response{Request: req, Header: make(http.Header)}
+		err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{RequestTarget}))
+		if err == nil || !strings.Contains(err.Error(), "method is missing") {
+			t.Fatalf("SignResponseWithHMAC() error = %v, want a missing method error", err)
+		}
+	})
+	t.Run("verifier", func(t *testing.T) {
+		res := &http.Response{
+			Request: req,
+			Header:  http.Header{Signature: {fixedCavageHMACHeader(t, "(request-target): get /resource?x=%2F", RequestTarget)}},
+		}
+		verifier, err := NewCavageVerifier(signingStringVerificationOptions())
+		if err != nil {
+			t.Fatalf("NewCavageVerifier() failed: %v", err)
+		}
+		signature, err := verifier.ParseResponse(res)
+		if signature != nil || !errors.Is(err, ErrInvalidHTTPMessage) || !strings.Contains(err.Error(), "method is required") {
+			t.Fatalf("ParseResponse() = %v, %v; want no snapshot and ErrInvalidHTTPMessage for a missing method", signature, err)
+		}
+	})
 }
 
 func TestCavageVerifierPreservesExpiresDecimalSignature(t *testing.T) {

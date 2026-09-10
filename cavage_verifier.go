@@ -509,14 +509,14 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 		createdPresent:    params.CreatedPresent,
 		expires:           expires,
 		expiresPresent:    params.ExpiresPresent,
-		signedHeaders:     append([]string(nil), headers...),
+		signedHeaders:     headers,
 		headersExplicit:   params.HeadersPresent,
-		signature:         append([]byte(nil), decodedSignature...),
+		signature:         decodedSignature,
 		signingString:     append([]byte(nil), buf.Bytes()...),
 		method:            message.method,
 		requestTarget:     requestTarget,
 		host:              message.host,
-		signedFieldValues: cloneHeaderValues(ownedHeaders),
+		signedFieldValues: ownedHeaders,
 	}, nil
 }
 
@@ -649,14 +649,6 @@ func cavageTrailerDeclaration(trailer http.Header) string {
 	}
 	slices.Sort(keys)
 	return strings.Join(keys, ",")
-}
-
-func cloneHeaderValues(header http.Header) map[string][]string {
-	cloned := make(map[string][]string, len(header))
-	for name, values := range header {
-		cloned[name] = append([]string(nil), values...)
-	}
-	return cloned
 }
 
 func parseCavageCreated(value string) (time.Time, error) {

@@ -276,7 +276,7 @@ func TestCavageSignatureAccessors(t *testing.T) {
 	}
 }
 
-func TestCavageVerifierRequiredHeadersFailBeforeKeyResolution(t *testing.T) {
+func TestCavageVerifierParseRequestEnforcesHeaderRequirements(t *testing.T) {
 	tests := []struct {
 		name string
 		opts *sigre.CavageVerificationOptions
@@ -291,13 +291,6 @@ func TestCavageVerifierRequiredHeadersFailBeforeKeyResolution(t *testing.T) {
 			test.opts.Now = func() time.Time { return time.Unix(100, 0) }
 			_, _, err := parseVerifierPolicyRequest(req, test.opts)
 			assertVerifierPolicyError(t, err, sigre.ErrRequiredHeaderMissing)
-			resolverCalls := 0
-			if err == nil {
-				resolverCalls++
-			}
-			if resolverCalls != 0 {
-				t.Fatalf("resolver was called %d times", resolverCalls)
-			}
 		})
 	}
 }

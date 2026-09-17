@@ -142,7 +142,6 @@ func validateCavageQuotedStringValue(name, value string) error {
 // parseCavageParams parses a Cavage HTTP Signature parameter string as defined in
 // draft-cavage-http-signatures-12 Section 2.1.
 func parseCavageParams(input string) (*cavageParams, error) {
-	var hasHeaders bool
 	p := &cavageParams{}
 	seen := make(map[string]bool, 6)
 
@@ -190,7 +189,6 @@ func parseCavageParams(input string) (*cavageParams, error) {
 			p.Expires = value
 			p.ExpiresPresent = true
 		case "headers":
-			hasHeaders = true
 			p.HeadersPresent = true
 			for _, h := range strings.Split(value, " ") {
 				if h != "" {
@@ -209,7 +207,7 @@ func parseCavageParams(input string) (*cavageParams, error) {
 	if _, err := base64.StdEncoding.Strict().DecodeString(p.Signature); err != nil {
 		return nil, fmt.Errorf("invalid 'signature' value: %w", err)
 	}
-	if len(p.Headers) == 0 && hasHeaders {
+	if len(p.Headers) == 0 && p.HeadersPresent {
 		return nil, fmt.Errorf("'headers' parameter must specify a non-empty value")
 	}
 

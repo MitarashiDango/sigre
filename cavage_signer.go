@@ -376,10 +376,7 @@ func (s *CavageSigner) signMessage(
 }
 
 func validateSigningKey(key SigningKey) (algorithmDefinition, error) {
-	if err := validateSigningMetadata(key.Metadata); err != nil {
-		return algorithmDefinition{}, err
-	}
-	algorithm, err := algorithmDefinitionFor(key.Metadata.Algorithm)
+	algorithm, err := validateSigningMetadata(key.Metadata)
 	if err != nil {
 		return algorithmDefinition{}, err
 	}
@@ -396,10 +393,7 @@ func validateSigningKey(key SigningKey) (algorithmDefinition, error) {
 }
 
 func validateHMACSigningKey(key HMACSigningKey) (algorithmDefinition, error) {
-	if err := validateSigningMetadata(key.Metadata); err != nil {
-		return algorithmDefinition{}, err
-	}
-	algorithm, err := algorithmDefinitionFor(key.Metadata.Algorithm)
+	algorithm, err := validateSigningMetadata(key.Metadata)
 	if err != nil {
 		return algorithmDefinition{}, err
 	}
@@ -412,14 +406,11 @@ func validateHMACSigningKey(key HMACSigningKey) (algorithmDefinition, error) {
 	return algorithm, nil
 }
 
-func validateSigningMetadata(metadata TrustedKeyMetadata) error {
+func validateSigningMetadata(metadata TrustedKeyMetadata) (algorithmDefinition, error) {
 	if err := validateCavageKeyID(metadata.KeyID); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidKeyMetadata, err)
+		return algorithmDefinition{}, fmt.Errorf("%w: %v", ErrInvalidKeyMetadata, err)
 	}
-	if _, err := algorithmDefinitionFor(metadata.Algorithm); err != nil {
-		return err
-	}
-	return nil
+	return algorithmDefinitionFor(metadata.Algorithm)
 }
 
 func validatePrivateKey(key crypto.PrivateKey, expected algorithmKeyKind) error {
@@ -738,9 +729,7 @@ func signHMAC(secret []byte, hash crypto.Hash, data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("trusted hash %v is unavailable", hash)
 	}
 	mac := hmac.New(hash.New, secret)
-	if _, err := mac.Write(data); err != nil {
-		return nil, fmt.Errorf("failed to write signing string to HMAC: %w", err)
-	}
+	mac.Write(data)
 	return mac.Sum(nil), nil
 }
 
@@ -749,9 +738,7 @@ func hashSigningString(hash crypto.Hash, data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("trusted hash %v is unavailable", hash)
 	}
 	h := hash.New()
-	if _, err := h.Write(data); err != nil {
-		return nil, fmt.Errorf("failed to hash signing string: %w", err)
-	}
+	h.Write(data)
 	return h.Sum(nil), nil
 }
 

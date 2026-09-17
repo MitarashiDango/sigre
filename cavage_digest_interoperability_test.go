@@ -155,7 +155,6 @@ func TestActivityPubDigestHelperRejectsUnsupportedOrMalformedValues(t *testing.T
 		{name: "multiple digest values", header: "SHA-256=" + validBase64 + ",SHA-256=" + validBase64},
 	}
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			if err := verifyInteroperabilitySHA256Digest([]byte("fixture"), test.header); err == nil {

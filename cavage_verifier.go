@@ -926,9 +926,7 @@ func verifyHMAC(secret, sig, data []byte, hashID crypto.Hash) error {
 		return err
 	}
 	mac := hmac.New(hashFunc, secret)
-	if _, err := mac.Write(data); err != nil {
-		return fmt.Errorf("failed to compute HMAC for verification: %w", err)
-	}
+	mac.Write(data)
 	if !hmac.Equal(sig, mac.Sum(nil)) {
 		return fmt.Errorf("%w: HMAC verification failed", ErrVerification)
 	}

@@ -72,7 +72,6 @@ func TestCavageInteroperabilityFixtureCoverage(t *testing.T) {
 		t.Fatalf("fixture count = %d, want %d", len(fixtures), len(expected))
 	}
 	for _, fixture := range fixtures {
-		fixture := fixture
 		t.Run(fixture.ID, func(t *testing.T) {
 			t.Parallel()
 			want, ok := expected[fixture.ID]
@@ -110,7 +109,6 @@ func TestCavageInteroperabilityStrictAndExplicitVerification(t *testing.T) {
 	t.Parallel()
 
 	for _, fixture := range loadCavageInteroperabilityFixtures(t) {
-		fixture := fixture
 		t.Run(fixture.ID, func(t *testing.T) {
 			t.Parallel()
 			key := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
@@ -146,7 +144,6 @@ func TestCavageInteroperabilitySignerMatchesFixedSignatures(t *testing.T) {
 	t.Parallel()
 
 	for _, fixture := range loadCavageInteroperabilityFixtures(t) {
-		fixture := fixture
 		t.Run(fixture.ID, func(t *testing.T) {
 			t.Parallel()
 			req := fixture.newRequest(t, false)
@@ -249,7 +246,6 @@ func TestCavageInteroperabilityExtensionMappingIsExact(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			opts := &sigre.CavageVerificationOptions{

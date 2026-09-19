@@ -51,7 +51,7 @@ err := signer.SignRequest(
 
 `NewCavageVerifier`で検証器を作成し、検証ポリシーを設定します。受信メッセージは`ParseRequest`または`ParseResponse`で解析します。
 
-解析結果は`CavageSignature`です。署名パラメータ、デコード済みの署名、署名対象、署名文字列、その生成に使ったHTTP値を保持します。これらの値は後から変更できません。
+解析結果は`CavageSignature`です。署名パラメータ、デコード済みの署名、署名対象、署名文字列を保持します。これらの値は後から変更できません。
 
 解析後に元のリクエスト、レスポンス、`Header`、`URL`を変更しても、検証結果には影響しません。`CavageSignature`は、それを生成した`CavageVerifier`でのみ検証できます。
 

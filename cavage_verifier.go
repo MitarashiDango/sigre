@@ -57,26 +57,22 @@ type CavageVerifier struct {
 
 // CavageSignature is an immutable snapshot returned by ParseRequest or
 // ParseResponse. It owns the parsed parameters, signature bytes, effective
-// signed fields, signing string, and message values used to build that string.
+// signed fields, and signing string.
 // A snapshot can be verified only by the CavageVerifier that parsed it.
 type CavageSignature struct {
-	origin            *cavageVerifierIdentity
-	keyID             string
-	placement         CavageSignaturePlacement
-	algorithmLabel    string
-	algorithmPresent  bool
-	created           time.Time
-	createdPresent    bool
-	expires           time.Time
-	expiresPresent    bool
-	signedHeaders     []string
-	headersExplicit   bool
-	signature         []byte
-	signingString     []byte
-	method            string
-	requestTarget     string
-	host              string
-	signedFieldValues map[string][]string
+	origin           *cavageVerifierIdentity
+	keyID            string
+	placement        CavageSignaturePlacement
+	algorithmLabel   string
+	algorithmPresent bool
+	created          time.Time
+	createdPresent   bool
+	expires          time.Time
+	expiresPresent   bool
+	signedHeaders    []string
+	headersExplicit  bool
+	signature        []byte
+	signingString    []byte
 }
 
 // NewCavageVerifier validates and copies opts. Passing nil selects the strict
@@ -458,7 +454,6 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidDate, err)
 		}
-		ownedHeaders["Date"] = append([]string(nil), dateValues...)
 	}
 
 	createdText, expiresText := "", ""
@@ -500,23 +495,19 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 	}
 
 	return &CavageSignature{
-		origin:            v.identity,
-		keyID:             params.KeyID,
-		placement:         candidate.placement,
-		algorithmLabel:    params.Algorithm,
-		algorithmPresent:  params.AlgorithmPresent,
-		created:           created,
-		createdPresent:    params.CreatedPresent,
-		expires:           expires,
-		expiresPresent:    params.ExpiresPresent,
-		signedHeaders:     headers,
-		headersExplicit:   params.HeadersPresent,
-		signature:         decodedSignature,
-		signingString:     append([]byte(nil), buf.Bytes()...),
-		method:            message.method,
-		requestTarget:     requestTarget,
-		host:              message.host,
-		signedFieldValues: ownedHeaders,
+		origin:           v.identity,
+		keyID:            params.KeyID,
+		placement:        candidate.placement,
+		algorithmLabel:   params.Algorithm,
+		algorithmPresent: params.AlgorithmPresent,
+		created:          created,
+		createdPresent:   params.CreatedPresent,
+		expires:          expires,
+		expiresPresent:   params.ExpiresPresent,
+		signedHeaders:    headers,
+		headersExplicit:  params.HeadersPresent,
+		signature:        decodedSignature,
+		signingString:    append([]byte(nil), buf.Bytes()...),
 	}, nil
 }
 

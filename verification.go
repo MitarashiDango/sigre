@@ -30,8 +30,8 @@ const (
 )
 
 // TrustedKeyMetadata binds an opaque wire keyId to one trusted algorithm.
-// The caller constructs this metadata from trusted configuration after resolving
-// a received keyId; a received algorithm parameter never constructs it.
+// The caller supplies this metadata from trusted configuration for signing
+// or verification; it must not be derived from a received algorithm parameter.
 type TrustedKeyMetadata struct {
 	// KeyID is serialized or compared byte-for-byte without normalization.
 	KeyID string
@@ -94,8 +94,8 @@ type CavageVerificationOptions struct {
 	RequireExplicitHeaders bool
 	// MaxSignatureAge limits the elapsed time since signed (created). A positive value
 	// requires (created) in the effective signed-header list and a valid created parameter.
-	// Zero disables this policy. The inclusive boundary is evaluated as a time.Duration
-	// without truncation to whole seconds.
+	// Zero disables this policy. The exact boundary is accepted without
+	// truncation to whole seconds.
 	MaxSignatureAge time.Duration
 	// MaxDateAge limits the absolute difference between a single valid signed Date value and
 	// the verifier's current time. A positive value requires exactly one Date value and date

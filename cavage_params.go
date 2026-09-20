@@ -19,25 +19,24 @@ const (
 	Expires = "(expires)"
 )
 
-// hs2019 is the non-deprecated algorithm identifier defined in the IANA
-// HTTP Signature Algorithms Registry (Appendix E.2).
+// hs2019 is listed as active in draft-cavage-http-signatures-12 Appendix E.2.
 const hs2019 = "hs2019"
 
-// cavageParams holds the parsed fields of a Cavage HTTP Signature header.
 type cavageParams struct {
 	KeyID            string
 	Signature        string
 	Algorithm        string
 	AlgorithmPresent bool
-	Created          string // Unix timestamp as decimal string
-	CreatedPresent   bool
-	Expires          string // Unix timestamp as decimal string
-	ExpiresPresent   bool
-	Headers          []string
-	HeadersPresent   bool
+	// Created and Expires hold parameter text. Time syntax is checked by
+	// CavageVerifier.parse and serializeCavageParams, not parseCavageParams.
+	Created        string
+	CreatedPresent bool
+	Expires        string
+	ExpiresPresent bool
+	Headers        []string
+	HeadersPresent bool
 }
 
-// serializeCavageParams serialises p into the Cavage signature-params wire format.
 func serializeCavageParams(p *cavageParams) (string, error) {
 	if p == nil {
 		return "", fmt.Errorf("signature parameters are nil")

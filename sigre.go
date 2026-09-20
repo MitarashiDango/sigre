@@ -7,22 +7,17 @@
 // Create signatures with [NewCavageSigner] and the SignRequest, SignResponse,
 // SignRequestWithHMAC, or SignResponseWithHMAC methods on [CavageSigner]. Every
 // signing call receives a [SigningKey] or [HMACSigningKey] and an explicit
-// [CavageSignaturePlacement]. Nil signing options have the same meaning as a
-// zero-value [CavageSigningOptions]. That strict zero value emits hs2019 with
-// a SHA-512 algorithm or Ed25519, signs (request-target) and (created) for a
-// request, and uses the draft's effective (created) field for a response.
+// [CavageSignaturePlacement].
 //
 // Construct a [CavageVerifier], parse a received signature with ParseRequest or
 // ParseResponse, resolve the snapshot's KeyID to a trusted [VerificationKey] or
 // [HMACVerificationKey], and then call Verify or VerifyHMAC. KeyID is an opaque,
-// attacker-controlled wire value. The trusted
-// [TrustedKeyMetadata.Algorithm] selects exactly one cryptographic algorithm;
-// the received algorithm parameter is used only for consistency checks. Nil
-// constructor options have the same meaning as a zero-value
-// [CavageVerificationOptions]. That strict zero value permits the active
-// SHA-512 algorithms and Ed25519 without adding a maximum-age policy. A
-// SHA-256 AlgorithmID must be explicitly allowed, and a deprecated wire label
-// additionally requires a matching compatibility setting.
+// attacker-controlled wire value. The trusted [TrustedKeyMetadata.Algorithm]
+// selects exactly one cryptographic algorithm; the received algorithm parameter
+// is used only for consistency checks.
+//
+// Nil options use the defaults documented in [CavageSigningOptions] and
+// [CavageVerificationOptions].
 //
 // Application policy such as required signed fields and maximum age is
 // configured separately from explicit interoperability relaxations. Package

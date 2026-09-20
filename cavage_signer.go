@@ -55,7 +55,6 @@ const (
 // setting. Signing never calculates a Digest field from a message body.
 type CavageSigningOptions struct {
 	// AdditionalHeaders appends fields to the strict request or response defaults.
-	// It does not replace those defaults.
 	AdditionalHeaders []string
 	// ExpiresAfter sets expires to the current time plus this duration. Whole-second
 	// deadlines use integer notation, and subsecond deadlines use decimal notation.

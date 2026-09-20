@@ -9,22 +9,25 @@ var (
 	// ErrInvalidHTTPMessage is returned when a request, response, or parsed
 	// signature is nil, incomplete, or not valid for the requested operation.
 	ErrInvalidHTTPMessage = errors.New("invalid HTTP message")
-	// ErrMissingSignature is returned when no HTTP signature is found in the message.
+	// ErrMissingSignature is returned when no Cavage signature candidate is found
+	// in the request sources selected by RequestSignatureSource or in a response
+	// Signature field.
 	ErrMissingSignature = errors.New("missing signature")
-	// ErrSignatureSourceConflict is returned when more than one selected Cavage
-	// signature source is present.
+	// ErrSignatureSourceConflict is returned when the selected request sources or
+	// a response Signature field contain more than one Cavage signature candidate.
 	ErrSignatureSourceConflict = errors.New("conflicting signature sources")
 	// ErrInvalidSignatureParameters is returned when the Cavage signature
 	// parameters are malformed, duplicated, incomplete, or contain invalid Base64.
 	ErrInvalidSignatureParameters = errors.New("invalid signature parameters")
 	// ErrInvalidSignatureAlgorithm is returned when a wire algorithm representation
-	// is invalid or disabled, a trusted AlgorithmID is disallowed, or an algorithm
-	// is incompatible with the chosen pseudo-headers.
+	// is invalid or disabled, a trusted AlgorithmID is disallowed, an algorithm
+	// is incompatible with the chosen pseudo-headers, or RequireAlgorithm is set
+	// and the algorithm parameter is omitted.
 	ErrInvalidSignatureAlgorithm = errors.New("invalid signature algorithm")
 	// ErrUnsupportedKeyFormat is returned when a recognized key has an invalid format or length.
 	ErrUnsupportedKeyFormat = errors.New("unsupported key format")
-	// ErrInvalidExpirationTime is returned when an expires parameter is missing,
-	// malformed, or outside the supported time range.
+	// ErrInvalidExpirationTime is returned when expires is malformed or outside
+	// the supported time range, or is missing while (expires) is signed.
 	ErrInvalidExpirationTime = errors.New("invalid signature expiration time")
 	// ErrSignatureExpired is returned when a valid expires value is older than
 	// the permitted boundary.
@@ -40,14 +43,17 @@ var (
 	// ErrAlgorithmMismatch is returned when trusted algorithm metadata conflicts with
 	// the signing or verification key kind, or with a received algorithm parameter.
 	ErrAlgorithmMismatch = errors.New("algorithm mismatch for the given key")
-	// ErrInvalidCreationTime is returned when a required (created) parameter is
-	// missing, malformed, too far in the future, or older than MaxSignatureAge.
+	// ErrInvalidCreationTime is returned when a created parameter is malformed,
+	// out of range, too far in the future, or older than MaxSignatureAge, or when
+	// (created) is signed without a created parameter.
 	ErrInvalidCreationTime = errors.New("invalid signature creation time")
 	// ErrRequiredHeaderMissing is returned when a field required by the caller or
-	// by a configured time policy is absent from the effective signed-header list.
+	// by a configured time policy is absent from the effective signed-header list,
+	// or when RequireExplicitHeaders is set and the headers parameter is omitted.
 	ErrRequiredHeaderMissing = errors.New("required header not listed in signature parameters")
 	// ErrSignedHeaderMissing is returned when a field listed in the effective
-	// signed-header list is absent from the HTTP message.
+	// signed-header list is absent from the HTTP message. A missing signed Date
+	// field is reported as ErrInvalidDate when MaxDateAge is positive.
 	ErrSignedHeaderMissing = errors.New("signed header missing from HTTP message")
 	// ErrKeyIDMismatch is returned when the received keyId differs from trusted key metadata.
 	ErrKeyIDMismatch = errors.New("signature keyId does not match trusted key metadata")
@@ -55,7 +61,9 @@ var (
 	ErrInvalidKeyMetadata = errors.New("invalid trusted key metadata")
 	// ErrInvalidVerificationOptions is returned when verification options contain an invalid value.
 	ErrInvalidVerificationOptions = errors.New("invalid verification options")
-	// ErrInvalidDate is returned when a signed Date value violates the configured freshness policy.
+	// ErrInvalidDate is returned when MaxDateAge is positive and the signed Date
+	// field is missing, has multiple values, is malformed, or differs from the
+	// current time by more than MaxDateAge.
 	ErrInvalidDate = errors.New("invalid signed Date header")
 	// ErrInvalidSignaturePlacement is returned when a signing placement is invalid
 	// or would make the Cavage signature source ambiguous.

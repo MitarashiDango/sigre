@@ -55,9 +55,9 @@ err := signer.SignRequest(
 
 解析後に元のリクエスト、レスポンス、`Header`、`URL`を変更しても、検証結果には影響しません。`CavageSignature`は、それを生成した`CavageVerifier`でのみ検証できます。
 
-リクエストでは、既定で`Signature`フィールドだけを解析します。`RequestSignatureSource`では、`Authorization: Signature`だけを選ぶことも、両方を候補にすることもできます。両方に署名がある場合は`ErrSignatureSourceConflict`になります。選択していないフィールドは解析しません。
+リクエストでは、既定で`Signature`フィールドだけを解析します。`RequestSignatureSource`では、`Authorization: Signature`だけを選ぶことも、両方を候補にすることもできます。選択した取得元に署名候補がない場合は`ErrMissingSignature`、複数ある場合は`ErrSignatureSourceConflict`になります。同じ取得元に複数の署名候補がある場合も競合に含みます。選択していない取得元は解析しません。
 
-レスポンスでは`Signature`フィールドだけを解析します。
+レスポンスでは、`RequestSignatureSource`によらず`Signature`フィールドだけを解析します。値がない場合は`ErrMissingSignature`、複数の値がある場合は`ErrSignatureSourceConflict`になります。
 
 解析後、`CavageSignature.KeyID()`の値を信頼済み鍵へ解決します。非対称鍵には`Verify`、HMACには`VerifyHMAC`を使用します。
 
@@ -123,7 +123,7 @@ if err == nil {
 	_, err = verifier.ParseRequest(req)
 }
 if errors.Is(err, sigre.ErrMissingSignature) {
-	// 署名が存在しない場合の処理
+	// 選択したリクエストの取得元に署名候補がない場合の処理
 }
 var packageError *sigre.SigreError
 if errors.As(err, &packageError) {
@@ -135,13 +135,15 @@ if errors.As(err, &packageError) {
 
 | エラー                       | 条件                                             |
 | ---------------------------- | ------------------------------------------------ |
-| `ErrMissingSignature`        | 署名が存在しない                                 |
-| `ErrSignatureSourceConflict` | 選択した署名の取得元が競合した                   |
-| `ErrSignedHeaderMissing`     | 署名対象のフィールドがHTTPメッセージに存在しない |
+| `ErrMissingSignature`        | `RequestSignatureSource`で選択したリクエストの取得元、またはレスポンスの`Signature`フィールドに署名候補がない |
+| `ErrSignatureSourceConflict` | 選択したリクエストの取得元、またはレスポンスの`Signature`フィールドに署名候補が複数ある。同じ取得元に複数ある場合も含む |
+| `ErrSignedHeaderMissing`     | 実効的な署名対象一覧に含まれるフィールドがHTTPメッセージに存在しない。ただし、`MaxDateAge > 0`で署名対象の`Date`フィールドが欠落した場合は`ErrInvalidDate`になる |
 | `ErrVerification`            | 暗号学的な検証に失敗した                         |
 | `ErrKeyIDMismatch`           | 受信した`keyId`と信頼済みメタデータが一致しない  |
-| `ErrRequiredHeaderMissing`   | 必須の署名対象が存在しない                       |
+| `ErrRequiredHeaderMissing`   | 呼び出し元または設定された時刻ポリシーが必須とするフィールドが実効的な署名対象一覧に含まれていない、または`RequireExplicitHeaders`が有効で`headers`パラメータが省略されている |
 | `ErrSignatureExpired`        | 署名の有効期限が切れている                       |
+| `ErrInvalidDate`             | `MaxDateAge > 0`で、署名対象の`Date`フィールドがHTTPメッセージに存在しない、値が複数ある、形式が不正、または現在時刻との差の絶対値が`MaxDateAge`を超えている。時刻差の制限は過去・未来の両方向に適用する。実効的な署名対象一覧に`date`が含まれない場合は、先に`ErrRequiredHeaderMissing`になる |
+| `ErrInvalidSignatureAlgorithm` | 送受信する`algorithm`の表現が不正または無効、信頼済みの`AlgorithmID`が許可されていない、アルゴリズムが選択した疑似ヘッダーと適合しない、または`RequireAlgorithm`が有効で`algorithm`パラメータが省略されている |
 
 ## 完全な実行例
 

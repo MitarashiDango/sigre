@@ -29,8 +29,7 @@ type outgoingTransferFields struct {
 	trailer          outgoingHTTPField
 }
 
-func resolveOutgoingRequestFields(req *http.Request, header http.Header, signedHeaders []string) (string, http.Header, error) {
-	host := req.Host
+func resolveOutgoingRequestFields(req *http.Request, header http.Header, signedHeaders []string) (http.Header, error) {
 	resolved := header
 	transferFieldsNeeded := slices.Contains(signedHeaders, outgoingContentLength) ||
 		slices.Contains(signedHeaders, outgoingTransferEncoding) ||
@@ -43,7 +42,7 @@ func resolveOutgoingRequestFields(req *http.Request, header http.Header, signedH
 	if transferFieldsNeeded {
 		transfer, err = outgoingRequestTransferFields(req, slices.Contains(signedHeaders, outgoingTrailer))
 		if err != nil {
-			return "", nil, err
+			return nil, err
 		}
 	}
 
@@ -51,42 +50,42 @@ func resolveOutgoingRequestFields(req *http.Request, header http.Header, signedH
 		switch name {
 		case outgoingHost:
 			if req.URL == nil {
-				return "", nil, fmt.Errorf("%w: request host cannot be determined without URL", ErrInvalidHTTPMessage)
+				return nil, fmt.Errorf("%w: request host cannot be determined without URL", ErrInvalidHTTPMessage)
 			}
 			source := req.Host
 			if source == "" {
 				source = req.URL.Host
 			}
 			if err := validateOutgoingHTTPFieldValue(outgoingHost, source); err != nil {
-				return "", nil, err
+				return nil, err
 			}
-			host, err = normalizeOutgoingRequestHost(source)
+			host, err := normalizeOutgoingRequestHost(source)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
 			resolved, err = resolveOutgoingField(header, resolved, outgoingHost, outgoingHTTPField{value: host, present: true, known: true}, normalizeOutgoingRequestHost)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
 		case outgoingContentLength:
 			resolved, err = resolveOutgoingField(header, resolved, outgoingContentLength, transfer.contentLength, nil)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
 		case outgoingTransferEncoding:
 			resolved, err = resolveOutgoingField(header, resolved, outgoingTransferEncoding, transfer.transferEncoding, nil)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
 		case outgoingTrailer:
 			resolved, err = resolveOutgoingField(header, resolved, outgoingTrailer, transfer.trailer, nil)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
 		}
 	}
 
-	return host, resolved, nil
+	return resolved, nil
 }
 
 func resolveOutgoingResponseFields(res *http.Response, header http.Header, signedHeaders []string) (http.Header, error) {

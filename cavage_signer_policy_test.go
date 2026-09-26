@@ -565,12 +565,31 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 		{name: "duplicate default", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{sigre.Created}}},
 		{name: "duplicate AdditionalHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"X-Extra", "x-extra"}}},
 		{name: "duplicate ExactHeaders", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"Date", "date"}}}},
+		{name: "non-ASCII field in AdditionalHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"\u212A-foo"}}},
+		{name: "non-ASCII pseudo-header in AdditionalHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"(exp\u0130res)"}, ExpiresAfter: time.Minute}},
+		{name: "non-ASCII field in ExactHeaders", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"\u212A-foo"}}}},
+		{name: "non-ASCII pseudo-header in ExactHeaders", opts: &sigre.CavageSigningOptions{ExpiresAfter: time.Minute, Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"(exp\u0130res)"}}}},
 	}
 	for _, tt := range invalidOptions {
 		t.Run(tt.name, func(t *testing.T) {
 			req := newSignerPolicyRequest(t)
+			// DeepEqual cannot compare non-nil functions; body replay is not needed here.
+			req.GetBody = nil
+			beforeRequest := req.Clone(req.Context())
 			if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, tt.opts); !errors.Is(err, sigre.ErrInvalidSigningOptions) {
 				t.Fatalf("error = %v, want ErrInvalidSigningOptions", err)
+			}
+			if !reflect.DeepEqual(req, beforeRequest) {
+				t.Fatal("request changed after rejected signing options")
+			}
+			res := newSignerPolicyResponse()
+			beforeResponse := *res
+			beforeResponse.Header = res.Header.Clone()
+			if err := signer.SignResponse(res, key, sigre.CavageSignaturePlacementSignature, tt.opts); !errors.Is(err, sigre.ErrInvalidSigningOptions) {
+				t.Fatalf("response error = %v, want ErrInvalidSigningOptions", err)
+			}
+			if !reflect.DeepEqual(res, &beforeResponse) {
+				t.Fatal("response changed after rejected signing options")
 			}
 		})
 	}
@@ -579,10 +598,45 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 		req := newSignerPolicyRequest(t)
 		opts := &sigre.CavageSigningOptions{AdditionalHeaders: []string{"X-Missing"}}
 		err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts)
-		if err == nil || !strings.Contains(err.Error(), "missing header") {
-			t.Fatalf("error = %v, want missing header", err)
+		if !errors.Is(err, sigre.ErrSignedHeaderMissing) {
+			t.Fatalf("error = %v, want ErrSignedHeaderMissing", err)
 		}
 	})
+}
+
+func TestCavageSignerMissingSignedFieldsWithoutMutation(t *testing.T) {
+	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+	key := fixedHMACSigningKey("missing-field-key", sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
+	for _, name := range []string{"date", "digest"} {
+		opts := &sigre.CavageSigningOptions{AdditionalHeaders: []string{name}}
+		t.Run("request/"+name, func(t *testing.T) {
+			req := newSignerPolicyRequest(t)
+			req.Header.Del(name)
+			// DeepEqual cannot compare non-nil functions; body replay is not needed here.
+			req.GetBody = nil
+			before := req.Clone(req.Context())
+			err := signer.SignRequestWithHMAC(req, key, sigre.CavageSignaturePlacementSignature, opts)
+			if !errors.Is(err, sigre.ErrSignedHeaderMissing) {
+				t.Fatalf("error = %v, want ErrSignedHeaderMissing", err)
+			}
+			if !reflect.DeepEqual(req, before) {
+				t.Fatal("request changed after a missing signed field")
+			}
+		})
+		t.Run("response/"+name, func(t *testing.T) {
+			res := newSignerPolicyResponse()
+			res.Header.Del(name)
+			before := *res
+			before.Header = res.Header.Clone()
+			err := signer.SignResponseWithHMAC(res, key, sigre.CavageSignaturePlacementSignature, opts)
+			if !errors.Is(err, sigre.ErrSignedHeaderMissing) {
+				t.Fatalf("error = %v, want ErrSignedHeaderMissing", err)
+			}
+			if !reflect.DeepEqual(res, &before) {
+				t.Fatal("response changed after a missing signed field")
+			}
+		})
+	}
 }
 
 func TestCavageSignerExpiresAfter(t *testing.T) {
@@ -916,8 +970,8 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 			ExactHeaders:   []string{sigre.RequestTarget, "date"},
 		}}
 		err := signer.SignRequest(req, fixedSigningKey("legacy-key", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey), sigre.CavageSignaturePlacementSignature, opts)
-		if err == nil || !strings.Contains(err.Error(), "missing header") {
-			t.Fatalf("error = %v, want missing Date", err)
+		if !errors.Is(err, sigre.ErrSignedHeaderMissing) {
+			t.Fatalf("error = %v, want ErrSignedHeaderMissing for Date", err)
 		}
 		if req.Header.Get("Date") != "" {
 			t.Fatal("signer synthesized Date")

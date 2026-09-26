@@ -472,7 +472,6 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 	}
 	buf, err := generateSignatureStringBuffer(
 		headers,
-		message.host,
 		message.method,
 		requestTarget,
 		ownedHeaders,

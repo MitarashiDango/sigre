@@ -31,6 +31,9 @@ var defaultCavageVerificationAlgorithms = []AlgorithmID{
 var maxCavageUnixSeconds = math.MaxInt64 + time.Time{}.Unix()
 
 type cavageVerifierIdentity struct {
+	// value keeps the struct's size nonzero, so distinct verifiers have distinct
+	// identity pointers. Pointers to separate zero-size variables may be equal.
+	// Keep this field even if static analysis reports it as unused.
 	value byte
 }
 
@@ -808,7 +811,12 @@ func validateVerificationPublicKey(key crypto.PublicKey, expected algorithmKeyKi
 		if !ok {
 			return fmt.Errorf("%w: AlgorithmID requires ECDSA, public key is %T", ErrAlgorithmMismatch, key)
 		}
-		if publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil || !publicKey.Curve.IsOnCurve(publicKey.X, publicKey.Y) {
+		// Intentionally inspect the deprecated X and Y fields: VerifyASN1 and
+		// PublicKey.Bytes can panic when key fields are nil.
+		if publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil {
+			return fmt.Errorf("%w: invalid ECDSA public key", ErrUnsupportedKeyFormat)
+		}
+		if _, err := publicKey.Bytes(); err != nil {
 			return fmt.Errorf("%w: invalid ECDSA public key", ErrUnsupportedKeyFormat)
 		}
 	case algorithmKeyEd25519:

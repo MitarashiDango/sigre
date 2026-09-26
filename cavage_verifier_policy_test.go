@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/url"
 	"slices"
@@ -759,6 +760,44 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 	assertVerifierPolicyError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &ecdsaPrivateKey.PublicKey)), sigre.ErrAlgorithmMismatch)
 	assertVerifierPolicyError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &rsa.PublicKey{})), sigre.ErrUnsupportedKeyFormat)
 	assertVerifierPolicyError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, rsaPublicKey)), sigre.ErrInvalidSignatureAlgorithm)
+
+	customParams := *elliptic.P256().Params()
+	customParams.Name = "custom-P256"
+	for _, tt := range []struct {
+		name string
+		key  *ecdsa.PublicKey
+	}{
+		{name: "ECDSA point off curve", key: &ecdsa.PublicKey{Curve: elliptic.P256(), X: big.NewInt(1), Y: big.NewInt(1)}},
+		{name: "ECDSA nil Curve", key: &ecdsa.PublicKey{X: ecdsaPrivateKey.X, Y: ecdsaPrivateKey.Y}},
+		{name: "ECDSA nil X", key: &ecdsa.PublicKey{Curve: elliptic.P256(), Y: ecdsaPrivateKey.Y}},
+		{name: "ECDSA nil Y", key: &ecdsa.PublicKey{Curve: elliptic.P256(), X: ecdsaPrivateKey.X}},
+		{name: "ECDSA custom curve", key: &ecdsa.PublicKey{Curve: &customParams, X: ecdsaPrivateKey.X, Y: ecdsaPrivateKey.Y}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			key := fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, tt.key)
+			assertVerifierPolicyError(t, verifier.Verify(signature, key), sigre.ErrUnsupportedKeyFormat)
+			assertVerifierPolicyError(t, restrictedVerifier.Verify(restrictedSignature, key), sigre.ErrUnsupportedKeyFormat)
+		})
+	}
+
+	t.Run("ECDSA signature with another public key", func(t *testing.T) {
+		req := newSignerPolicyRequest(t)
+		signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+		if err := signer.SignRequest(req, fixedSigningKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
+			t.Fatalf("SignRequest() failed: %v", err)
+		}
+		req.RequestURI = req.URL.RequestURI()
+		ecdsaVerifier, ecdsaSignature := parseSignerPolicyRequest(t, req, testFixedTime, nil)
+		if err := ecdsaVerifier.Verify(ecdsaSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, &ecdsaPrivateKey.PublicKey)); err != nil {
+			t.Fatalf("Verify() with the signing key failed: %v", err)
+		}
+		otherPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatalf("failed to generate another ECDSA key: %v", err)
+		}
+		err = ecdsaVerifier.Verify(ecdsaSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, &otherPrivateKey.PublicKey))
+		assertVerifierPolicyError(t, err, sigre.ErrVerification)
+	})
 
 	hmacVerifier, hmacSignature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
 	if err != nil {

@@ -422,6 +422,9 @@ func validatePrivateKey(key crypto.PrivateKey, expected algorithmKeyKind) error 
 		if privateKey == nil {
 			return ErrMissingPrivateKey
 		}
+		if privateKey.N == nil || privateKey.D == nil {
+			return fmt.Errorf("%w: invalid RSA private key", ErrUnsupportedKeyFormat)
+		}
 	case algorithmKeyECDSA:
 		privateKey, ok := key.(*ecdsa.PrivateKey)
 		if !ok {
@@ -429,6 +432,14 @@ func validatePrivateKey(key crypto.PrivateKey, expected algorithmKeyKind) error 
 		}
 		if privateKey == nil {
 			return ErrMissingPrivateKey
+		}
+		// Intentionally inspect the deprecated X, Y, and D fields: SignASN1 and
+		// PrivateKey.Bytes can panic when key fields are nil.
+		if privateKey.Curve == nil || privateKey.X == nil || privateKey.Y == nil || privateKey.D == nil {
+			return fmt.Errorf("%w: invalid ECDSA private key", ErrUnsupportedKeyFormat)
+		}
+		if _, err := privateKey.Bytes(); err != nil {
+			return fmt.Errorf("%w: invalid ECDSA private key", ErrUnsupportedKeyFormat)
 		}
 	case algorithmKeyEd25519:
 		switch privateKey := key.(type) {

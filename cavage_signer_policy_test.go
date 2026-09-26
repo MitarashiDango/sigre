@@ -2,12 +2,18 @@ package sigre_test
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha512"
 	"encoding/base64"
 	"errors"
+	"math/big"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -215,6 +221,7 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 		secret     []byte
 	}{
 		{name: "RSA SHA-512", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, privateKey: rsaPrivateKey, publicKey: &rsaPrivateKey.PublicKey},
+		{name: "RSA SHA-512 without primes", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, privateKey: &rsa.PrivateKey{PublicKey: rsaPrivateKey.PublicKey, D: rsaPrivateKey.D}, publicKey: &rsaPrivateKey.PublicKey},
 		{name: "ECDSA SHA-512", algorithm: sigre.AlgorithmECDSASHA512, privateKey: ecdsaPrivateKey, publicKey: &ecdsaPrivateKey.PublicKey},
 		{name: "Ed25519", algorithm: sigre.AlgorithmEd25519, privateKey: ed25519PrivateKey, publicKey: ed25519PrivateKey.Public()},
 		{name: "HMAC SHA-512", algorithm: sigre.AlgorithmHMACSHA512, secret: secret},
@@ -272,6 +279,27 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 	}
 }
 
+func TestCavageSignerECDSACurves(t *testing.T) {
+	for _, curve := range []elliptic.Curve{elliptic.P224(), elliptic.P256(), elliptic.P384(), elliptic.P521()} {
+		t.Run(curve.Params().Name, func(t *testing.T) {
+			privateKey, err := ecdsa.GenerateKey(curve, rand.Reader)
+			if err != nil {
+				t.Fatalf("failed to generate ECDSA key: %v", err)
+			}
+			req := newSignerPolicyRequest(t)
+			signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+			if err := signer.SignRequest(req, fixedSigningKey("ecdsa-key", sigre.AlgorithmECDSASHA512, privateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
+				t.Fatalf("SignRequest() failed: %v", err)
+			}
+			req.RequestURI = req.URL.RequestURI()
+			verifier, signature := parseSignerPolicyRequest(t, req, testFixedTime, nil)
+			if err := verifier.Verify(signature, fixedPublicVerificationKey("ecdsa-key", sigre.AlgorithmECDSASHA512, &privateKey.PublicKey)); err != nil {
+				t.Fatalf("Verify() failed: %v", err)
+			}
+		})
+	}
+}
+
 func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 	rsaPrivateKey := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	ecdsaPrivateKey := parseECDSAPrivateKey(t, testECDSAPrivateKeyPEM)
@@ -308,6 +336,20 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			wantErr: sigre.ErrMissingPrivateKey,
 			run: func(req *http.Request) error {
 				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, nil), sigre.CavageSignaturePlacementSignature, nil)
+			},
+		},
+		{
+			name:    "nil RSA private key pointer",
+			wantErr: sigre.ErrMissingPrivateKey,
+			run: func(req *http.Request) error {
+				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, (*rsa.PrivateKey)(nil)), sigre.CavageSignaturePlacementSignature, nil)
+			},
+		},
+		{
+			name:    "nil ECDSA private key pointer",
+			wantErr: sigre.ErrMissingPrivateKey,
+			run: func(req *http.Request) error {
+				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmECDSASHA512, (*ecdsa.PrivateKey)(nil)), sigre.CavageSignaturePlacementSignature, nil)
 			},
 		},
 		{
@@ -363,6 +405,74 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			}
 			if req.Header.Get(sigre.Signature) != "" || strings.HasPrefix(req.Header.Get(sigre.Authorization), "Signature ") {
 				t.Fatal("signer wrote a signature after rejecting the key or placement")
+			}
+		})
+	}
+
+	params := *elliptic.P256().Params()
+	params.Name = "custom-P256"
+	invalidKeys := []struct {
+		name       string
+		algorithm  sigre.AlgorithmID
+		privateKey crypto.PrivateKey
+	}{
+		{name: "empty ECDSA key", algorithm: sigre.AlgorithmECDSASHA512, privateKey: &ecdsa.PrivateKey{}},
+		{
+			name: "ECDSA nil Curve", algorithm: sigre.AlgorithmECDSASHA512,
+			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{X: ecdsaPrivateKey.X, Y: ecdsaPrivateKey.Y}, D: ecdsaPrivateKey.D},
+		},
+		{
+			name: "ECDSA nil X", algorithm: sigre.AlgorithmECDSASHA512,
+			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: ecdsaPrivateKey.Curve, Y: ecdsaPrivateKey.Y}, D: ecdsaPrivateKey.D},
+		},
+		{
+			name: "ECDSA nil Y", algorithm: sigre.AlgorithmECDSASHA512,
+			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: ecdsaPrivateKey.Curve, X: ecdsaPrivateKey.X}, D: ecdsaPrivateKey.D},
+		},
+		{
+			name: "ECDSA nil D", algorithm: sigre.AlgorithmECDSASHA512,
+			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsaPrivateKey.PublicKey},
+		},
+		{
+			name: "ECDSA zero D", algorithm: sigre.AlgorithmECDSASHA512,
+			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsaPrivateKey.PublicKey, D: new(big.Int)},
+		},
+		{
+			name: "ECDSA point off curve", algorithm: sigre.AlgorithmECDSASHA512,
+			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: ecdsaPrivateKey.Curve, X: big.NewInt(1), Y: big.NewInt(1)}, D: ecdsaPrivateKey.D},
+		},
+		{
+			name: "ECDSA custom curve", algorithm: sigre.AlgorithmECDSASHA512,
+			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: &params, X: ecdsaPrivateKey.X, Y: ecdsaPrivateKey.Y}, D: ecdsaPrivateKey.D},
+		},
+		{name: "empty RSA key", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, privateKey: &rsa.PrivateKey{}},
+		{name: "RSA nil D", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, privateKey: &rsa.PrivateKey{PublicKey: rsaPrivateKey.PublicKey}},
+	}
+	for _, tt := range invalidKeys {
+		key := fixedSigningKey("key", tt.algorithm, tt.privateKey)
+		t.Run(tt.name+"/request", func(t *testing.T) {
+			req := newSignerPolicyRequest(t)
+			// DeepEqual cannot compare non-nil functions; body replay is not needed here.
+			req.GetBody = nil
+			before := req.Clone(req.Context())
+			err := sigre.NewCavageSigner().SignRequest(req, key, sigre.CavageSignaturePlacementSignature, nil)
+			if !errors.Is(err, sigre.ErrUnsupportedKeyFormat) {
+				t.Fatalf("error = %v, want ErrUnsupportedKeyFormat", err)
+			}
+			if !reflect.DeepEqual(req, before) {
+				t.Fatal("signer modified the request after rejecting the key")
+			}
+		})
+		t.Run(tt.name+"/response", func(t *testing.T) {
+			res := newSignerPolicyResponse()
+			before := *res
+			before.Header = res.Header.Clone()
+			err := sigre.NewCavageSigner().SignResponse(res, key, sigre.CavageSignaturePlacementSignature, nil)
+			if !errors.Is(err, sigre.ErrUnsupportedKeyFormat) {
+				t.Fatalf("error = %v, want ErrUnsupportedKeyFormat", err)
+			}
+			if !reflect.DeepEqual(res, &before) {
+				t.Fatal("signer modified the response after rejecting the key")
 			}
 		})
 	}

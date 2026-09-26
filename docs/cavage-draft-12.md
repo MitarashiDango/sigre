@@ -16,6 +16,8 @@
 | `AlgorithmHMACSHA512`        | 共通鍵  | SHA-512          | ―             | 可                   |
 | `AlgorithmHMACSHA256`        | 共通鍵  | SHA-256          | ―             | 不可                 |
 
+ECDSA鍵の`Curve`には、`elliptic.P224()`、`elliptic.P256()`、`elliptic.P384()`、`elliptic.P521()`が返す値をそのまま使用してください。`crypto/x509`で解析したECDSA鍵と、これらの値を`ecdsa.GenerateKey`に渡して作った鍵が該当します。それ以外の値を持つ鍵は、署名・検証ともに`ErrUnsupportedKeyFormat`になります。数学的には同じNIST曲線でも、`elliptic.P256().Params()`などの`*elliptic.CurveParams`や、標準の曲線を包む独自の型を`Curve`に設定した鍵は拒否します。
+
 非対称鍵には`SigningKey`と`VerificationKey`を使用します。HMACには`HMACSigningKey`と`HMACVerificationKey`を使用します。
 
 ## 署名

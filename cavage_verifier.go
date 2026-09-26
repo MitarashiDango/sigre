@@ -26,6 +26,10 @@ var defaultCavageVerificationAlgorithms = []AlgorithmID{
 	AlgorithmHMACSHA512,
 }
 
+// maxCavageUnixSeconds is the largest Unix second for which time.Unix's
+// internal addition of the offset from year 1 to 1970 does not overflow int64.
+var maxCavageUnixSeconds = math.MaxInt64 + time.Time{}.Unix()
+
 type cavageVerifierIdentity struct {
 	value byte
 }
@@ -650,69 +654,41 @@ func parseCavageCreated(value string) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%w: created is outside the int64 range", ErrInvalidCreationTime)
 	}
-	created := time.Unix(seconds, 0)
-	if created.Unix() != seconds || created.Nanosecond() != 0 {
+	if seconds > maxCavageUnixSeconds {
 		return time.Time{}, fmt.Errorf("%w: created is outside the time.Time range", ErrInvalidCreationTime)
 	}
-	return created, nil
+	return time.Unix(seconds, 0), nil
 }
 
 func parseCavageExpires(value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, fmt.Errorf("%w: expires is empty", ErrInvalidExpirationTime)
 	}
-	negative := value[0] == '-'
-	digits := value
-	if negative {
-		digits = value[1:]
-	}
-	whole, fraction, hasFraction := strings.Cut(digits, ".")
-	if whole == "" || !allDecimalDigits(whole) || hasFraction && (fraction == "" || !allDecimalDigits(fraction)) {
+	whole, fraction, hasFraction := strings.Cut(value, ".")
+	if !isSignedDecimalInteger(whole) || hasFraction && (fraction == "" || !allDecimalDigits(fraction)) {
 		return time.Time{}, fmt.Errorf("%w: expires must be -?[0-9]+ or -?[0-9]+\\.[0-9]+", ErrInvalidExpirationTime)
 	}
 	fraction = strings.TrimRight(fraction, "0")
 	if len(fraction) > 9 {
 		return time.Time{}, fmt.Errorf("%w: expires must have at most 9 fractional digits after trailing zeros are removed", ErrInvalidExpirationTime)
 	}
-	magnitude, err := strconv.ParseUint(whole, 10, 64)
+	seconds, err := strconv.ParseInt(whole, 10, 64)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
 	}
-	var fractionalNanoseconds int64
+	var nanoseconds int64
 	if hasFraction {
 		padded := fraction + strings.Repeat("0", 9-len(fraction))
-		fractionalNanoseconds, _ = strconv.ParseInt(padded, 10, 32)
+		nanoseconds, _ = strconv.ParseInt(padded, 10, 32)
+		if whole[0] == '-' {
+			nanoseconds = -nanoseconds
+		}
 	}
 
-	var seconds, nanoseconds int64
-	if !negative {
-		if magnitude > uint64(^uint64(0)>>1) {
-			return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
-		}
-		seconds = int64(magnitude)
-		nanoseconds = fractionalNanoseconds
-	} else if fractionalNanoseconds == 0 {
-		if magnitude > uint64(^uint64(0)>>1)+1 {
-			return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
-		}
-		if magnitude == uint64(^uint64(0)>>1)+1 {
-			seconds = -1 << 63
-		} else {
-			seconds = -int64(magnitude)
-		}
-	} else {
-		if magnitude > uint64(^uint64(0)>>1) {
-			return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
-		}
-		seconds = -int64(magnitude) - 1
-		nanoseconds = int64(time.Second) - fractionalNanoseconds
-	}
-
-	expires := time.Unix(seconds, nanoseconds)
-	if expires.Unix() != seconds || int64(expires.Nanosecond()) != nanoseconds {
+	if seconds > maxCavageUnixSeconds || seconds == math.MinInt64 && nanoseconds < 0 {
 		return time.Time{}, fmt.Errorf("%w: expires is outside the time.Time range", ErrInvalidExpirationTime)
 	}
-	return expires, nil
+	return time.Unix(seconds, nanoseconds), nil
 }
 
 func isSignedDecimalInteger(value string) bool {
@@ -735,26 +711,15 @@ func allDecimalDigits(value string) bool {
 }
 
 // timeAfterDuration reports whether value is strictly later than base plus
-// duration without converting the difference to time.Duration. All callers
-// provide a non-negative duration validated by NewCavageVerifier.
+// duration. If Add clamps the seconds at time.Time's upper limit, no
+// representable value can exceed the true boundary. All callers provide a
+// non-negative duration validated by NewCavageVerifier.
 func timeAfterDuration(value, base time.Time, duration time.Duration) bool {
-	boundarySeconds := base.Unix()
-	boundaryNanoseconds := int64(base.Nanosecond()) + int64(duration%time.Second)
-	secondsToAdd := int64(duration / time.Second)
-	if boundaryNanoseconds >= int64(time.Second) {
-		boundaryNanoseconds -= int64(time.Second)
-		secondsToAdd++
-	}
-	if boundarySeconds > math.MaxInt64-secondsToAdd {
+	boundary := base.Add(duration)
+	if boundary.Sub(base) < duration {
 		return false
 	}
-	boundarySeconds += secondsToAdd
-
-	valueSeconds := value.Unix()
-	if valueSeconds != boundarySeconds {
-		return valueSeconds > boundarySeconds
-	}
-	return int64(value.Nanosecond()) > boundaryNanoseconds
+	return value.After(boundary)
 }
 
 func (v *CavageVerifier) currentTime() time.Time {

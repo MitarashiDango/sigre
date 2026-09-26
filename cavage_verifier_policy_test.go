@@ -302,7 +302,10 @@ func TestCavageVerifierSignedHeaderMissing(t *testing.T) {
 }
 
 func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
-	createdInvalid := []string{"", "+1", "1.0", "1e3", "--1", "9223372036854775808", "-9223372036854775809"}
+	createdInvalid := []string{
+		"", "+1", "1.0", "1e3", "--1", "9223372036854775808", "-9223372036854775809",
+		"9223371974719179008", "9223372036854775807",
+	}
 	for _, value := range createdInvalid {
 		t.Run("created/"+value, func(t *testing.T) {
 			params := verifierPolicyParameters("hs2019", "x-test", ",created="+value)
@@ -313,7 +316,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { nowCalls++; return time.Unix(0, 0) }})
 			assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
 			if nowCalls != 0 {
-				t.Fatalf("syntax failure called Now %d times", nowCalls)
+				t.Fatalf("invalid created called Now %d times", nowCalls)
 			}
 		})
 	}
@@ -321,6 +324,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 	expiresInvalid := []string{
 		"", ".", "+1", ".5", "1.", "1e3", "1.2x000", "1. 000", "1.2\t000", "1.-000", "1.２000",
 		"1.1234567891", "1.12345678910", "0.0000000001",
+		"9223371974719179008", "9223372036854775807", "9223372036854775807.0000000000",
 		"9223372036854775808", "9223372036854775808.0000000000",
 		"-9223372036854775808.1", "-9223372036854775808.0000000010",
 		"-9223372036854775809.0000000000", "18446744073709551616.0000000000",
@@ -333,7 +337,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { nowCalls++; return time.Unix(0, 0) }})
 			assertVerifierPolicyError(t, err, sigre.ErrInvalidExpirationTime)
 			if nowCalls != 0 {
-				t.Fatalf("syntax failure called Now %d times", nowCalls)
+				t.Fatalf("invalid expires called Now %d times", nowCalls)
 			}
 		})
 	}
@@ -390,7 +394,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			t.Fatalf("Expires() = %v/%t", expires, ok)
 		}
 	})
-	t.Run("int64 second boundaries round trip", func(t *testing.T) {
+	t.Run("supported second boundaries round trip", func(t *testing.T) {
 		for _, test := range []struct {
 			name      string
 			parameter string
@@ -399,9 +403,9 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			read      func(*sigre.CavageSignature) (time.Time, bool)
 		}{
 			{name: "created minimum", parameter: ",created=-9223372036854775808", header: "(created) x-test", now: time.Unix(-1<<63, 0), read: (*sigre.CavageSignature).Created},
-			{name: "created maximum", parameter: ",created=9223372036854775807", header: "(created) x-test", now: time.Unix(1<<63-1, 0), read: (*sigre.CavageSignature).Created},
+			{name: "created maximum", parameter: ",created=9223371974719179007", header: "(created) x-test", now: time.Unix(9223371974719179007, 0), read: (*sigre.CavageSignature).Created},
 			{name: "expires minimum", parameter: ",expires=-9223372036854775808", header: "(expires) x-test", now: time.Unix(-1<<63, 0), read: (*sigre.CavageSignature).Expires},
-			{name: "expires maximum", parameter: ",expires=9223372036854775807", header: "(expires) x-test", now: time.Unix(1<<63-1, 0), read: (*sigre.CavageSignature).Expires},
+			{name: "expires maximum", parameter: ",expires=9223371974719179007", header: "(expires) x-test", now: time.Unix(9223371974719179007, 0), read: (*sigre.CavageSignature).Expires},
 		} {
 			t.Run(test.name, func(t *testing.T) {
 				params := verifierPolicyParameters("hs2019", test.header, test.parameter)
@@ -416,18 +420,24 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			})
 		}
 	})
-	t.Run("extreme comparisons do not saturate", func(t *testing.T) {
-		createdMaximum := verifierPolicyParameters("hs2019", "(created) x-test", ",created=9223372036854775807")
+	t.Run("extreme time comparisons", func(t *testing.T) {
+		now := time.Unix(0, 0)
+		createdMaximum := verifierPolicyParameters("hs2019", "(created) x-test", ",created=9223371974719179007")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(createdMaximum), &sigre.CavageVerificationOptions{
-			Now: func() time.Time { return time.Unix(0, 0) },
+			Now: func() time.Time { return now },
 		})
 		assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
 
-		expiresMaximum := verifierPolicyParameters("hs2019", "(expires) x-test", ",expires=9223372036854775807")
-		if _, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(expiresMaximum), &sigre.CavageVerificationOptions{
-			Now: func() time.Time { return time.Unix(0, 0) },
-		}); err != nil {
+		expiresMaximum := verifierPolicyParameters("hs2019", "(expires) x-test", ",expires=9223371974719179007")
+		_, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(expiresMaximum), &sigre.CavageVerificationOptions{
+			Now: func() time.Time { return now },
+		})
+		if err != nil {
 			t.Fatalf("maximum expires was treated as expired: %v", err)
+		}
+		expires, present := signature.Expires()
+		if !present || !expires.After(now) {
+			t.Fatalf("Expires() = %v/%t, want a time after %v", expires, present, now)
 		}
 
 		oldCreated := verifierPolicyParameters("hs2019", "(created) x-test", ",created=0")
@@ -504,6 +514,56 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestCavageVerifierTimeAdditionAtUpperLimit(t *testing.T) {
+	for _, test := range []struct {
+		name               string
+		parameter          string
+		header             string
+		maxSignatureAge    time.Duration
+		allowedExpiredSkew time.Duration
+	}{
+		{
+			name:               "expires with fractional carry",
+			parameter:          ",expires=9223371974719179007.9",
+			header:             "(expires) x-test",
+			allowedExpiredSkew: 500 * time.Millisecond,
+		},
+		{
+			name:               "expires with whole second overflow",
+			parameter:          ",expires=9223371974719179006.9",
+			header:             "(expires) x-test",
+			allowedExpiredSkew: 1500 * time.Millisecond,
+		},
+		{
+			name:            "created age overflow",
+			parameter:       ",created=9223371974719179007",
+			header:          "(created) x-test",
+			maxSignatureAge: time.Second,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			nowCalls := 0
+			params := verifierPolicyParameters("hs2019", test.header, test.parameter)
+			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+				MaxSignatureAge: test.maxSignatureAge,
+				Now: func() time.Time {
+					nowCalls++
+					return time.Unix(9223371974719179007, 500_000_000)
+				},
+				Compatibility: &sigre.CavageVerificationCompatibility{
+					AllowedExpiredSkew: test.allowedExpiredSkew,
+				},
+			})
+			if nowCalls != 1 {
+				t.Errorf("Now calls = %d, want 1", nowCalls)
+			}
+			if err != nil {
+				t.Fatalf("ParseRequest() failed: %v", err)
+			}
+		})
+	}
 }
 
 func TestCavageVerifierNowCallContract(t *testing.T) {
@@ -802,7 +862,8 @@ func TestCavageVerifierExpiresDecimalPrecision(t *testing.T) {
 		{value: "-0.0000000000"},
 		{value: "-0.0000000010", seconds: -1, nanoseconds: 999999999},
 		{value: "-1.1234567890", seconds: -2, nanoseconds: 876543211},
-		{value: "9223372036854775807.0000000000", seconds: 1<<63 - 1},
+		{value: "9223371974719179007.0000000000", seconds: 9223371974719179007},
+		{value: "9223371974719179007.5", seconds: 9223371974719179007, nanoseconds: 500000000},
 		{value: "-9223372036854775808.0000000000", seconds: -1 << 63},
 		{value: "-9223372036854775807.9999999990", seconds: -1 << 63, nanoseconds: 1},
 	} {

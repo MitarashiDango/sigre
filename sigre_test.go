@@ -522,8 +522,8 @@ func TestSignerInputValidation(t *testing.T) {
 			sigre.CavageSignaturePlacementSignature,
 			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{sigre.RequestTarget, "date"}, 0),
 		)
-		if err == nil || !strings.Contains(err.Error(), "missing header") {
-			t.Fatalf("expected missing header error, got: %v", err)
+		if !errors.Is(err, sigre.ErrSignedHeaderMissing) {
+			t.Fatalf("expected ErrSignedHeaderMissing, got: %v", err)
 		}
 	})
 

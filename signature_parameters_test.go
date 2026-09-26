@@ -44,7 +44,7 @@ func TestParseCavageParams(t *testing.T) {
 				CreatedPresent:   true,
 				Expires:          "1618952739",
 				ExpiresPresent:   true,
-				Headers:          []string{"host", "date"},
+				Headers:          []string{"Host", "Date"},
 				Signature:        "c2ln",
 				HeadersPresent:   true,
 			},
@@ -314,6 +314,16 @@ func TestCavageVerifierRejectsSemanticallyInvalidParameters(t *testing.T) {
 		{
 			name:      "headers is empty",
 			input:     `keyId="k",signature="AA==",headers=""`,
+			wantError: sigre.ErrInvalidSignatureParameters,
+		},
+		{
+			name:      "signed field name contains non-ASCII bytes",
+			input:     "keyId=\"k\",signature=\"AA==\",headers=\"\u212A-foo\"",
+			wantError: sigre.ErrInvalidSignatureParameters,
+		},
+		{
+			name:      "signed pseudo-header name contains non-ASCII bytes",
+			input:     "keyId=\"k\",signature=\"AA==\",headers=\"(exp\u0130res)\"",
 			wantError: sigre.ErrInvalidSignatureParameters,
 		},
 		{

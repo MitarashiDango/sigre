@@ -191,7 +191,7 @@ func parseCavageParams(input string) (*cavageParams, error) {
 			p.HeadersPresent = true
 			for _, h := range strings.Split(value, " ") {
 				if h != "" {
-					p.Headers = append(p.Headers, strings.ToLower(h))
+					p.Headers = append(p.Headers, h)
 				}
 			}
 		}
@@ -489,6 +489,11 @@ func associatedRequestTarget(req *http.Request) (string, error) {
 }
 
 func normalizeCavageSignedHeaderName(name string) (string, error) {
+	for i := 0; i < len(name); i++ {
+		if name[i] >= 0x80 {
+			return "", fmt.Errorf("invalid HTTP field-name in signed headers: %q", name)
+		}
+	}
 	lowerName := strings.ToLower(name)
 	switch lowerName {
 	case RequestTarget, Created, Expires:
@@ -523,10 +528,9 @@ func appendCavageHeaderValues(buf *bytes.Buffer, name string, values []string) e
 }
 
 // generateSignatureStringBuffer builds the signature string as defined in
-// draft-cavage-http-signatures-12 Section 2.3.
+// draft-cavage-http-signatures-12 Section 2.3 using normalized signed-header names.
 func generateSignatureStringBuffer(
-	headers []string,
-	host string,
+	normalizedHeaders []string,
 	method string,
 	requestTarget string,
 	header http.Header,
@@ -534,13 +538,8 @@ func generateSignatureStringBuffer(
 	expiresValue string,
 ) (*bytes.Buffer, error) {
 	buf := &bytes.Buffer{}
-	buf.Grow(8192)
 
-	for i, configuredName := range headers {
-		name, err := normalizeCavageSignedHeaderName(configuredName)
-		if err != nil {
-			return nil, err
-		}
+	for i, name := range normalizedHeaders {
 		if i > 0 {
 			buf.WriteString("\n")
 		}
@@ -550,44 +549,28 @@ func generateSignatureStringBuffer(
 		switch name {
 		case RequestTarget:
 			if method == "" {
-				return nil, fmt.Errorf("'%s' is included, but method is missing", RequestTarget)
+				return nil, fmt.Errorf("%w: '%s' is included, but method is missing", ErrInvalidHTTPMessage, RequestTarget)
 			}
 			if requestTarget == "" {
-				return nil, fmt.Errorf("'%s' is included, but request-target is missing", RequestTarget)
+				return nil, fmt.Errorf("%w: '%s' is included, but request-target is missing", ErrInvalidHTTPMessage, RequestTarget)
 			}
 			buf.WriteString(strings.ToLower(method))
 			buf.WriteString(" ")
 			buf.WriteString(requestTarget)
 		case Created:
 			if createdValue == "" {
-				return nil, fmt.Errorf("'%s' is included in signing string, but 'created' value is empty", Created)
+				return nil, fmt.Errorf("%w: '%s' is included in signing string, but 'created' value is empty", ErrInvalidCreationTime, Created)
 			}
 			buf.WriteString(createdValue)
 		case Expires:
 			if expiresValue == "" {
-				return nil, fmt.Errorf("'%s' is included in signing string, but 'expires' value is empty", Expires)
+				return nil, fmt.Errorf("%w: '%s' is included in signing string, but 'expires' value is empty", ErrInvalidExpirationTime, Expires)
 			}
 			buf.WriteString(expiresValue)
-		case "host":
-			values, ok := header[http.CanonicalHeaderKey(name)]
-			if ok {
-				if len(values) == 0 {
-					return nil, fmt.Errorf("missing header in message for signing string: %s", name)
-				}
-				if err := appendCavageHeaderValues(buf, name, values); err != nil {
-					return nil, err
-				}
-			} else if host != "" {
-				if err := appendCavageHeaderValues(buf, name, []string{host}); err != nil {
-					return nil, err
-				}
-			} else {
-				return nil, fmt.Errorf("failed to get host value for signing string: 'Host' header missing and no fallback host provided")
-			}
 		default:
 			vals, ok := header[http.CanonicalHeaderKey(name)]
 			if !ok || len(vals) == 0 {
-				return nil, fmt.Errorf("missing header in message for signing string: %s (canonical: %s)", name, http.CanonicalHeaderKey(name))
+				return nil, fmt.Errorf("%w: %s", ErrSignedHeaderMissing, name)
 			}
 			if err := appendCavageHeaderValues(buf, name, vals); err != nil {
 				return nil, err

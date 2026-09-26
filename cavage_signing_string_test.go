@@ -396,7 +396,7 @@ func TestCavageResponseSignerRejectsAssociatedCONNECTRequestTarget(t *testing.T)
 
 func TestGenerateSignatureStringNormalHeaders(t *testing.T) {
 	header := signingStringTestHeaders()
-	headers := []string{"X-One", "x-MULTI", "X-Zero", "X-Empty", "x-Internal", "X-Unicode"}
+	headers := []string{"x-one", "x-multi", "x-zero", "x-empty", "x-internal", "x-unicode"}
 	want := "x-one: single\n" +
 		"x-multi: first, second\n" +
 		"x-zero: \n" +
@@ -404,7 +404,7 @@ func TestGenerateSignatureStringNormalHeaders(t *testing.T) {
 		"x-internal: a \t b\n" +
 		"x-unicode: \u00a0kept\u2003"
 
-	buf, err := generateSignatureStringBuffer(headers, "", "", "", header, "", "")
+	buf, err := generateSignatureStringBuffer(headers, "", "", header, "", "")
 	if err != nil {
 		t.Fatalf("generateSignatureStringBuffer() failed: %v", err)
 	}
@@ -413,6 +413,66 @@ func TestGenerateSignatureStringNormalHeaders(t *testing.T) {
 	}
 	if strings.HasSuffix(buf.String(), "\n") || strings.Contains(buf.String(), "\r") {
 		t.Fatalf("signing string has an invalid line separator: %q", buf.String())
+	}
+}
+
+func TestGenerateSignatureStringErrorSentinels(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		headerName    string
+		method        string
+		requestTarget string
+		wantError     error
+	}{
+		{name: "missing field", headerName: "date", wantError: ErrSignedHeaderMissing},
+		{name: "missing method", headerName: RequestTarget, requestTarget: "/", wantError: ErrInvalidHTTPMessage},
+		{name: "missing request-target", headerName: RequestTarget, method: "GET", wantError: ErrInvalidHTTPMessage},
+		{name: "empty created", headerName: Created, wantError: ErrInvalidCreationTime},
+		{name: "empty expires", headerName: Expires, wantError: ErrInvalidExpirationTime},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := generateSignatureStringBuffer([]string{tt.headerName}, tt.method, tt.requestTarget, nil, "", "")
+			if !errors.Is(err, tt.wantError) {
+				t.Fatalf("generateSignatureStringBuffer() error = %v, want %v", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestCavageSignedHeaderNamesAreCaseInsensitive(t *testing.T) {
+	headers := []string{"(Request-Target)", "X-FOO"}
+	req := &http.Request{
+		Method: "GET",
+		URL:    &url.URL{Scheme: "https", Host: "example.test", Path: "/"},
+		Header: http.Header{"X-Foo": {"value"}},
+	}
+	err := NewCavageSigner().SignRequestWithHMAC(req, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions(headers))
+	if err != nil {
+		t.Fatalf("SignRequestWithHMAC() failed: %v", err)
+	}
+	value := req.Header.Get(Signature)
+	assertCavageHMACSignature(t, value, "(request-target): get /\nx-foo: value")
+	const normalizedParameter = `headers="(request-target) x-foo"`
+	if !strings.Contains(value, normalizedParameter) {
+		t.Fatalf("signature parameters do not contain %s: %s", normalizedParameter, value)
+	}
+	req.Header.Set(Signature, strings.Replace(value, normalizedParameter, `headers="(Request-Target) X-FOO"`, 1))
+	req.RequestURI = "/"
+	opts := signingStringVerificationOptions()
+	opts.RequiredHeaders = headers
+	verifier, err := NewCavageVerifier(opts)
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	signature, err := verifier.ParseRequest(req)
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	if got := signature.SignedHeaders(); !reflect.DeepEqual(got, []string{RequestTarget, "x-foo"}) {
+		t.Fatalf("SignedHeaders() = %v, want normalized names", got)
+	}
+	if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
+		t.Fatalf("VerifyHMAC() failed: %v", err)
 	}
 }
 
@@ -682,9 +742,9 @@ func TestCavageSignerRejectsInvalidPlacementBeforeSigningWork(t *testing.T) {
 			message := cavageSigningMessage{
 				isRequest: tt.isRequest,
 				header:    header,
-				resolveFields: func([]string) (string, http.Header, error) {
+				resolveFields: func([]string) (http.Header, error) {
 					resolveCalls++
-					return "", header, nil
+					return header, nil
 				},
 			}
 			signer := &CavageSigner{Now: func() time.Time {
@@ -791,7 +851,7 @@ func TestGenerateSignatureStringRejectsForbiddenHeaderValueBytes(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(valueSet.name+"/"+tt.name, func(t *testing.T) {
 				header := http.Header{"X-Signed": valueSet.values(tt.b)}
-				_, err := generateSignatureStringBuffer([]string{"x-signed"}, "", "", "", header, "", "")
+				_, err := generateSignatureStringBuffer([]string{"x-signed"}, "", "", header, "", "")
 				if !errors.Is(err, ErrInvalidHTTPMessage) {
 					t.Fatalf("generateSignatureStringBuffer() error = %v, want ErrInvalidHTTPMessage", err)
 				}
@@ -831,7 +891,7 @@ func TestGenerateSignatureStringRejectsForbiddenHeaderValueBytes(t *testing.T) {
 	for _, tt := range diagnosticTests {
 		t.Run("diagnostics/"+tt.name, func(t *testing.T) {
 			header := http.Header{"X-Signed": tt.values}
-			_, err := generateSignatureStringBuffer([]string{"x-signed"}, "", "", "", header, "", "")
+			_, err := generateSignatureStringBuffer([]string{"x-signed"}, "", "", header, "", "")
 			if !errors.Is(err, ErrInvalidHTTPMessage) {
 				t.Fatalf("generateSignatureStringBuffer() error = %v, want ErrInvalidHTTPMessage", err)
 			}
@@ -849,68 +909,6 @@ func TestGenerateSignatureStringRejectsForbiddenHeaderValueBytes(t *testing.T) {
 
 	if diagnosticErrors["single value"] == diagnosticErrors["second value"] {
 		t.Errorf("single-value and second-value errors are indistinguishable: %q", diagnosticErrors["single value"])
-	}
-}
-
-func TestGenerateSignatureStringRejectsForbiddenHostFallbackBytes(t *testing.T) {
-	tests := []struct {
-		name string
-		b    byte
-	}{
-		{name: "CR", b: '\r'},
-		{name: "LF", b: '\n'},
-		{name: "NUL", b: 0x00},
-		{name: "DEL", b: 0x7f},
-		{name: "other CTL", b: 0x01},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			host := "signed" + string(tt.b) + "host"
-			_, err := generateSignatureStringBuffer([]string{"host"}, host, "", "", make(http.Header), "", "")
-			if !errors.Is(err, ErrInvalidHTTPMessage) {
-				t.Fatalf("generateSignatureStringBuffer() error = %v, want ErrInvalidHTTPMessage", err)
-			}
-		})
-	}
-
-	t.Run("diagnostics", func(t *testing.T) {
-		const host = "SENTINEL\rhost"
-		_, err := generateSignatureStringBuffer([]string{"host"}, host, "", "", make(http.Header), "", "")
-		if !errors.Is(err, ErrInvalidHTTPMessage) {
-			t.Fatalf("generateSignatureStringBuffer() error = %v, want ErrInvalidHTTPMessage", err)
-		}
-		for _, want := range []string{"host", "value index 0", "byte position 9"} {
-			if !strings.Contains(err.Error(), want) {
-				t.Errorf("error = %q, want it to contain %q", err, want)
-			}
-		}
-		if strings.Contains(err.Error(), "SENTINEL") {
-			t.Errorf("error = %q, must not disclose the Host fallback value", err)
-		}
-	})
-}
-
-func TestGenerateSignatureStringNormalHostFallback(t *testing.T) {
-	tests := []struct {
-		name string
-		host string
-		want string
-	}{
-		{name: "plain host", host: "example.test:8443", want: "host: example.test:8443"},
-		{name: "OWS is trimmed", host: " \texample.test:8443\t ", want: "host: example.test:8443"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			buf, err := generateSignatureStringBuffer([]string{"host"}, tt.host, "", "", make(http.Header), "", "")
-			if err != nil {
-				t.Fatalf("generateSignatureStringBuffer() failed: %v", err)
-			}
-			if got := buf.String(); got != tt.want {
-				t.Fatalf("signing string = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -2094,8 +2092,8 @@ func TestCavageResponseRequestTargetRejectsEmptyReceivedMethod(t *testing.T) {
 	t.Run("signer", func(t *testing.T) {
 		res := &http.Response{Request: req, Header: make(http.Header)}
 		err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{RequestTarget}))
-		if err == nil || !strings.Contains(err.Error(), "method is missing") {
-			t.Fatalf("SignResponseWithHMAC() error = %v, want a missing method error", err)
+		if !errors.Is(err, ErrInvalidHTTPMessage) {
+			t.Fatalf("SignResponseWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
 		}
 	})
 	t.Run("verifier", func(t *testing.T) {

@@ -68,6 +68,8 @@ func TestNewCavageVerifierValidationAndDeepCopy(t *testing.T) {
 	invalid := []*sigre.CavageVerificationOptions{
 		{RequestSignatureSource: 255},
 		{RequiredHeaders: []string{"bad field"}},
+		{RequiredHeaders: []string{"\u212A-foo"}},
+		{RequiredHeaders: []string{"(exp\u0130res)"}},
 		{AllowedAlgorithms: []sigre.AlgorithmID{0}},
 		{MaxSignatureAge: -time.Nanosecond},
 		{MaxDateAge: -time.Nanosecond},

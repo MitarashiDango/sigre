@@ -243,11 +243,10 @@ func (s *CavageSigner) SignResponseWithHMAC(
 
 type cavageSigningMessage struct {
 	isRequest            bool
-	host                 string
 	method               string
 	header               http.Header
 	resolveRequestTarget func() (string, error)
-	resolveFields        func([]string) (string, http.Header, error)
+	resolveFields        func([]string) (http.Header, error)
 }
 
 func requestSigningMessage(req *http.Request, header http.Header) cavageSigningMessage {
@@ -258,13 +257,12 @@ func requestSigningMessage(req *http.Request, header http.Header) cavageSigningM
 	}
 	return cavageSigningMessage{
 		isRequest: true,
-		host:      req.Host,
 		method:    method,
 		header:    header,
 		resolveRequestTarget: func() (string, error) {
 			return outgoingRequestTarget(req)
 		},
-		resolveFields: func(headers []string) (string, http.Header, error) {
+		resolveFields: func(headers []string) (http.Header, error) {
 			return resolveOutgoingRequestFields(req, header, headers)
 		},
 	}
@@ -282,9 +280,8 @@ func responseSigningMessage(res *http.Response, header http.Header) cavageSignin
 			return associatedRequestTarget(res.Request)
 		}
 	}
-	message.resolveFields = func(headers []string) (string, http.Header, error) {
-		resolved, err := resolveOutgoingResponseFields(res, header, headers)
-		return "", resolved, err
+	message.resolveFields = func(headers []string) (http.Header, error) {
+		return resolveOutgoingResponseFields(res, header, headers)
 	}
 	return message
 }
@@ -320,13 +317,9 @@ func (s *CavageSigner) signMessage(
 	if err := ensureCavageSignatureAbsent(message.header); err != nil {
 		return err
 	}
-	signingHost := message.host
-	signingHeader := message.header
-	if message.resolveFields != nil {
-		signingHost, signingHeader, err = message.resolveFields(configuration.headers)
-		if err != nil {
-			return fmt.Errorf("failed to create signing string: %w", err)
-		}
+	signingHeader, err := message.resolveFields(configuration.headers)
+	if err != nil {
+		return fmt.Errorf("failed to create signing string: %w", err)
 	}
 	requestTarget := ""
 	if slices.Contains(configuration.headers, RequestTarget) && message.resolveRequestTarget != nil {
@@ -340,7 +333,6 @@ func (s *CavageSigner) signMessage(
 	created, expires := signingTimestamps(now, configuration.headers, configuration.expiresAfter)
 	buf, err := generateSignatureStringBuffer(
 		configuration.headers,
-		signingHost,
 		message.method,
 		requestTarget,
 		signingHeader,

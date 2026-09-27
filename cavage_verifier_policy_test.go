@@ -908,13 +908,34 @@ func TestCavageVerifierErrorPriority(t *testing.T) {
 		_, _, err := parseVerifierPolicyRequest(req, nil)
 		assertVerifierPolicyError(t, err, sigre.ErrSignedHeaderMissing)
 	})
-	t.Run("HTTP message before Date syntax", func(t *testing.T) {
+	t.Run("missing Date before missing signed header", func(t *testing.T) {
+		params := verifierPolicyParameters("hs2019", "x-missing date", "")
+		req := rawVerifierPolicyRequest(params)
+		req.Header.Del("Date")
+		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: time.Second})
+		assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
+	})
+	t.Run("multiple Date values before missing signed header", func(t *testing.T) {
+		params := verifierPolicyParameters("hs2019", "x-missing date", "")
+		req := rawVerifierPolicyRequest(params)
+		req.Header.Add("Date", req.Header.Get("Date"))
+		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: time.Second})
+		assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
+	})
+	t.Run("missing Date with MaxDateAge disabled", func(t *testing.T) {
+		params := verifierPolicyParameters("hs2019", "date", "")
+		req := rawVerifierPolicyRequest(params)
+		req.Header.Del("Date")
+		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: 0})
+		assertVerifierPolicyError(t, err, sigre.ErrSignedHeaderMissing)
+	})
+	t.Run("Date syntax before HTTP message", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "(request-target) date", "")
 		req := rawVerifierPolicyRequest(params)
 		req.Method = ""
 		req.Header.Set("Date", "invalid")
 		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: time.Second})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidHTTPMessage)
+		assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
 	})
 	t.Run("Date syntax before created policy", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "date x-test", ",created=101")

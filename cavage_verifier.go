@@ -342,7 +342,7 @@ func (v *CavageVerifier) validateSignature(signature *CavageSignature) error {
 	if err := v.validateConstructed(); err != nil {
 		return err
 	}
-	if signature == nil || signature.origin == nil || signature.origin != v.identity {
+	if signature == nil || signature.origin != v.identity {
 		return fmt.Errorf("%w: CavageSignature was not parsed by this CavageVerifier", ErrInvalidHTTPMessage)
 	}
 	return nil
@@ -386,96 +386,36 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 	if err != nil {
 		return nil, err
 	}
-	if v.config.requireExplicitHeaders && !params.HeadersPresent {
-		return nil, fmt.Errorf("%w: headers parameter is required", ErrRequiredHeaderMissing)
-	}
-	if err := requireCavageHeaders(headers, v.config.requiredHeaders); err != nil {
+	if err := v.checkCavageSignedHeaderPolicy(params, headers); err != nil {
 		return nil, err
 	}
-	if v.config.maxSignatureAge > 0 && !slices.Contains(headers, Created) {
-		return nil, fmt.Errorf("%w: MaxSignatureAge requires %s", ErrRequiredHeaderMissing, Created)
-	}
-	if v.config.maxDateAge > 0 && !slices.Contains(headers, "date") {
-		return nil, fmt.Errorf("%w: MaxDateAge requires date", ErrRequiredHeaderMissing)
-	}
-
-	if slices.Contains(headers, Created) && !params.CreatedPresent {
-		return nil, fmt.Errorf("%w: %s requires a created parameter", ErrInvalidCreationTime, Created)
-	}
-	if slices.Contains(headers, Expires) && !params.ExpiresPresent {
-		return nil, fmt.Errorf("%w: %s requires an expires parameter", ErrInvalidExpirationTime, Expires)
-	}
-
-	if err := v.validateWireAlgorithmBeforeKey(params, headers); err != nil {
-		return nil, err
-	}
-	ownedHeaders, err := snapshotCavageSignedFields(message, headers, v.config.maxDateAge > 0)
+	parsedDate, err := v.parseCavageDateForPolicy(message.header)
 	if err != nil {
 		return nil, err
 	}
-	requestTarget := ""
-	if slices.Contains(headers, RequestTarget) {
-		if message.method == "" {
-			return nil, fmt.Errorf("%w: method is required by %s", ErrInvalidHTTPMessage, RequestTarget)
-		}
-		if message.resolveRequestTarget != nil {
-			requestTarget, err = message.resolveRequestTarget()
-			if err != nil {
-				return nil, err
-			}
-		}
-		if requestTarget == "" {
-			return nil, fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
-		}
+	ownedHeaders, err := snapshotCavageSignedFields(message, headers)
+	if err != nil {
+		return nil, err
+	}
+	requestTarget, err := resolveCavageRequestTarget(message, headers)
+	if err != nil {
+		return nil, err
 	}
 
-	var parsedDate time.Time
-	if v.config.maxDateAge > 0 {
-		dateValues := message.header.Values("Date")
-		if len(dateValues) != 1 {
-			return nil, fmt.Errorf("%w: MaxDateAge requires exactly one Date value, got %d", ErrInvalidDate, len(dateValues))
-		}
-		parsedDate, err = http.ParseTime(dateValues[0])
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidDate, err)
-		}
-	}
-
-	createdText, expiresText := "", ""
-	if params.CreatedPresent {
-		createdText = params.Created
-	}
-	if params.ExpiresPresent {
-		expiresText = params.Expires
-	}
 	buf, err := generateSignatureStringBuffer(
 		headers,
 		message.method,
 		requestTarget,
 		ownedHeaders,
-		createdText,
-		expiresText,
+		params.Created,
+		params.Expires,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to create signing string: %v", ErrInvalidHTTPMessage, err)
 	}
 
-	if params.CreatedPresent || params.ExpiresPresent || v.config.maxDateAge > 0 {
-		now := v.currentTime()
-		if params.CreatedPresent {
-			if timeAfterDuration(created, now, v.config.allowedCreatedFutureSkew) {
-				return nil, fmt.Errorf("%w: created is after the permitted future boundary", ErrInvalidCreationTime)
-			}
-			if v.config.maxSignatureAge > 0 && timeAfterDuration(now, created, v.config.maxSignatureAge) {
-				return nil, fmt.Errorf("%w: signature age exceeds MaxSignatureAge", ErrInvalidCreationTime)
-			}
-		}
-		if params.ExpiresPresent && timeAfterDuration(now, expires, v.config.allowedExpiredSkew) {
-			return nil, fmt.Errorf("%w: expires is before the permitted past boundary", ErrSignatureExpired)
-		}
-		if v.config.maxDateAge > 0 && (timeAfterDuration(parsedDate, now, v.config.maxDateAge) || timeAfterDuration(now, parsedDate, v.config.maxDateAge)) {
-			return nil, fmt.Errorf("%w: Date differs from current time by more than MaxDateAge", ErrInvalidDate)
-		}
+	if err := v.checkCavageTimePolicy(params, created, expires, parsedDate); err != nil {
+		return nil, err
 	}
 
 	return &CavageSignature{
@@ -493,6 +433,88 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 		signature:        decodedSignature,
 		signingString:    append([]byte(nil), buf.Bytes()...),
 	}, nil
+}
+
+func (v *CavageVerifier) checkCavageSignedHeaderPolicy(params *cavageParams, headers []string) error {
+	if v.config.requireExplicitHeaders && !params.HeadersPresent {
+		return fmt.Errorf("%w: headers parameter is required", ErrRequiredHeaderMissing)
+	}
+	if err := requireCavageHeaders(headers, v.config.requiredHeaders); err != nil {
+		return err
+	}
+	if v.config.maxSignatureAge > 0 && !slices.Contains(headers, Created) {
+		return fmt.Errorf("%w: MaxSignatureAge requires %s", ErrRequiredHeaderMissing, Created)
+	}
+	if v.config.maxDateAge > 0 && !slices.Contains(headers, "date") {
+		return fmt.Errorf("%w: MaxDateAge requires date", ErrRequiredHeaderMissing)
+	}
+
+	if slices.Contains(headers, Created) && !params.CreatedPresent {
+		return fmt.Errorf("%w: %s requires a created parameter", ErrInvalidCreationTime, Created)
+	}
+	if slices.Contains(headers, Expires) && !params.ExpiresPresent {
+		return fmt.Errorf("%w: %s requires an expires parameter", ErrInvalidExpirationTime, Expires)
+	}
+
+	return v.validateWireAlgorithmBeforeKey(params, headers)
+}
+
+func (v *CavageVerifier) parseCavageDateForPolicy(header http.Header) (time.Time, error) {
+	if v.config.maxDateAge == 0 {
+		return time.Time{}, nil
+	}
+	dateValues := header.Values("Date")
+	if len(dateValues) != 1 {
+		return time.Time{}, fmt.Errorf("%w: MaxDateAge requires exactly one Date value, got %d", ErrInvalidDate, len(dateValues))
+	}
+	parsedDate, err := http.ParseTime(dateValues[0])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%w: %v", ErrInvalidDate, err)
+	}
+	return parsedDate, nil
+}
+
+func resolveCavageRequestTarget(message cavageMessageSnapshot, headers []string) (string, error) {
+	if !slices.Contains(headers, RequestTarget) {
+		return "", nil
+	}
+	if message.method == "" {
+		return "", fmt.Errorf("%w: method is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+	}
+	var requestTarget string
+	if message.resolveRequestTarget != nil {
+		var err error
+		requestTarget, err = message.resolveRequestTarget()
+		if err != nil {
+			return "", err
+		}
+	}
+	if requestTarget == "" {
+		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+	}
+	return requestTarget, nil
+}
+
+func (v *CavageVerifier) checkCavageTimePolicy(params *cavageParams, created, expires, date time.Time) error {
+	if !params.CreatedPresent && !params.ExpiresPresent && v.config.maxDateAge == 0 {
+		return nil
+	}
+	now := v.currentTime()
+	if params.CreatedPresent {
+		if timeAfterDuration(created, now, v.config.allowedCreatedFutureSkew) {
+			return fmt.Errorf("%w: created is after the permitted future boundary", ErrInvalidCreationTime)
+		}
+		if v.config.maxSignatureAge > 0 && timeAfterDuration(now, created, v.config.maxSignatureAge) {
+			return fmt.Errorf("%w: signature age exceeds MaxSignatureAge", ErrInvalidCreationTime)
+		}
+	}
+	if params.ExpiresPresent && timeAfterDuration(now, expires, v.config.allowedExpiredSkew) {
+		return fmt.Errorf("%w: expires is before the permitted past boundary", ErrSignatureExpired)
+	}
+	if v.config.maxDateAge > 0 && (timeAfterDuration(date, now, v.config.maxDateAge) || timeAfterDuration(now, date, v.config.maxDateAge)) {
+		return fmt.Errorf("%w: Date differs from current time by more than MaxDateAge", ErrInvalidDate)
+	}
+	return nil
 }
 
 func effectiveCavageSignedHeaders(params *cavageParams) ([]string, error) {
@@ -565,7 +587,7 @@ func (v *CavageVerifier) hs2019Permits(id AlgorithmID) bool {
 	return isStrictCavageAlgorithm(id) || id == AlgorithmRSAPKCS1v15SHA256 && v.config.allowHS2019WithSHA256
 }
 
-func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []string, deferDate bool) (http.Header, error) {
+func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []string) (http.Header, error) {
 	owned := make(http.Header)
 	for _, name := range signedHeaders {
 		switch name {
@@ -595,14 +617,12 @@ func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []s
 			}
 		}
 
-		values, ok := message.header[http.CanonicalHeaderKey(name)]
+		canonicalName := http.CanonicalHeaderKey(name)
+		values, ok := message.header[canonicalName]
 		if !ok || len(values) == 0 {
-			if deferDate && name == "date" {
-				continue
-			}
 			return nil, fmt.Errorf("%w: %s", ErrSignedHeaderMissing, name)
 		}
-		owned[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
+		owned[canonicalName] = append([]string(nil), values...)
 	}
 	return owned, nil
 }

@@ -1046,8 +1046,11 @@ func TestCavageSignerExtensionAlgorithm(t *testing.T) {
 		{name: "mismatched AlgorithmID", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmECDSASHA512}}},
 		{name: "known hs2019 label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "hs2019", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
 		{name: "known legacy label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "known rsa-sha1 label without created or expires", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.RequestTarget, "date"}, Extension: &sigre.ExtensionAlgorithm{Label: "rsa-sha1", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "known legacy label without created or expires", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.RequestTarget, "date"}, Extension: &sigre.ExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
 		{name: "extension and omitted mode", compatibility: sigre.CavageSigningCompatibility{AlgorithmField: sigre.AlgorithmFieldOmitted, Extension: &sigre.ExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
 		{name: "rsa prefix with created", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "rsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "ecdsa prefix with created", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "ecdsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {

@@ -498,10 +498,8 @@ func resolveCavageSigningConfiguration(
 			}
 		}
 	}
-	if family := legacyAlgorithmFamily(wireAlgorithm); family != "" {
-		if err := validateCreatedExpiresWithAlgorithm(headers, family); err != nil {
-			return cavageSigningConfiguration{}, invalidSigningAlgorithmOptions(err)
-		}
+	if err := validateCavagePseudoHeadersForAlgorithmLabel(wireAlgorithm, headers); err != nil {
+		return cavageSigningConfiguration{}, invalidSigningAlgorithmOptions(err)
 	}
 
 	hasExpires := slices.Contains(headers, Expires)
@@ -526,17 +524,8 @@ func resolveSigningAlgorithmField(id AlgorithmID, compatibility CavageSigningCom
 			return "", invalidSigningOptions("Extension and a non-strict AlgorithmField cannot be combined")
 		}
 		extension := compatibility.Extension
-		if extension.Label == "" {
-			return "", invalidSigningOptions("Extension.Label must not be empty")
-		}
-		if err := validateCavageQuotedStringValue("algorithm", extension.Label); err != nil {
-			return "", invalidSigningOptions("invalid Extension.Label: %v", err)
-		}
-		if isReservedCavageAlgorithmLabel(extension.Label) {
-			return "", invalidSigningOptions("Extension must not override known label %q", extension.Label)
-		}
-		if _, err := algorithmDefinitionFor(extension.Algorithm); err != nil {
-			return "", invalidSigningOptions("Extension.Algorithm is invalid: %v", err)
+		if err := validateCavageExtensionAlgorithm(extension.Label, extension.Algorithm); err != nil {
+			return "", invalidSigningOptions("Extension label %q: %v", extension.Label, err)
 		}
 		if extension.Algorithm != id {
 			return "", invalidSigningOptions("Extension.Algorithm %d does not match SigningKey AlgorithmID %d", extension.Algorithm, id)

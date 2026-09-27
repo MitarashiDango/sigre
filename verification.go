@@ -3,7 +3,7 @@ package sigre
 import (
 	"crypto"
 	"fmt"
-	"strings"
+	"slices"
 	"time"
 )
 
@@ -167,68 +167,69 @@ func algorithmDefinitionFor(id AlgorithmID) (algorithmDefinition, error) {
 	}
 }
 
+var defaultCavageVerificationAlgorithms = []AlgorithmID{
+	AlgorithmRSAPKCS1v15SHA512,
+	AlgorithmECDSASHA512,
+	AlgorithmEd25519,
+	AlgorithmHMACSHA512,
+}
+
+var legacyCavageAlgorithms = [...]struct {
+	label string
+	id    AlgorithmID
+}{
+	{label: "rsa-sha256", id: AlgorithmRSAPKCS1v15SHA256},
+	{label: "ecdsa-sha256", id: AlgorithmECDSASHA256},
+	{label: "hmac-sha256", id: AlgorithmHMACSHA256},
+}
+
 func isStrictCavageAlgorithm(id AlgorithmID) bool {
-	switch id {
-	case AlgorithmRSAPKCS1v15SHA512, AlgorithmECDSASHA512, AlgorithmEd25519, AlgorithmHMACSHA512:
-		return true
-	default:
-		return false
-	}
+	return slices.Contains(defaultCavageVerificationAlgorithms, id)
 }
 
 func isLegacyCavageAlgorithm(id AlgorithmID) bool {
-	switch id {
-	case AlgorithmRSAPKCS1v15SHA256, AlgorithmECDSASHA256, AlgorithmHMACSHA256:
-		return true
-	default:
-		return false
-	}
+	_, ok := legacyAlgorithmLabel(id)
+	return ok
 }
 
 func isReservedCavageAlgorithmLabel(label string) bool {
-	switch label {
-	case hs2019, "rsa-sha1", "rsa-sha256", "ecdsa-sha256", "hmac-sha256":
+	if label == hs2019 || label == "rsa-sha1" {
 		return true
-	default:
-		return false
 	}
+	_, ok := legacyAlgorithmID(label)
+	return ok
 }
 
 func legacyAlgorithmID(label string) (AlgorithmID, bool) {
-	switch label {
-	case "rsa-sha256":
-		return AlgorithmRSAPKCS1v15SHA256, true
-	case "ecdsa-sha256":
-		return AlgorithmECDSASHA256, true
-	case "hmac-sha256":
-		return AlgorithmHMACSHA256, true
-	default:
-		return 0, false
+	for _, algorithm := range legacyCavageAlgorithms {
+		if algorithm.label == label {
+			return algorithm.id, true
+		}
 	}
+	return 0, false
 }
 
 func legacyAlgorithmLabel(id AlgorithmID) (string, bool) {
-	switch id {
-	case AlgorithmRSAPKCS1v15SHA256:
-		return "rsa-sha256", true
-	case AlgorithmECDSASHA256:
-		return "ecdsa-sha256", true
-	case AlgorithmHMACSHA256:
-		return "hmac-sha256", true
-	default:
-		return "", false
+	for _, algorithm := range legacyCavageAlgorithms {
+		if algorithm.id == id {
+			return algorithm.label, true
+		}
 	}
+	return "", false
 }
 
-func legacyAlgorithmFamily(label string) string {
-	switch {
-	case strings.HasPrefix(label, "rsa"):
-		return "rsa"
-	case strings.HasPrefix(label, "hmac"):
-		return "hmac"
-	case strings.HasPrefix(label, "ecdsa"):
-		return "ecdsa"
-	default:
-		return ""
+func validateCavageExtensionAlgorithm(label string, id AlgorithmID) error {
+	if label == "" {
+		return fmt.Errorf("label must not be empty")
 	}
+	if err := validateCavageQuotedStringValue("algorithm", label); err != nil {
+		return err
+	}
+	if isReservedCavageAlgorithmLabel(label) {
+		return fmt.Errorf("label is reserved")
+	}
+	if _, err := algorithmDefinitionFor(id); err != nil {
+		return fmt.Errorf("unsupported AlgorithmID %d", id)
+	}
+	return nil
 }

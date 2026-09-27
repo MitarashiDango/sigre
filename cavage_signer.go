@@ -130,21 +130,13 @@ func (s *CavageSigner) SignRequest(
 	if req == nil {
 		return wrapSigreError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
 	}
-	algorithm, err := validateSigningKey(key)
+	algorithm, privateKey, err := validateSigningKey(key)
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	header := req.Header
-	if header == nil {
-		header = make(http.Header)
-	}
-	message := requestSigningMessage(req, header)
-	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
-		return signAsymmetric(key.PrivateKey, algorithm, data)
+	err = s.signRequestWith(req, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
+		return signAsymmetric(privateKey, algorithm, data)
 	})
-	if err == nil {
-		req.Header = header
-	}
 	return wrapSigreError(err)
 }
 
@@ -161,21 +153,13 @@ func (s *CavageSigner) SignResponse(
 	if res == nil {
 		return wrapSigreError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
 	}
-	algorithm, err := validateSigningKey(key)
+	algorithm, privateKey, err := validateSigningKey(key)
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	header := res.Header
-	if header == nil {
-		header = make(http.Header)
-	}
-	message := responseSigningMessage(res, header)
-	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
-		return signAsymmetric(key.PrivateKey, algorithm, data)
+	err = s.signResponseWith(res, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
+		return signAsymmetric(privateKey, algorithm, data)
 	})
-	if err == nil {
-		res.Header = header
-	}
 	return wrapSigreError(err)
 }
 
@@ -196,17 +180,9 @@ func (s *CavageSigner) SignRequestWithHMAC(
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	header := req.Header
-	if header == nil {
-		header = make(http.Header)
-	}
-	message := requestSigningMessage(req, header)
-	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
+	err = s.signRequestWith(req, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signHMAC(key.Secret, algorithm.hash, data)
 	})
-	if err == nil {
-		req.Header = header
-	}
 	return wrapSigreError(err)
 }
 
@@ -227,18 +203,50 @@ func (s *CavageSigner) SignResponseWithHMAC(
 	if err != nil {
 		return wrapSigreError(err)
 	}
+	err = s.signResponseWith(res, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
+		return signHMAC(key.Secret, algorithm.hash, data)
+	})
+	return wrapSigreError(err)
+}
+
+func (s *CavageSigner) signRequestWith(
+	req *http.Request,
+	metadata TrustedKeyMetadata,
+	algorithm algorithmDefinition,
+	placement CavageSignaturePlacement,
+	opts *CavageSigningOptions,
+	sign func([]byte) ([]byte, error),
+) error {
+	header := req.Header
+	if header == nil {
+		header = make(http.Header)
+	}
+	message := requestSigningMessage(req, header)
+	err := s.signMessage(message, metadata, algorithm, placement, opts, sign)
+	if err == nil {
+		req.Header = header
+	}
+	return err
+}
+
+func (s *CavageSigner) signResponseWith(
+	res *http.Response,
+	metadata TrustedKeyMetadata,
+	algorithm algorithmDefinition,
+	placement CavageSignaturePlacement,
+	opts *CavageSigningOptions,
+	sign func([]byte) ([]byte, error),
+) error {
 	header := res.Header
 	if header == nil {
 		header = make(http.Header)
 	}
 	message := responseSigningMessage(res, header)
-	err = s.signMessage(message, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
-		return signHMAC(key.Secret, algorithm.hash, data)
-	})
+	err := s.signMessage(message, metadata, algorithm, placement, opts, sign)
 	if err == nil {
 		res.Header = header
 	}
-	return wrapSigreError(err)
+	return err
 }
 
 type cavageSigningMessage struct {
@@ -271,11 +279,7 @@ func requestSigningMessage(req *http.Request, header http.Header) cavageSigningM
 func responseSigningMessage(res *http.Response, header http.Header) cavageSigningMessage {
 	message := cavageSigningMessage{header: header}
 	if res.Request != nil {
-		message.method = res.Request.Method
-		// Use the same client-side branch as associatedRequestTarget.
-		if res.Request.RequestURI == "" && message.method == "" {
-			message.method = http.MethodGet
-		}
+		message.method = associatedRequestMethod(res.Request)
 		message.resolveRequestTarget = func() (string, error) {
 			return associatedRequestTarget(res.Request)
 		}
@@ -366,21 +370,33 @@ func (s *CavageSigner) signMessage(
 	return nil
 }
 
-func validateSigningKey(key SigningKey) (algorithmDefinition, error) {
+func validateSigningKey(key SigningKey) (algorithmDefinition, crypto.PrivateKey, error) {
 	algorithm, err := validateSigningMetadata(key.Metadata)
 	if err != nil {
-		return algorithmDefinition{}, err
+		return algorithmDefinition{}, nil, err
 	}
 	if key.PrivateKey == nil {
-		return algorithmDefinition{}, ErrMissingPrivateKey
+		return algorithmDefinition{}, nil, ErrMissingPrivateKey
 	}
 	if algorithm.keyKind == algorithmKeyHMAC {
-		return algorithmDefinition{}, fmt.Errorf("%w: HMAC AlgorithmID must be used with HMACSigningKey", ErrAlgorithmMismatch)
+		return algorithmDefinition{}, nil, fmt.Errorf("%w: HMAC AlgorithmID must be used with HMACSigningKey", ErrAlgorithmMismatch)
 	}
-	if err := validatePrivateKey(key.PrivateKey, algorithm.keyKind); err != nil {
-		return algorithmDefinition{}, err
+	privateKey := normalizeEd25519PrivateKey(key.PrivateKey)
+	if err := validatePrivateKey(privateKey, algorithm.keyKind); err != nil {
+		return algorithmDefinition{}, nil, err
 	}
-	return algorithm, nil
+	return algorithm, privateKey, nil
+}
+
+func normalizeEd25519PrivateKey(key crypto.PrivateKey) crypto.PrivateKey {
+	privateKey, ok := key.(*ed25519.PrivateKey)
+	if !ok {
+		return key
+	}
+	if privateKey == nil {
+		return ed25519.PrivateKey(nil)
+	}
+	return *privateKey
 }
 
 func validateHMACSigningKey(key HMACSigningKey) (algorithmDefinition, error) {
@@ -434,23 +450,15 @@ func validatePrivateKey(key crypto.PrivateKey, expected algorithmKeyKind) error 
 			return fmt.Errorf("%w: invalid ECDSA private key", ErrUnsupportedKeyFormat)
 		}
 	case algorithmKeyEd25519:
-		switch privateKey := key.(type) {
-		case ed25519.PrivateKey:
-			if len(privateKey) == 0 {
-				return ErrMissingPrivateKey
-			}
-			if len(privateKey) != ed25519.PrivateKeySize {
-				return fmt.Errorf("%w: invalid Ed25519 private key length %d", ErrUnsupportedKeyFormat, len(privateKey))
-			}
-		case *ed25519.PrivateKey:
-			if privateKey == nil || len(*privateKey) == 0 {
-				return ErrMissingPrivateKey
-			}
-			if len(*privateKey) != ed25519.PrivateKeySize {
-				return fmt.Errorf("%w: invalid Ed25519 private key length %d", ErrUnsupportedKeyFormat, len(*privateKey))
-			}
-		default:
+		privateKey, ok := key.(ed25519.PrivateKey)
+		if !ok {
 			return fmt.Errorf("%w: AlgorithmID requires Ed25519, private key is %T", ErrAlgorithmMismatch, key)
+		}
+		if len(privateKey) == 0 {
+			return ErrMissingPrivateKey
+		}
+		if len(privateKey) != ed25519.PrivateKeySize {
+			return fmt.Errorf("%w: invalid Ed25519 private key length %d", ErrUnsupportedKeyFormat, len(privateKey))
 		}
 	default:
 		return fmt.Errorf("%w: SigningKey received a non-asymmetric AlgorithmID", ErrAlgorithmMismatch)
@@ -705,12 +713,7 @@ func signAsymmetric(key crypto.PrivateKey, algorithm algorithmDefinition, data [
 		}
 		return ecdsa.SignASN1(rand.Reader, key.(*ecdsa.PrivateKey), digest)
 	case algorithmKeyEd25519:
-		switch privateKey := key.(type) {
-		case ed25519.PrivateKey:
-			return ed25519.Sign(privateKey, data), nil
-		case *ed25519.PrivateKey:
-			return ed25519.Sign(*privateKey, data), nil
-		}
+		return ed25519.Sign(key.(ed25519.PrivateKey), data), nil
 	}
 	return nil, fmt.Errorf("%w: unsupported asymmetric AlgorithmID %d", ErrAlgorithmMismatch, algorithm.id)
 }

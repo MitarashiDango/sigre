@@ -2,6 +2,7 @@ package sigre_test
 
 import (
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -780,6 +781,28 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 	assertVerifierPolicyError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, nil)), sigre.ErrMissingPublicKey)
 	assertVerifierPolicyError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, rsaPublicKey)), sigre.ErrAlgorithmMismatch)
 	assertVerifierPolicyError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &ecdsaPrivateKey.PublicKey)), sigre.ErrAlgorithmMismatch)
+
+	var nilEd25519PublicKey ed25519.PublicKey
+	emptyEd25519PublicKey := ed25519.PublicKey{}
+	invalidEd25519PublicKey := make(ed25519.PublicKey, ed25519.PublicKeySize-1)
+	for _, tt := range []struct {
+		name      string
+		algorithm sigre.AlgorithmID
+		publicKey *ed25519.PublicKey
+		wantErr   error
+	}{
+		{name: "nil Ed25519 public key pointer", algorithm: sigre.AlgorithmEd25519, wantErr: sigre.ErrMissingPublicKey},
+		{name: "pointer to nil Ed25519 public key", algorithm: sigre.AlgorithmEd25519, publicKey: &nilEd25519PublicKey, wantErr: sigre.ErrMissingPublicKey},
+		{name: "pointer to empty Ed25519 public key", algorithm: sigre.AlgorithmEd25519, publicKey: &emptyEd25519PublicKey, wantErr: sigre.ErrMissingPublicKey},
+		{name: "pointer to invalid length Ed25519 public key", algorithm: sigre.AlgorithmEd25519, publicKey: &invalidEd25519PublicKey, wantErr: sigre.ErrUnsupportedKeyFormat},
+		{name: "nil Ed25519 public key pointer with HMAC AlgorithmID", algorithm: sigre.AlgorithmHMACSHA512, wantErr: sigre.ErrMissingPublicKey},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			key := fixedPublicVerificationKey(verifierPolicyKeyID, tt.algorithm, tt.publicKey)
+			assertVerifierPolicyError(t, verifier.Verify(signature, key), tt.wantErr)
+		})
+	}
+
 	restrictedVerifier, restrictedSignature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
 		AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmEd25519},
 	})

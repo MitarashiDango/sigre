@@ -485,6 +485,16 @@ func receivedRequestTarget(req *http.Request) (string, error) {
 	return "", fmt.Errorf("%w: authority-form request-target does not define the :path required by %s", ErrInvalidHTTPMessage, RequestTarget)
 }
 
+// associatedRequestMethod uses the same client-side branch as associatedRequestTarget:
+// requests with an empty RequestURI are treated as client requests, for which
+// net/http defines an empty method as GET.
+func associatedRequestMethod(req *http.Request) string {
+	if req.RequestURI == "" && req.Method == "" {
+		return http.MethodGet
+	}
+	return req.Method
+}
+
 // associatedRequestTarget distinguishes a received server-side request from
 // a client-side request associated with a response.
 func associatedRequestTarget(req *http.Request) (string, error) {

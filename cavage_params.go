@@ -396,18 +396,27 @@ func forbiddenHeaderValueByteIndex(value string) (int, bool) {
 	return 0, false
 }
 
-// validateCreatedExpiresWithAlgorithm enforces the Section 2.3 restriction:
+// validateCavagePseudoHeadersForAlgorithmLabel enforces draft-12 Section 2.3:
 // the (created) and (expires) pseudo-headers MUST NOT appear in the headers list
-// when the algorithm starts with "rsa", "hmac", or "ecdsa".
-func validateCreatedExpiresWithAlgorithm(headers []string, keyType string) error {
-	if keyType != "rsa" && keyType != "hmac" && keyType != "ecdsa" {
+// when the algorithm label starts with "rsa", "hmac", or "ecdsa".
+// This restriction applies to both deprecated and extension labels.
+func validateCavagePseudoHeadersForAlgorithmLabel(label string, headers []string) error {
+	var family string
+	switch {
+	case strings.HasPrefix(label, "rsa"):
+		family = "rsa"
+	case strings.HasPrefix(label, "hmac"):
+		family = "hmac"
+	case strings.HasPrefix(label, "ecdsa"):
+		family = "ecdsa"
+	default:
 		return nil
 	}
 	if slices.Contains(headers, Created) {
-		return fmt.Errorf("%w: '(created)' MUST NOT be used with '%s' family algorithms", ErrInvalidSignatureAlgorithm, keyType)
+		return fmt.Errorf("%w: '(created)' MUST NOT be used with '%s' family algorithms", ErrInvalidSignatureAlgorithm, family)
 	}
 	if slices.Contains(headers, Expires) {
-		return fmt.Errorf("%w: '(expires)' MUST NOT be used with '%s' family algorithms", ErrInvalidSignatureAlgorithm, keyType)
+		return fmt.Errorf("%w: '(expires)' MUST NOT be used with '%s' family algorithms", ErrInvalidSignatureAlgorithm, family)
 	}
 	return nil
 }

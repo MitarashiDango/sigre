@@ -19,13 +19,6 @@ import (
 	"time"
 )
 
-var defaultCavageVerificationAlgorithms = []AlgorithmID{
-	AlgorithmRSAPKCS1v15SHA512,
-	AlgorithmECDSASHA512,
-	AlgorithmEd25519,
-	AlgorithmHMACSHA512,
-}
-
 // maxCavageUnixSeconds is the largest Unix second for which time.Unix's
 // internal addition of the offset from year 1 to 1970 does not overflow int64.
 var maxCavageUnixSeconds = math.MaxInt64 + time.Time{}.Unix()
@@ -336,17 +329,8 @@ func newCavageVerificationConfig(opts *CavageVerificationOptions) (cavageVerific
 	}
 	config.extensionAlgorithms = make(map[string]AlgorithmID, len(compatibility.ExtensionAlgorithms))
 	for label, id := range compatibility.ExtensionAlgorithms {
-		if label == "" {
-			return cavageVerificationConfig{}, fmt.Errorf("%w: ExtensionAlgorithms contains an empty label", ErrInvalidVerificationOptions)
-		}
-		if err := validateCavageQuotedStringValue("algorithm", label); err != nil {
-			return cavageVerificationConfig{}, fmt.Errorf("%w: invalid extension label %q: %v", ErrInvalidVerificationOptions, label, err)
-		}
-		if isReservedCavageAlgorithmLabel(label) {
-			return cavageVerificationConfig{}, fmt.Errorf("%w: ExtensionAlgorithms must not override known label %q", ErrInvalidVerificationOptions, label)
-		}
-		if _, err := algorithmDefinitionFor(id); err != nil {
-			return cavageVerificationConfig{}, fmt.Errorf("%w: extension label %q maps to unsupported AlgorithmID %d", ErrInvalidVerificationOptions, label, id)
+		if err := validateCavageExtensionAlgorithm(label, id); err != nil {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: ExtensionAlgorithms label %q: %v", ErrInvalidVerificationOptions, label, err)
 		}
 		config.extensionAlgorithms[label] = id
 	}
@@ -557,7 +541,7 @@ func (v *CavageVerifier) validateWireAlgorithmBeforeKey(params *cavageParams, he
 	switch label {
 	case hs2019:
 		for id := range v.config.allowedAlgorithms {
-			if isStrictCavageAlgorithm(id) || id == AlgorithmRSAPKCS1v15SHA256 && v.config.allowHS2019WithSHA256 {
+			if v.hs2019Permits(id) {
 				return nil
 			}
 		}
@@ -580,12 +564,11 @@ func (v *CavageVerifier) validateWireAlgorithmBeforeKey(params *cavageParams, he
 			}
 		}
 	}
-	if family := legacyAlgorithmFamily(label); family != "" {
-		if err := validateCreatedExpiresWithAlgorithm(headers, family); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateCavagePseudoHeadersForAlgorithmLabel(label, headers)
+}
+
+func (v *CavageVerifier) hs2019Permits(id AlgorithmID) bool {
+	return isStrictCavageAlgorithm(id) || id == AlgorithmRSAPKCS1v15SHA256 && v.config.allowHS2019WithSHA256
 }
 
 func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []string, deferDate bool) (http.Header, error) {
@@ -754,7 +737,7 @@ func (v *CavageVerifier) validateTrustedAlgorithm(signature *CavageSignature, id
 	}
 	label := signature.algorithmLabel
 	if label == hs2019 {
-		if isStrictCavageAlgorithm(id) || id == AlgorithmRSAPKCS1v15SHA256 && v.config.allowHS2019WithSHA256 {
+		if v.hs2019Permits(id) {
 			return nil
 		}
 		return fmt.Errorf("%w: algorithm %q does not identify trusted AlgorithmID %d", ErrAlgorithmMismatch, label, id)

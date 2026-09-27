@@ -78,6 +78,8 @@ func TestNewCavageVerifierValidationAndDeepCopy(t *testing.T) {
 		{Compatibility: &sigre.CavageVerificationCompatibility{AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmEd25519}}},
 		{Compatibility: &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"": sigre.AlgorithmEd25519}}},
 		{Compatibility: &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"hs2019": sigre.AlgorithmEd25519}}},
+		{Compatibility: &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"rsa-sha1": sigre.AlgorithmEd25519}}},
+		{Compatibility: &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"ecdsa-sha256": sigre.AlgorithmEd25519}}},
 	}
 	for i, options := range invalid {
 		if _, err := sigre.NewCavageVerifier(options); err == nil {
@@ -668,6 +670,19 @@ func TestCavageVerifierAlgorithmPolicy(t *testing.T) {
 			verifyErr: sigre.ErrVerification,
 		},
 		{
+			name:       "hs2019 SHA-256 requires explicit exception during parsing",
+			algorithm:  "hs2019",
+			opts:       &sigre.CavageVerificationOptions{AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256}},
+			parseError: sigre.ErrInvalidSignatureAlgorithm,
+		},
+		{
+			name:      "hs2019 SHA-256 requires explicit exception for trusted key",
+			algorithm: "hs2019",
+			opts:      &sigre.CavageVerificationOptions{AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256, sigre.AlgorithmRSAPKCS1v15SHA512}},
+			key:       rsa256Key,
+			verifyErr: sigre.ErrAlgorithmMismatch,
+		},
+		{
 			name:      "hs2019 SHA-256 explicit exception",
 			algorithm: "hs2019",
 			opts:      &sigre.CavageVerificationOptions{AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256}, Compatibility: &sigre.CavageVerificationCompatibility{AllowHS2019WithSHA256: true}},
@@ -705,6 +720,18 @@ func TestCavageVerifierAlgorithmPolicy(t *testing.T) {
 			assertVerifierPolicyError(t, err, test.verifyErr)
 		})
 	}
+
+	t.Run("legacy label rejects created pseudo-header", func(t *testing.T) {
+		params := verifierPolicyParameters("rsa-sha256", "(request-target) (created)", ",created=1")
+		options := &sigre.CavageVerificationOptions{
+			AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
+			Compatibility: &sigre.CavageVerificationCompatibility{
+				AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
+			},
+		}
+		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), options)
+		assertVerifierPolicyError(t, err, sigre.ErrInvalidSignatureAlgorithm)
+	})
 
 	t.Run("omitted algorithm accepts explicitly allowed SHA-256", func(t *testing.T) {
 		params := verifierPolicyParameters("", "x-test", "")

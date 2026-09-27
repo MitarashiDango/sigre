@@ -6,11 +6,8 @@ import (
 	"crypto/ed25519"
 	"crypto/hmac"
 	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/sha512"
 	"encoding/base64"
 	"fmt"
-	"hash"
 	"math"
 	"net/http"
 	"slices"
@@ -834,7 +831,7 @@ func verifyAsymmetric(key crypto.PublicKey, algorithm algorithmDefinition, sig, 
 }
 
 func verifyRSA(publicKey *rsa.PublicKey, sig, data []byte, hashID crypto.Hash) error {
-	digest, err := hashMessage(hashID, data)
+	digest, err := digestSigningString(hashID, data)
 	if err != nil {
 		return err
 	}
@@ -845,7 +842,7 @@ func verifyRSA(publicKey *rsa.PublicKey, sig, data []byte, hashID crypto.Hash) e
 }
 
 func verifyECDSA(publicKey *ecdsa.PublicKey, sig, data []byte, hashID crypto.Hash) error {
-	digest, err := hashMessage(hashID, data)
+	digest, err := digestSigningString(hashID, data)
 	if err != nil {
 		return err
 	}
@@ -863,38 +860,12 @@ func verifyEd25519(publicKey ed25519.PublicKey, sig, data []byte) error {
 }
 
 func verifyHMAC(secret, sig, data []byte, hashID crypto.Hash) error {
-	hashFunc, err := hmacHash(hashID)
+	mac, err := computeHMAC(hashID, secret, data)
 	if err != nil {
 		return err
 	}
-	mac := hmac.New(hashFunc, secret)
-	mac.Write(data)
-	if !hmac.Equal(sig, mac.Sum(nil)) {
+	if !hmac.Equal(sig, mac) {
 		return fmt.Errorf("%w: HMAC verification failed", ErrVerification)
 	}
 	return nil
-}
-
-func hashMessage(hashID crypto.Hash, data []byte) ([]byte, error) {
-	switch hashID {
-	case crypto.SHA256:
-		digest := sha256.Sum256(data)
-		return digest[:], nil
-	case crypto.SHA512:
-		digest := sha512.Sum512(data)
-		return digest[:], nil
-	default:
-		return nil, fmt.Errorf("unsupported trusted hash %v", hashID)
-	}
-}
-
-func hmacHash(hashID crypto.Hash) (func() hash.Hash, error) {
-	switch hashID {
-	case crypto.SHA256:
-		return sha256.New, nil
-	case crypto.SHA512:
-		return sha512.New, nil
-	default:
-		return nil, fmt.Errorf("unsupported trusted HMAC hash %v", hashID)
-	}
 }

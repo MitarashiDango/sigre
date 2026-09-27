@@ -211,6 +211,7 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 	rsaPrivateKey := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
 	ecdsaPrivateKey := parseECDSAPrivateKey(t, testECDSAPrivateKeyPEM)
 	ed25519PrivateKey := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
+	ed25519PublicKey := ed25519PrivateKey.Public().(ed25519.PublicKey)
 	secret := []byte(testHMACSecret)
 
 	tests := []struct {
@@ -224,6 +225,8 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 		{name: "RSA SHA-512 without primes", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, privateKey: &rsa.PrivateKey{PublicKey: rsaPrivateKey.PublicKey, D: rsaPrivateKey.D}, publicKey: &rsaPrivateKey.PublicKey},
 		{name: "ECDSA SHA-512", algorithm: sigre.AlgorithmECDSASHA512, privateKey: ecdsaPrivateKey, publicKey: &ecdsaPrivateKey.PublicKey},
 		{name: "Ed25519", algorithm: sigre.AlgorithmEd25519, privateKey: ed25519PrivateKey, publicKey: ed25519PrivateKey.Public()},
+		{name: "Ed25519 private key pointer with public key value", algorithm: sigre.AlgorithmEd25519, privateKey: &ed25519PrivateKey, publicKey: ed25519PublicKey},
+		{name: "Ed25519 private and public key pointers", algorithm: sigre.AlgorithmEd25519, privateKey: &ed25519PrivateKey, publicKey: &ed25519PublicKey},
 		{name: "HMAC SHA-512", algorithm: sigre.AlgorithmHMACSHA512, secret: secret},
 	}
 
@@ -241,6 +244,15 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 					}
 					if err != nil {
 						t.Fatalf("request signing failed: %v", err)
+					}
+					if _, ok := tt.privateKey.(*ed25519.PrivateKey); ok {
+						valueRequest := newSignerPolicyRequest(t)
+						if err := signer.SignRequest(valueRequest, fixedSigningKey("active-key", tt.algorithm, ed25519PrivateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
+							t.Fatalf("request signing with a key value failed: %v", err)
+						}
+						if req.Header.Get(sigre.Signature) != valueRequest.Header.Get(sigre.Signature) {
+							t.Fatal("Ed25519 private key pointer and value produced different request signatures")
+						}
 					}
 					req.RequestURI = req.URL.RequestURI()
 					verifier, signature := parseSignerPolicyRequest(t, req, testFixedTime, nil)
@@ -264,6 +276,15 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 				}
 				if err != nil {
 					t.Fatalf("response signing failed: %v", err)
+				}
+				if _, ok := tt.privateKey.(*ed25519.PrivateKey); ok {
+					valueResponse := newSignerPolicyResponse()
+					if err := signer.SignResponse(valueResponse, fixedSigningKey("active-key", tt.algorithm, ed25519PrivateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
+						t.Fatalf("response signing with a key value failed: %v", err)
+					}
+					if res.Header.Get(sigre.Signature) != valueResponse.Header.Get(sigre.Signature) {
+						t.Fatal("Ed25519 private key pointer and value produced different response signatures")
+					}
 				}
 				verifier, signature := parseSignerPolicyResponse(t, res, testFixedTime, nil)
 				if tt.secret != nil {
@@ -405,6 +426,48 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			}
 			if req.Header.Get(sigre.Signature) != "" || strings.HasPrefix(req.Header.Get(sigre.Authorization), "Signature ") {
 				t.Fatal("signer wrote a signature after rejecting the key or placement")
+			}
+		})
+	}
+
+	var nilEd25519PrivateKey ed25519.PrivateKey
+	emptyEd25519PrivateKey := ed25519.PrivateKey{}
+	invalidEd25519PrivateKey := make(ed25519.PrivateKey, ed25519.PrivateKeySize-1)
+	for _, tt := range []struct {
+		name       string
+		algorithm  sigre.AlgorithmID
+		privateKey *ed25519.PrivateKey
+		wantErr    error
+	}{
+		{name: "nil Ed25519 private key pointer", algorithm: sigre.AlgorithmEd25519, wantErr: sigre.ErrMissingPrivateKey},
+		{name: "pointer to nil Ed25519 private key", algorithm: sigre.AlgorithmEd25519, privateKey: &nilEd25519PrivateKey, wantErr: sigre.ErrMissingPrivateKey},
+		{name: "pointer to empty Ed25519 private key", algorithm: sigre.AlgorithmEd25519, privateKey: &emptyEd25519PrivateKey, wantErr: sigre.ErrMissingPrivateKey},
+		{name: "pointer to invalid length Ed25519 private key", algorithm: sigre.AlgorithmEd25519, privateKey: &invalidEd25519PrivateKey, wantErr: sigre.ErrUnsupportedKeyFormat},
+		{name: "nil Ed25519 private key pointer with HMAC AlgorithmID", algorithm: sigre.AlgorithmHMACSHA512, wantErr: sigre.ErrAlgorithmMismatch},
+	} {
+		key := fixedSigningKey("key", tt.algorithm, tt.privateKey)
+		t.Run(tt.name+"/request", func(t *testing.T) {
+			req := newSignerPolicyRequest(t)
+			// DeepEqual cannot compare non-nil functions; body replay is not needed here.
+			req.GetBody = nil
+			before := req.Clone(req.Context())
+			err := sigre.NewCavageSigner().SignRequest(req, key, sigre.CavageSignaturePlacementSignature, nil)
+			assertVerifierPolicyError(t, err, tt.wantErr)
+			if !reflect.DeepEqual(req, before) {
+				t.Fatal("signer modified the request after rejecting the Ed25519 key pointer")
+			}
+		})
+		t.Run(tt.name+"/response", func(t *testing.T) {
+			res := newSignerPolicyResponse()
+			res.Request = newSignerPolicyRequest(t)
+			res.Request.GetBody = nil
+			before := *res
+			before.Header = res.Header.Clone()
+			before.Request = res.Request.Clone(res.Request.Context())
+			err := sigre.NewCavageSigner().SignResponse(res, key, sigre.CavageSignaturePlacementSignature, nil)
+			assertVerifierPolicyError(t, err, tt.wantErr)
+			if !reflect.DeepEqual(res, &before) {
+				t.Fatal("signer modified the response or associated request after rejecting the Ed25519 key pointer")
 			}
 		})
 	}

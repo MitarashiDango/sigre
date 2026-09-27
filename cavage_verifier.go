@@ -147,11 +147,7 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 		trailer:          res.Trailer,
 	}
 	if res.Request != nil {
-		snapshot.method = res.Request.Method
-		// Use the same client-side branch as associatedRequestTarget.
-		if res.Request.RequestURI == "" && snapshot.method == "" {
-			snapshot.method = http.MethodGet
-		}
+		snapshot.method = associatedRequestMethod(res.Request)
 		snapshot.resolveRequestTarget = func() (string, error) {
 			return associatedRequestTarget(res.Request)
 		}
@@ -172,19 +168,20 @@ func (v *CavageVerifier) Verify(signature *CavageSignature, key VerificationKey)
 	if err != nil {
 		return wrapSigreError(err)
 	}
-	if isMissingPublicKey(key.PublicKey) {
+	publicKey := normalizeEd25519PublicKey(key.PublicKey)
+	if isMissingPublicKey(publicKey) {
 		return wrapSigreError(ErrMissingPublicKey)
 	}
 	if algorithm.keyKind == algorithmKeyHMAC {
 		return wrapSigreError(fmt.Errorf("%w: HMAC AlgorithmID must be used with VerifyHMAC", ErrAlgorithmMismatch))
 	}
-	if err := validateVerificationPublicKey(key.PublicKey, algorithm.keyKind); err != nil {
+	if err := validateVerificationPublicKey(publicKey, algorithm.keyKind); err != nil {
 		return wrapSigreError(err)
 	}
 	if err := v.validateTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
 		return wrapSigreError(err)
 	}
-	return wrapSigreError(verifyAsymmetric(key.PublicKey, algorithm, signature.signature, signature.signingString))
+	return wrapSigreError(verifyAsymmetric(publicKey, algorithm, signature.signature, signature.signingString))
 }
 
 // VerifyHMAC checks snapshot with trusted HMAC metadata and a shared secret.
@@ -760,6 +757,17 @@ func (v *CavageVerifier) isAlgorithmAllowed(id AlgorithmID) bool {
 	return ok
 }
 
+func normalizeEd25519PublicKey(key crypto.PublicKey) crypto.PublicKey {
+	publicKey, ok := key.(*ed25519.PublicKey)
+	if !ok {
+		return key
+	}
+	if publicKey == nil {
+		return ed25519.PublicKey(nil)
+	}
+	return *publicKey
+}
+
 func isMissingPublicKey(key crypto.PublicKey) bool {
 	if key == nil {
 		return true
@@ -771,8 +779,6 @@ func isMissingPublicKey(key crypto.PublicKey) bool {
 		return publicKey == nil
 	case ed25519.PublicKey:
 		return len(publicKey) == 0
-	case *ed25519.PublicKey:
-		return publicKey == nil || len(*publicKey) == 0
 	default:
 		return false
 	}
@@ -802,17 +808,12 @@ func validateVerificationPublicKey(key crypto.PublicKey, expected algorithmKeyKi
 			return fmt.Errorf("%w: invalid ECDSA public key", ErrUnsupportedKeyFormat)
 		}
 	case algorithmKeyEd25519:
-		switch publicKey := key.(type) {
-		case ed25519.PublicKey:
-			if len(publicKey) != ed25519.PublicKeySize {
-				return fmt.Errorf("%w: invalid Ed25519 public key length %d", ErrUnsupportedKeyFormat, len(publicKey))
-			}
-		case *ed25519.PublicKey:
-			if len(*publicKey) != ed25519.PublicKeySize {
-				return fmt.Errorf("%w: invalid Ed25519 public key length %d", ErrUnsupportedKeyFormat, len(*publicKey))
-			}
-		default:
+		publicKey, ok := key.(ed25519.PublicKey)
+		if !ok {
 			return fmt.Errorf("%w: AlgorithmID requires Ed25519, public key is %T", ErrAlgorithmMismatch, key)
+		}
+		if len(publicKey) != ed25519.PublicKeySize {
+			return fmt.Errorf("%w: invalid Ed25519 public key length %d", ErrUnsupportedKeyFormat, len(publicKey))
 		}
 	default:
 		return fmt.Errorf("%w: asymmetric verification received a non-public-key AlgorithmID", ErrAlgorithmMismatch)
@@ -827,12 +828,7 @@ func verifyAsymmetric(key crypto.PublicKey, algorithm algorithmDefinition, sig, 
 	case algorithmKeyECDSA:
 		return verifyECDSA(key.(*ecdsa.PublicKey), sig, data, algorithm.hash)
 	case algorithmKeyEd25519:
-		switch publicKey := key.(type) {
-		case ed25519.PublicKey:
-			return verifyEd25519(publicKey, sig, data)
-		case *ed25519.PublicKey:
-			return verifyEd25519(*publicKey, sig, data)
-		}
+		return verifyEd25519(key.(ed25519.PublicKey), sig, data)
 	}
 	return fmt.Errorf("%w: unsupported asymmetric AlgorithmID %d", ErrAlgorithmMismatch, algorithm.id)
 }

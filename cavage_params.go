@@ -28,7 +28,7 @@ type cavageParams struct {
 	Algorithm        string
 	AlgorithmPresent bool
 	// Created and Expires hold parameter text. Time syntax is checked by
-	// CavageVerifier.parse and serializeCavageParams, not parseCavageParams.
+	// CavageVerifier.parse, not parseCavageParams.
 	Created        string
 	CreatedPresent bool
 	Expires        string
@@ -38,31 +38,6 @@ type cavageParams struct {
 }
 
 func serializeCavageParams(p *cavageParams) (string, error) {
-	if p == nil {
-		return "", fmt.Errorf("signature parameters are nil")
-	}
-	if err := validateCavageKeyID(p.KeyID); err != nil {
-		return "", err
-	}
-	if p.Signature == "" {
-		return "", fmt.Errorf("missing required parameter: signature")
-	}
-	if _, err := base64.StdEncoding.Strict().DecodeString(p.Signature); err != nil {
-		return "", fmt.Errorf("invalid 'signature' value: %w", err)
-	}
-	createdPresent := p.CreatedPresent || p.Created != ""
-	if createdPresent {
-		if err := isValidUnixTime(p.Created); err != nil {
-			return "", fmt.Errorf("invalid 'created' value: %w", err)
-		}
-	}
-	expiresPresent := p.ExpiresPresent || p.Expires != ""
-	if expiresPresent {
-		if _, err := parseCavageExpires(p.Expires); err != nil {
-			return "", fmt.Errorf("invalid 'expires' value: %w", err)
-		}
-	}
-
 	var sb strings.Builder
 	if err := appendCavageQuotedString(&sb, "keyId", p.KeyID); err != nil {
 		return "", err
@@ -79,25 +54,19 @@ func serializeCavageParams(p *cavageParams) (string, error) {
 		}
 	}
 
-	if createdPresent {
-		sb.WriteString(",created=")
-		sb.WriteString(p.Created)
+	if p.CreatedPresent || p.Created != "" {
+		if err := appendCavageToken(&sb, "created", p.Created); err != nil {
+			return "", err
+		}
 	}
 
-	if expiresPresent {
-		sb.WriteString(",expires=")
-		sb.WriteString(p.Expires)
+	if p.ExpiresPresent || p.Expires != "" {
+		if err := appendCavageToken(&sb, "expires", p.Expires); err != nil {
+			return "", err
+		}
 	}
 
 	if p.HeadersPresent || len(p.Headers) > 0 {
-		if len(p.Headers) == 0 {
-			return "", fmt.Errorf("'headers' parameter must specify a non-empty value")
-		}
-		for _, h := range p.Headers {
-			if h == "" {
-				return "", fmt.Errorf("'headers' parameter must not contain an empty header name")
-			}
-		}
 		sb.WriteString(",")
 		if err := appendCavageQuotedString(&sb, "headers", strings.Join(p.Headers, " ")); err != nil {
 			return "", err
@@ -105,6 +74,24 @@ func serializeCavageParams(p *cavageParams) (string, error) {
 	}
 
 	return sb.String(), nil
+}
+
+// appendCavageToken writes an unquoted parameter value. The value must be a
+// non-empty token so that the serialized parameter can be parsed again.
+func appendCavageToken(sb *strings.Builder, name, value string) error {
+	if value == "" {
+		return fmt.Errorf("'%s' must be a non-empty token", name)
+	}
+	for i := 0; i < len(value); i++ {
+		if !isCavageTokenByte(value[i]) {
+			return fmt.Errorf("'%s' contains a non-token byte at position %d", name, i)
+		}
+	}
+	sb.WriteString(",")
+	sb.WriteString(name)
+	sb.WriteString("=")
+	sb.WriteString(value)
+	return nil
 }
 
 func appendCavageQuotedString(sb *strings.Builder, name, value string) error {

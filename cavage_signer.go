@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
@@ -181,7 +180,7 @@ func (s *CavageSigner) SignRequestWithHMAC(
 		return wrapSigreError(err)
 	}
 	err = s.signRequestWith(req, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
-		return signHMAC(key.Secret, algorithm.hash, data)
+		return computeHMAC(algorithm.hash, key.Secret, data)
 	})
 	return wrapSigreError(err)
 }
@@ -204,7 +203,7 @@ func (s *CavageSigner) SignResponseWithHMAC(
 		return wrapSigreError(err)
 	}
 	err = s.signResponseWith(res, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
-		return signHMAC(key.Secret, algorithm.hash, data)
+		return computeHMAC(algorithm.hash, key.Secret, data)
 	})
 	return wrapSigreError(err)
 }
@@ -701,13 +700,13 @@ func formatCavageExpires(deadline time.Time) string {
 func signAsymmetric(key crypto.PrivateKey, algorithm algorithmDefinition, data []byte) ([]byte, error) {
 	switch algorithm.keyKind {
 	case algorithmKeyRSA:
-		digest, err := hashSigningString(algorithm.hash, data)
+		digest, err := digestSigningString(algorithm.hash, data)
 		if err != nil {
 			return nil, err
 		}
 		return rsa.SignPKCS1v15(rand.Reader, key.(*rsa.PrivateKey), algorithm.hash, digest)
 	case algorithmKeyECDSA:
-		digest, err := hashSigningString(algorithm.hash, data)
+		digest, err := digestSigningString(algorithm.hash, data)
 		if err != nil {
 			return nil, err
 		}
@@ -716,24 +715,6 @@ func signAsymmetric(key crypto.PrivateKey, algorithm algorithmDefinition, data [
 		return ed25519.Sign(key.(ed25519.PrivateKey), data), nil
 	}
 	return nil, fmt.Errorf("%w: unsupported asymmetric AlgorithmID %d", ErrAlgorithmMismatch, algorithm.id)
-}
-
-func signHMAC(secret []byte, hash crypto.Hash, data []byte) ([]byte, error) {
-	if !hash.Available() {
-		return nil, fmt.Errorf("trusted hash %v is unavailable", hash)
-	}
-	mac := hmac.New(hash.New, secret)
-	mac.Write(data)
-	return mac.Sum(nil), nil
-}
-
-func hashSigningString(hash crypto.Hash, data []byte) ([]byte, error) {
-	if !hash.Available() {
-		return nil, fmt.Errorf("trusted hash %v is unavailable", hash)
-	}
-	h := hash.New()
-	h.Write(data)
-	return h.Sum(nil), nil
 }
 
 func invalidSigningOptions(format string, args ...any) error {

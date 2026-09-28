@@ -4,10 +4,8 @@ import (
 	"crypto"
 	"crypto/sha256"
 	"crypto/subtle"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -414,35 +412,12 @@ func interoperabilityQuotedParameter(t *testing.T, headerValue, name string) str
 
 func loadCavageInteroperabilityPrivateKey(t *testing.T, name string) crypto.PrivateKey {
 	t.Helper()
-	block := loadCavageInteroperabilityPEM(t, name)
-	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		t.Fatalf("failed to parse interoperability private key %q: %v", name, err)
-	}
-	return key
+	return loadTestPrivateKeyFile(t, filepath.Join(cavageInteroperabilityFixtureDirectory, name))
 }
 
 func loadCavageInteroperabilityPublicKey(t *testing.T, name string) crypto.PublicKey {
 	t.Helper()
-	block := loadCavageInteroperabilityPEM(t, name)
-	key, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		t.Fatalf("failed to parse interoperability public key %q: %v", name, err)
-	}
-	return key
-}
-
-func loadCavageInteroperabilityPEM(t *testing.T, name string) *pem.Block {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(cavageInteroperabilityFixtureDirectory, name))
-	if err != nil {
-		t.Fatalf("failed to read interoperability key %q: %v", name, err)
-	}
-	block, rest := pem.Decode(data)
-	if block == nil || len(strings.TrimSpace(string(rest))) != 0 {
-		t.Fatalf("interoperability key %q is not a single PEM block", name)
-	}
-	return block
+	return loadTestPublicKeyFile(t, filepath.Join(cavageInteroperabilityFixtureDirectory, name))
 }
 
 func verifyInteroperabilitySHA256Digest(rawBody []byte, digestHeader string) error {

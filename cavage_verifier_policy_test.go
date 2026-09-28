@@ -54,17 +54,6 @@ func parseVerifierPolicyRequest(req *http.Request, opts *sigre.CavageVerificatio
 	return verifier, signature, err
 }
 
-func assertVerifierPolicyError(t *testing.T, err, sentinel error) {
-	t.Helper()
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("error = %v, want %v", err, sentinel)
-	}
-	var packageError *sigre.SigreError
-	if !errors.As(err, &packageError) {
-		t.Fatalf("error %v is not wrapped by *SigreError", err)
-	}
-}
-
 func TestNewCavageVerifierValidationAndDeepCopy(t *testing.T) {
 	invalid := []*sigre.CavageVerificationOptions{
 		{RequestSignatureSource: 255},
@@ -86,7 +75,7 @@ func TestNewCavageVerifierValidationAndDeepCopy(t *testing.T) {
 		if _, err := sigre.NewCavageVerifier(options); err == nil {
 			t.Fatalf("invalid options case %d succeeded", i)
 		} else {
-			assertVerifierPolicyError(t, err, sigre.ErrInvalidVerificationOptions)
+			assertPackageError(t, err, sigre.ErrInvalidVerificationOptions)
 		}
 	}
 
@@ -130,9 +119,9 @@ func TestNewCavageVerifierValidationAndDeepCopy(t *testing.T) {
 	if nowCalls != 0 {
 		t.Fatalf("time-independent parse called Now %d times", nowCalls)
 	}
-	rsaPublicKey := parseRSAPublicKey(t, testRSAPublicKeyPEM)
+	rsaPublicKey := fixedRSAPublicKey(t)
 	err = verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, rsaPublicKey))
-	assertVerifierPolicyError(t, err, sigre.ErrVerification)
+	assertPackageError(t, err, sigre.ErrVerification)
 
 	future := rawVerifierPolicyRequest(verifierPolicyParameters("hs2019", "(created) x-test", ",created=101"))
 	if _, err := verifier.ParseRequest(future); err != nil {
@@ -296,7 +285,7 @@ func TestCavageVerifierParseRequestEnforcesHeaderRequirements(t *testing.T) {
 			req := rawVerifierPolicyRequest(params)
 			test.opts.Now = func() time.Time { return time.Unix(100, 0) }
 			_, _, err := parseVerifierPolicyRequest(req, test.opts)
-			assertVerifierPolicyError(t, err, sigre.ErrRequiredHeaderMissing)
+			assertPackageError(t, err, sigre.ErrRequiredHeaderMissing)
 		})
 	}
 }
@@ -304,7 +293,7 @@ func TestCavageVerifierParseRequestEnforcesHeaderRequirements(t *testing.T) {
 func TestCavageVerifierSignedHeaderMissing(t *testing.T) {
 	req := rawVerifierPolicyRequest(verifierPolicyParameters("hs2019", "x-missing", ""))
 	_, _, err := parseVerifierPolicyRequest(req, nil)
-	assertVerifierPolicyError(t, err, sigre.ErrSignedHeaderMissing)
+	assertPackageError(t, err, sigre.ErrSignedHeaderMissing)
 }
 
 func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
@@ -320,7 +309,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			}
 			nowCalls := 0
 			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { nowCalls++; return time.Unix(0, 0) }})
-			assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
+			assertPackageError(t, err, sigre.ErrInvalidCreationTime)
 			if nowCalls != 0 {
 				t.Fatalf("invalid created called Now %d times", nowCalls)
 			}
@@ -341,7 +330,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			nowCalls := 0
 			params := verifierPolicyParameters("hs2019", "x-test", parameter)
 			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { nowCalls++; return time.Unix(0, 0) }})
-			assertVerifierPolicyError(t, err, sigre.ErrInvalidExpirationTime)
+			assertPackageError(t, err, sigre.ErrInvalidExpirationTime)
 			if nowCalls != 0 {
 				t.Fatalf("invalid expires called Now %d times", nowCalls)
 			}
@@ -352,7 +341,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			nowCalls := 0
 			params := verifierPolicyParameters("hs2019", "x-test", ",expires="+value)
 			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { nowCalls++; return time.Unix(0, 0) }})
-			assertVerifierPolicyError(t, err, sigre.ErrInvalidExpirationTime)
+			assertPackageError(t, err, sigre.ErrInvalidExpirationTime)
 			if nowCalls != 0 {
 				t.Fatalf("invalid expires called Now %d times", nowCalls)
 			}
@@ -362,12 +351,12 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 	t.Run("missing signed created", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "(created) x-test", "")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
+		assertPackageError(t, err, sigre.ErrInvalidCreationTime)
 	})
 	t.Run("missing signed expires", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "(expires) x-test", "")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidExpirationTime)
+		assertPackageError(t, err, sigre.ErrInvalidExpirationTime)
 	})
 	t.Run("fractional expires inclusive boundary", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "(expires) x-test", ",expires=100.5")
@@ -382,7 +371,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			t.Run(test.name, func(t *testing.T) {
 				_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { return test.now }})
 				if test.wantErr != nil {
-					assertVerifierPolicyError(t, err, test.wantErr)
+					assertPackageError(t, err, test.wantErr)
 				} else if err != nil {
 					t.Fatalf("error = %v, want %v", err, test.wantErr)
 				}
@@ -432,7 +421,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(createdMaximum), &sigre.CavageVerificationOptions{
 			Now: func() time.Time { return now },
 		})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
+		assertPackageError(t, err, sigre.ErrInvalidCreationTime)
 
 		expiresMaximum := verifierPolicyParameters("hs2019", "(expires) x-test", ",expires=9223371974719179007")
 		_, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(expiresMaximum), &sigre.CavageVerificationOptions{
@@ -459,7 +448,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 			MaxSignatureAge: maximumAge,
 			Now:             func() time.Time { return time.Unix(10_000_000_000, 0) },
 		})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
+		assertPackageError(t, err, sigre.ErrInvalidCreationTime)
 	})
 	t.Run("inclusive created age and skew", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "(created) x-test", ",created=100")
@@ -472,7 +461,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 		}
 		options.Now = func() time.Time { return time.Unix(101, 1) }
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), options)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
+		assertPackageError(t, err, sigre.ErrInvalidCreationTime)
 
 		future := verifierPolicyParameters("hs2019", "(created) x-test", ",created=101")
 		options = &sigre.CavageVerificationOptions{
@@ -494,7 +483,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 		}
 		options.Now = func() time.Time { return time.Unix(101, 1) }
 		_, _, err := parseVerifierPolicyRequest(req, options)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
+		assertPackageError(t, err, sigre.ErrInvalidDate)
 	})
 	t.Run("Date count and syntax fail before reading Now", func(t *testing.T) {
 		for _, test := range []struct {
@@ -513,7 +502,7 @@ func TestCavageVerifierTimeSyntaxAndBoundaries(t *testing.T) {
 					MaxDateAge: time.Second,
 					Now:        func() time.Time { nowCalls++; return time.Unix(100, 0) },
 				})
-				assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
+				assertPackageError(t, err, sigre.ErrInvalidDate)
 				if nowCalls != 0 {
 					t.Fatalf("invalid Date called Now %d times", nowCalls)
 				}
@@ -618,7 +607,7 @@ func TestCavageVerifierNowCallContract(t *testing.T) {
 			t.Fatalf("ParseRequest() called Now %d times, want 1", calls)
 		}
 		err = verifier.VerifyHMAC(signature, fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, []byte("secret")))
-		assertVerifierPolicyError(t, err, sigre.ErrVerification)
+		assertPackageError(t, err, sigre.ErrVerification)
 		if calls != 1 {
 			t.Fatalf("VerifyHMAC() called Now; total calls = %d", calls)
 		}
@@ -638,7 +627,7 @@ func TestCavageVerifierNowCallContract(t *testing.T) {
 }
 
 func TestCavageVerifierAlgorithmPolicy(t *testing.T) {
-	rsaPublicKey := parseRSAPublicKey(t, testRSAPublicKeyPEM)
+	rsaPublicKey := fixedRSAPublicKey(t)
 	rsa256Key := fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA256, rsaPublicKey)
 	rsa512Key := fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, rsaPublicKey)
 
@@ -711,14 +700,14 @@ func TestCavageVerifierAlgorithmPolicy(t *testing.T) {
 			params := verifierPolicyParameters(test.algorithm, "x-test", "")
 			verifier, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), test.opts)
 			if test.parseError != nil {
-				assertVerifierPolicyError(t, err, test.parseError)
+				assertPackageError(t, err, test.parseError)
 				return
 			}
 			if err != nil {
 				t.Fatalf("ParseRequest() failed: %v", err)
 			}
 			err = verifier.Verify(signature, test.key)
-			assertVerifierPolicyError(t, err, test.verifyErr)
+			assertPackageError(t, err, test.verifyErr)
 		})
 	}
 
@@ -731,7 +720,7 @@ func TestCavageVerifierAlgorithmPolicy(t *testing.T) {
 			},
 		}
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), options)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidSignatureAlgorithm)
+		assertPackageError(t, err, sigre.ErrInvalidSignatureAlgorithm)
 	})
 
 	t.Run("omitted algorithm accepts explicitly allowed SHA-256", func(t *testing.T) {
@@ -742,12 +731,12 @@ func TestCavageVerifierAlgorithmPolicy(t *testing.T) {
 			t.Fatalf("ParseRequest() failed: %v", err)
 		}
 		err = verifier.Verify(signature, rsa256Key)
-		assertVerifierPolicyError(t, err, sigre.ErrVerification)
+		assertPackageError(t, err, sigre.ErrVerification)
 	})
 	t.Run("RequireAlgorithm controls omission", func(t *testing.T) {
 		params := verifierPolicyParameters("", "x-test", "")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{RequireAlgorithm: true})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidSignatureAlgorithm)
+		assertPackageError(t, err, sigre.ErrInvalidSignatureAlgorithm)
 	})
 }
 
@@ -757,30 +746,30 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRequest() failed: %v", err)
 	}
-	rsaPublicKey := parseRSAPublicKey(t, testRSAPublicKeyPEM)
+	rsaPublicKey := fixedRSAPublicKey(t)
 	ecdsaPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("failed to generate ECDSA key: %v", err)
 	}
 
 	var zeroVerifier sigre.CavageVerifier
-	assertVerifierPolicyError(t, zeroVerifier.Verify(signature, sigre.VerificationKey{}), sigre.ErrInvalidVerificationOptions)
+	assertPackageError(t, zeroVerifier.Verify(signature, sigre.VerificationKey{}), sigre.ErrInvalidVerificationOptions)
 	var nilVerifier *sigre.CavageVerifier
-	assertVerifierPolicyError(t, nilVerifier.Verify(signature, sigre.VerificationKey{}), sigre.ErrInvalidVerificationOptions)
-	assertVerifierPolicyError(t, verifier.Verify(nil, sigre.VerificationKey{}), sigre.ErrInvalidHTTPMessage)
-	assertVerifierPolicyError(t, verifier.Verify(&sigre.CavageSignature{}, sigre.VerificationKey{}), sigre.ErrInvalidHTTPMessage)
+	assertPackageError(t, nilVerifier.Verify(signature, sigre.VerificationKey{}), sigre.ErrInvalidVerificationOptions)
+	assertPackageError(t, verifier.Verify(nil, sigre.VerificationKey{}), sigre.ErrInvalidHTTPMessage)
+	assertPackageError(t, verifier.Verify(&sigre.CavageSignature{}, sigre.VerificationKey{}), sigre.ErrInvalidHTTPMessage)
 	otherVerifier, err := sigre.NewCavageVerifier(nil)
 	if err != nil {
 		t.Fatalf("NewCavageVerifier() failed: %v", err)
 	}
-	assertVerifierPolicyError(t, otherVerifier.Verify(signature, sigre.VerificationKey{}), sigre.ErrInvalidHTTPMessage)
+	assertPackageError(t, otherVerifier.Verify(signature, sigre.VerificationKey{}), sigre.ErrInvalidHTTPMessage)
 
-	assertVerifierPolicyError(t, verifier.Verify(signature, sigre.VerificationKey{}), sigre.ErrInvalidKeyMetadata)
-	assertVerifierPolicyError(t, verifier.Verify(signature, fixedPublicVerificationKey("wrong", sigre.AlgorithmRSAPKCS1v15SHA512, nil)), sigre.ErrKeyIDMismatch)
-	assertVerifierPolicyError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, nil)), sigre.ErrMissingPublicKey)
-	assertVerifierPolicyError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, nil)), sigre.ErrMissingPublicKey)
-	assertVerifierPolicyError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, rsaPublicKey)), sigre.ErrAlgorithmMismatch)
-	assertVerifierPolicyError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &ecdsaPrivateKey.PublicKey)), sigre.ErrAlgorithmMismatch)
+	assertPackageError(t, verifier.Verify(signature, sigre.VerificationKey{}), sigre.ErrInvalidKeyMetadata)
+	assertPackageError(t, verifier.Verify(signature, fixedPublicVerificationKey("wrong", sigre.AlgorithmRSAPKCS1v15SHA512, nil)), sigre.ErrKeyIDMismatch)
+	assertPackageError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, nil)), sigre.ErrMissingPublicKey)
+	assertPackageError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, nil)), sigre.ErrMissingPublicKey)
+	assertPackageError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, rsaPublicKey)), sigre.ErrAlgorithmMismatch)
+	assertPackageError(t, verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &ecdsaPrivateKey.PublicKey)), sigre.ErrAlgorithmMismatch)
 
 	var nilEd25519PublicKey ed25519.PublicKey
 	emptyEd25519PublicKey := ed25519.PublicKey{}
@@ -799,7 +788,7 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			key := fixedPublicVerificationKey(verifierPolicyKeyID, tt.algorithm, tt.publicKey)
-			assertVerifierPolicyError(t, verifier.Verify(signature, key), tt.wantErr)
+			assertPackageError(t, verifier.Verify(signature, key), tt.wantErr)
 		})
 	}
 
@@ -809,9 +798,9 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restricted ParseRequest() failed: %v", err)
 	}
-	assertVerifierPolicyError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &ecdsaPrivateKey.PublicKey)), sigre.ErrAlgorithmMismatch)
-	assertVerifierPolicyError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &rsa.PublicKey{})), sigre.ErrUnsupportedKeyFormat)
-	assertVerifierPolicyError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, rsaPublicKey)), sigre.ErrInvalidSignatureAlgorithm)
+	assertPackageError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &ecdsaPrivateKey.PublicKey)), sigre.ErrAlgorithmMismatch)
+	assertPackageError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, &rsa.PublicKey{})), sigre.ErrUnsupportedKeyFormat)
+	assertPackageError(t, restrictedVerifier.Verify(restrictedSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, rsaPublicKey)), sigre.ErrInvalidSignatureAlgorithm)
 
 	customParams := *elliptic.P256().Params()
 	customParams.Name = "custom-P256"
@@ -827,8 +816,8 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			key := fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, tt.key)
-			assertVerifierPolicyError(t, verifier.Verify(signature, key), sigre.ErrUnsupportedKeyFormat)
-			assertVerifierPolicyError(t, restrictedVerifier.Verify(restrictedSignature, key), sigre.ErrUnsupportedKeyFormat)
+			assertPackageError(t, verifier.Verify(signature, key), sigre.ErrUnsupportedKeyFormat)
+			assertPackageError(t, restrictedVerifier.Verify(restrictedSignature, key), sigre.ErrUnsupportedKeyFormat)
 		})
 	}
 
@@ -848,27 +837,27 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 			t.Fatalf("failed to generate another ECDSA key: %v", err)
 		}
 		err = ecdsaVerifier.Verify(ecdsaSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, &otherPrivateKey.PublicKey))
-		assertVerifierPolicyError(t, err, sigre.ErrVerification)
+		assertPackageError(t, err, sigre.ErrVerification)
 	})
 
 	hmacVerifier, hmacSignature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
 	if err != nil {
 		t.Fatalf("ParseRequest() failed: %v", err)
 	}
-	assertVerifierPolicyError(t, hmacVerifier.VerifyHMAC(hmacSignature, sigre.HMACVerificationKey{}), sigre.ErrInvalidKeyMetadata)
-	assertVerifierPolicyError(t, hmacVerifier.VerifyHMAC(hmacSignature, fixedHMACVerificationKey("wrong", sigre.AlgorithmHMACSHA512, nil)), sigre.ErrKeyIDMismatch)
-	assertVerifierPolicyError(t, hmacVerifier.VerifyHMAC(hmacSignature, fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, nil)), sigre.ErrMissingSharedSecret)
-	assertVerifierPolicyError(t, hmacVerifier.VerifyHMAC(hmacSignature, fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, nil)), sigre.ErrMissingSharedSecret)
+	assertPackageError(t, hmacVerifier.VerifyHMAC(hmacSignature, sigre.HMACVerificationKey{}), sigre.ErrInvalidKeyMetadata)
+	assertPackageError(t, hmacVerifier.VerifyHMAC(hmacSignature, fixedHMACVerificationKey("wrong", sigre.AlgorithmHMACSHA512, nil)), sigre.ErrKeyIDMismatch)
+	assertPackageError(t, hmacVerifier.VerifyHMAC(hmacSignature, fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, nil)), sigre.ErrMissingSharedSecret)
+	assertPackageError(t, hmacVerifier.VerifyHMAC(hmacSignature, fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, nil)), sigre.ErrMissingSharedSecret)
 }
 
 func TestCavageVerifierErrorPriority(t *testing.T) {
 	t.Run("constructor before nil message", func(t *testing.T) {
 		var verifier sigre.CavageVerifier
 		_, err := verifier.ParseRequest(nil)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidVerificationOptions)
+		assertPackageError(t, err, sigre.ErrInvalidVerificationOptions)
 		var nilVerifier *sigre.CavageVerifier
 		_, err = nilVerifier.ParseResponse(nil)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidVerificationOptions)
+		assertPackageError(t, err, sigre.ErrInvalidVerificationOptions)
 	})
 	t.Run("source conflict before malformed parameters", func(t *testing.T) {
 		verifier, err := sigre.NewCavageVerifier(&sigre.CavageVerificationOptions{RequestSignatureSource: sigre.CavageRequestSignatureSourceSignatureOrAuthorization})
@@ -878,27 +867,27 @@ func TestCavageVerifierErrorPriority(t *testing.T) {
 		req := rawVerifierPolicyRequest("malformed")
 		req.Header.Set(sigre.Authorization, "Signature malformed")
 		_, err = verifier.ParseRequest(req)
-		assertVerifierPolicyError(t, err, sigre.ErrSignatureSourceConflict)
+		assertPackageError(t, err, sigre.ErrSignatureSourceConflict)
 	})
 	t.Run("created syntax before expires syntax", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "x-test", ",created=bad,expires=bad")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
+		assertPackageError(t, err, sigre.ErrInvalidCreationTime)
 	})
 	t.Run("required header before missing pseudo parameter", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "(created) x-test", "")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{RequiredHeaders: []string{"digest"}})
-		assertVerifierPolicyError(t, err, sigre.ErrRequiredHeaderMissing)
+		assertPackageError(t, err, sigre.ErrRequiredHeaderMissing)
 	})
 	t.Run("pseudo parameter before algorithm", func(t *testing.T) {
 		params := verifierPolicyParameters("invalid", "(created) x-test", "")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
+		assertPackageError(t, err, sigre.ErrInvalidCreationTime)
 	})
 	t.Run("algorithm before signed header", func(t *testing.T) {
 		params := verifierPolicyParameters("invalid", "x-missing", "")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidSignatureAlgorithm)
+		assertPackageError(t, err, sigre.ErrInvalidSignatureAlgorithm)
 	})
 	t.Run("signed header before HTTP message", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "x-missing (request-target)", "")
@@ -906,28 +895,28 @@ func TestCavageVerifierErrorPriority(t *testing.T) {
 		req.Method = ""
 		req.RequestURI = ""
 		_, _, err := parseVerifierPolicyRequest(req, nil)
-		assertVerifierPolicyError(t, err, sigre.ErrSignedHeaderMissing)
+		assertPackageError(t, err, sigre.ErrSignedHeaderMissing)
 	})
 	t.Run("missing Date before missing signed header", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "x-missing date", "")
 		req := rawVerifierPolicyRequest(params)
 		req.Header.Del("Date")
 		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: time.Second})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
+		assertPackageError(t, err, sigre.ErrInvalidDate)
 	})
 	t.Run("multiple Date values before missing signed header", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "x-missing date", "")
 		req := rawVerifierPolicyRequest(params)
 		req.Header.Add("Date", req.Header.Get("Date"))
 		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: time.Second})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
+		assertPackageError(t, err, sigre.ErrInvalidDate)
 	})
 	t.Run("missing Date with MaxDateAge disabled", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "date", "")
 		req := rawVerifierPolicyRequest(params)
 		req.Header.Del("Date")
 		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: 0})
-		assertVerifierPolicyError(t, err, sigre.ErrSignedHeaderMissing)
+		assertPackageError(t, err, sigre.ErrSignedHeaderMissing)
 	})
 	t.Run("Date syntax before HTTP message", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "(request-target) date", "")
@@ -935,19 +924,19 @@ func TestCavageVerifierErrorPriority(t *testing.T) {
 		req.Method = ""
 		req.Header.Set("Date", "invalid")
 		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: time.Second})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
+		assertPackageError(t, err, sigre.ErrInvalidDate)
 	})
 	t.Run("Date syntax before created policy", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "date x-test", ",created=101")
 		req := rawVerifierPolicyRequest(params)
 		req.Header.Set("Date", "invalid")
 		_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{MaxDateAge: time.Second, Now: func() time.Time { return time.Unix(100, 0) }})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidDate)
+		assertPackageError(t, err, sigre.ErrInvalidDate)
 	})
 	t.Run("created policy before expiration", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "x-test", ",created=101,expires=99")
 		_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{Now: func() time.Time { return time.Unix(100, 0) }})
-		assertVerifierPolicyError(t, err, sigre.ErrInvalidCreationTime)
+		assertPackageError(t, err, sigre.ErrInvalidCreationTime)
 	})
 	t.Run("expiration before Date range", func(t *testing.T) {
 		params := verifierPolicyParameters("hs2019", "(expires) date x-test", ",expires=199")
@@ -955,7 +944,7 @@ func TestCavageVerifierErrorPriority(t *testing.T) {
 			MaxDateAge: time.Second,
 			Now:        func() time.Time { return time.Unix(200, 0) },
 		})
-		assertVerifierPolicyError(t, err, sigre.ErrSignatureExpired)
+		assertPackageError(t, err, sigre.ErrSignatureExpired)
 	})
 }
 
@@ -1013,7 +1002,7 @@ func TestCavageVerifierExpiresDecimalBoundary(t *testing.T) {
 						Now: func() time.Time { return test.now },
 					})
 					if test.wantErr != nil {
-						assertVerifierPolicyError(t, err, test.wantErr)
+						assertPackageError(t, err, test.wantErr)
 						return
 					}
 					if err != nil {
@@ -1058,7 +1047,7 @@ func TestCavageVerifierRejectsInvalidRSAFormat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRequest() failed: %v", err)
 	}
-	validRSA := parseRSAPublicKey(t, testRSAPublicKeyPEM)
+	validRSA := fixedRSAPublicKey(t)
 	for _, test := range []struct {
 		name string
 		key  *rsa.PublicKey
@@ -1068,7 +1057,7 @@ func TestCavageVerifierRejectsInvalidRSAFormat(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA512, test.key))
-			assertVerifierPolicyError(t, err, sigre.ErrUnsupportedKeyFormat)
+			assertPackageError(t, err, sigre.ErrUnsupportedKeyFormat)
 		})
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
-	"encoding/pem"
 	"errors"
 	"net/http"
 	"strings"
@@ -80,12 +79,9 @@ const testHMACSecret = "test-hmac-secret-key-for-sigre-testing"
 
 var testFixedTime = time.Date(2024, 6, 8, 10, 30, 0, 0, time.UTC)
 
-func parseRSAPrivateKey(t *testing.T, pemStr string) *rsa.PrivateKey {
+func fixedRSAPrivateKey(t *testing.T) *rsa.PrivateKey {
 	t.Helper()
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		t.Fatal("failed to decode PEM block")
-	}
+	block := decodeTestPEM(t, []byte(testRSAPrivateKeyPEM), "testRSAPrivateKeyPEM")
 	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
 		t.Fatalf("failed to parse RSA private key: %v", err)
@@ -93,12 +89,9 @@ func parseRSAPrivateKey(t *testing.T, pemStr string) *rsa.PrivateKey {
 	return key
 }
 
-func parseRSAPublicKey(t *testing.T, pemStr string) *rsa.PublicKey {
+func fixedRSAPublicKey(t *testing.T) *rsa.PublicKey {
 	t.Helper()
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		t.Fatal("failed to decode PEM block")
-	}
+	block := decodeTestPEM(t, []byte(testRSAPublicKeyPEM), "testRSAPublicKeyPEM")
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		t.Fatalf("failed to parse RSA public key: %v", err)
@@ -110,12 +103,9 @@ func parseRSAPublicKey(t *testing.T, pemStr string) *rsa.PublicKey {
 	return rsaPub
 }
 
-func parseECDSAPrivateKey(t *testing.T, pemStr string) *ecdsa.PrivateKey {
+func fixedECDSAPrivateKey(t *testing.T) *ecdsa.PrivateKey {
 	t.Helper()
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		t.Fatal("failed to decode PEM block")
-	}
+	block := decodeTestPEM(t, []byte(testECDSAPrivateKeyPEM), "testECDSAPrivateKeyPEM")
 	key, err := x509.ParseECPrivateKey(block.Bytes)
 	if err != nil {
 		t.Fatalf("failed to parse ECDSA private key: %v", err)
@@ -123,12 +113,9 @@ func parseECDSAPrivateKey(t *testing.T, pemStr string) *ecdsa.PrivateKey {
 	return key
 }
 
-func parseECDSAPublicKey(t *testing.T, pemStr string) *ecdsa.PublicKey {
+func fixedECDSAPublicKey(t *testing.T) *ecdsa.PublicKey {
 	t.Helper()
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		t.Fatal("failed to decode PEM block")
-	}
+	block := decodeTestPEM(t, []byte(testECDSAPublicKeyPEM), "testECDSAPublicKeyPEM")
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		t.Fatalf("failed to parse ECDSA public key: %v", err)
@@ -140,12 +127,9 @@ func parseECDSAPublicKey(t *testing.T, pemStr string) *ecdsa.PublicKey {
 	return ecPub
 }
 
-func parseEd25519PrivateKey(t *testing.T, pemStr string) ed25519.PrivateKey {
+func fixedEd25519PrivateKey(t *testing.T) ed25519.PrivateKey {
 	t.Helper()
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		t.Fatal("failed to decode PEM block")
-	}
+	block := decodeTestPEM(t, []byte(testEd25519PrivateKeyPEM), "testEd25519PrivateKeyPEM")
 	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
 		t.Fatalf("failed to parse Ed25519 private key: %v", err)
@@ -157,12 +141,9 @@ func parseEd25519PrivateKey(t *testing.T, pemStr string) ed25519.PrivateKey {
 	return edKey
 }
 
-func parseEd25519PublicKey(t *testing.T, pemStr string) ed25519.PublicKey {
+func fixedEd25519PublicKey(t *testing.T) ed25519.PublicKey {
 	t.Helper()
-	block, _ := pem.Decode([]byte(pemStr))
-	if block == nil {
-		t.Fatal("failed to decode PEM block")
-	}
+	block := decodeTestPEM(t, []byte(testEd25519PublicKeyPEM), "testEd25519PublicKeyPEM")
 	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
 	if err != nil {
 		t.Fatalf("failed to parse Ed25519 public key: %v", err)
@@ -192,10 +173,10 @@ func newTestRequest(t *testing.T, method, urlStr, body string) *http.Request {
 	return req
 }
 
-func setStandardHeaders(t *testing.T, header http.Header, host string, includeDigest bool) {
+func setStandardHeaders(t *testing.T, header http.Header, includeDigest bool) {
 	t.Helper()
 	header.Set("Date", testDateHeader)
-	header.Set("Host", host)
+	header.Set("Host", "example.com")
 	if includeDigest {
 		header.Set("Digest", testBodyDigest)
 	}
@@ -311,12 +292,12 @@ func fixedSigningOptions(
 }
 
 func TestFixedKeySignAndVerify(t *testing.T) {
-	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
-	ecPriv := parseECDSAPrivateKey(t, testECDSAPrivateKeyPEM)
-	ecPub := parseECDSAPublicKey(t, testECDSAPublicKeyPEM)
-	edPriv := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
-	edPub := parseEd25519PublicKey(t, testEd25519PublicKeyPEM)
+	rsaPriv := fixedRSAPrivateKey(t)
+	rsaPub := fixedRSAPublicKey(t)
+	ecPriv := fixedECDSAPrivateKey(t)
+	ecPub := fixedECDSAPublicKey(t)
+	edPriv := fixedEd25519PrivateKey(t)
+	edPub := fixedEd25519PublicKey(t)
 	hmacSecret := []byte(testHMACSecret)
 
 	nowFunc := func() time.Time { return testFixedTime }
@@ -333,7 +314,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("RSA-SHA256: sign with fixed key and verify with same public key", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		err := signer.SignRequest(
 			req,
@@ -353,7 +334,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("RSA-SHA512: sign with fixed key and verify with same public key", func(t *testing.T) {
 		req := newTestRequest(t, "PUT", "https://example.com/update", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		err := signer.SignRequest(
 			req,
@@ -373,7 +354,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("ECDSA-SHA256: sign with fixed key and verify with same public key", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/ecdsa", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		err := signer.SignRequest(
 			req,
@@ -393,7 +374,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("Ed25519: sign with fixed key and verify with same public key", func(t *testing.T) {
 		req := newTestRequest(t, "GET", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		err := signer.SignRequest(
 			req,
@@ -413,7 +394,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("HMAC-SHA256: sign with fixed secret and verify with same secret", func(t *testing.T) {
 		req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		err := signer.SignRequestWithHMAC(
 			req,
@@ -433,7 +414,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("RSA-SHA256: verification fails with different RSA public key", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/foo", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		err := signer.SignRequest(
 			req,
@@ -453,7 +434,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("Ed25519: verification fails with different Ed25519 public key", func(t *testing.T) {
 		req := newTestRequest(t, "GET", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		err := signer.SignRequest(
 			req,
@@ -473,7 +454,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("HMAC-SHA256: verification fails with different secret", func(t *testing.T) {
 		req := newTestRequest(t, "DELETE", "https://example.com/resource/123", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		err := signer.SignRequestWithHMAC(
 			req,
@@ -493,7 +474,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("Ed25519: sign and verify with (created) pseudo-header", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/api/data", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		err := signer.SignRequest(
 			req,
@@ -513,7 +494,7 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 	t.Run("RSA-SHA256: sign and verify with Authorization header format", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/auth", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		err := signer.SignRequest(
 			req,
@@ -536,8 +517,8 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 // Precomputed signature values verify compatibility without using the signer.
 func TestVerifyPrecomputedSignatures(t *testing.T) {
-	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
-	edPub := parseEd25519PublicKey(t, testEd25519PublicKeyPEM)
+	rsaPub := fixedRSAPublicKey(t)
+	edPub := fixedEd25519PublicKey(t)
 
 	nowFunc := func() time.Time { return testFixedTime }
 
@@ -714,8 +695,8 @@ func TestVerifyPrecomputedSignatures(t *testing.T) {
 }
 
 func TestDeterministicSignatures(t *testing.T) {
-	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	edPriv := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
+	rsaPriv := fixedRSAPrivateKey(t)
+	edPriv := fixedEd25519PrivateKey(t)
 
 	nowFunc := func() time.Time { return testFixedTime }
 
@@ -723,7 +704,7 @@ func TestDeterministicSignatures(t *testing.T) {
 		signatures := make([]string, 3)
 		for i := range signatures {
 			req := newTestRequest(t, "POST", "https://example.com/foo?param=value&pet=dog", testBodyJSON)
-			setStandardHeaders(t, req.Header, "example.com", true)
+			setStandardHeaders(t, req.Header, true)
 
 			signer := &sigre.CavageSigner{Now: nowFunc}
 			err := signer.SignRequest(
@@ -749,7 +730,7 @@ func TestDeterministicSignatures(t *testing.T) {
 		signatures := make([]string, 3)
 		for i := range signatures {
 			req := newTestRequest(t, "GET", "https://example.com/", "")
-			setStandardHeaders(t, req.Header, "example.com", false)
+			setStandardHeaders(t, req.Header, false)
 
 			signer := &sigre.CavageSigner{Now: nowFunc}
 			err := signer.SignRequest(
@@ -773,9 +754,9 @@ func TestDeterministicSignatures(t *testing.T) {
 }
 
 func TestKeyTypeMismatch(t *testing.T) {
-	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	ecPub := parseECDSAPublicKey(t, testECDSAPublicKeyPEM)
-	edPub := parseEd25519PublicKey(t, testEd25519PublicKeyPEM)
+	rsaPriv := fixedRSAPrivateKey(t)
+	ecPub := fixedECDSAPublicKey(t)
+	edPub := fixedEd25519PublicKey(t)
 
 	nowFunc := func() time.Time { return testFixedTime }
 
@@ -796,7 +777,7 @@ func TestKeyTypeMismatch(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := newTestRequest(t, "POST", "https://example.com/foo", testBodyJSON)
-			setStandardHeaders(t, req.Header, "example.com", true)
+			setStandardHeaders(t, req.Header, true)
 
 			signer := &sigre.CavageSigner{Now: nowFunc}
 			err := signer.SignRequest(
@@ -826,16 +807,16 @@ func TestKeyTypeMismatch(t *testing.T) {
 }
 
 func TestFixedKeyWithCavageVerifier(t *testing.T) {
-	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
-	edPriv := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
-	edPub := parseEd25519PublicKey(t, testEd25519PublicKeyPEM)
+	rsaPriv := fixedRSAPrivateKey(t)
+	rsaPub := fixedRSAPublicKey(t)
+	edPriv := fixedEd25519PrivateKey(t)
+	edPub := fixedEd25519PublicKey(t)
 
 	nowFunc := func() time.Time { return testFixedTime }
 
 	t.Run("ParseRequest: RSA-SHA256", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/generic", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -859,7 +840,7 @@ func TestFixedKeyWithCavageVerifier(t *testing.T) {
 
 	t.Run("ParseRequest: Ed25519", func(t *testing.T) {
 		req := newTestRequest(t, "GET", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -925,8 +906,8 @@ func TestFixedKeyWithCavageVerifier(t *testing.T) {
 }
 
 func TestFixedKeyResponseSignAndVerify(t *testing.T) {
-	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
+	rsaPriv := fixedRSAPrivateKey(t)
+	rsaPub := fixedRSAPublicKey(t)
 
 	nowFunc := func() time.Time { return testFixedTime }
 
@@ -1076,16 +1057,16 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 }
 
 func TestFixedKeyCavageVerificationOptions(t *testing.T) {
-	rsaPriv := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	rsaPub := parseRSAPublicKey(t, testRSAPublicKeyPEM)
-	edPriv := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
-	edPub := parseEd25519PublicKey(t, testEd25519PublicKeyPEM)
+	rsaPriv := fixedRSAPrivateKey(t)
+	rsaPub := fixedRSAPublicKey(t)
+	edPriv := fixedEd25519PrivateKey(t)
+	edPub := fixedEd25519PublicKey(t)
 
 	nowFunc := func() time.Time { return testFixedTime }
 
 	t.Run("RequiredHeaders: verification succeeds when signed headers satisfy requirements", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -1109,7 +1090,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("RequiredHeaders: verification fails when required header is not in signed headers", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -1136,7 +1117,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("MaxSignatureAge: verification succeeds at the age boundary", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -1160,7 +1141,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("MaxSignatureAge: verification fails outside the age boundary", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -1188,7 +1169,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("Expires: verification succeeds before expiry", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -1210,7 +1191,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("Expires: verification fails after expiry", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -1237,7 +1218,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("Expires: verification succeeds within skew tolerance", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -1261,7 +1242,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("Expires: verification fails when signed parameter is missing", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", "")
-		setStandardHeaders(t, req.Header, "example.com", false)
+		setStandardHeaders(t, req.Header, false)
 		req.Header.Set("Signature", `keyId="test-key-ed25519",signature="AAAA",algorithm="ed25519",headers="(expires)"`)
 
 		opts := fixedVerificationOptions(sigre.AlgorithmEd25519, "ed25519")
@@ -1278,7 +1259,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("AllowedAlgorithms: verification succeeds with permitted algorithm", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(
@@ -1302,7 +1283,7 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 
 	t.Run("AllowedAlgorithms: verification fails with non-permitted algorithm", func(t *testing.T) {
 		req := newTestRequest(t, "POST", "https://example.com/", testBodyJSON)
-		setStandardHeaders(t, req.Header, "example.com", true)
+		setStandardHeaders(t, req.Header, true)
 
 		signer := &sigre.CavageSigner{Now: nowFunc}
 		err := signer.SignRequest(

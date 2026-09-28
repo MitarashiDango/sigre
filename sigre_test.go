@@ -36,13 +36,11 @@ func TestSignAndVerify(t *testing.T) {
 		signOpts   signOptsPartial
 		verifyOpts verifyOptsPartial
 
-		isRequest   bool
-		method      string
-		url         string
-		body        string
-		headers     http.Header
-		expectError bool
-		wantErr     error
+		isRequest bool
+		method    string
+		url       string
+		body      string
+		wantErr   error
 	}{
 		{
 			name:       "Success: RSA-SHA256 (Request)",
@@ -134,7 +132,7 @@ func TestSignAndVerify(t *testing.T) {
 			},
 		},
 		{
-			name:      "Success: AllowedAlgorithms unspecified",
+			name:      "Success: RSA-SHA256 (Request, root path)",
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
@@ -177,8 +175,7 @@ func TestSignAndVerify(t *testing.T) {
 				publicKey:         rsaPubKey,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512},
 			},
-			expectError: true,
-			wantErr:     sigre.ErrInvalidSignatureAlgorithm,
+			wantErr: sigre.ErrInvalidSignatureAlgorithm,
 		},
 		{
 			name:      "Failure: AllowedAlgorithms rejects HMAC algorithm",
@@ -190,18 +187,16 @@ func TestSignAndVerify(t *testing.T) {
 				secret:            hmacSecret,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA512},
 			},
-			expectError: true,
-			wantErr:     sigre.ErrInvalidSignatureAlgorithm,
+			wantErr: sigre.ErrInvalidSignatureAlgorithm,
 		},
 		{
-			name:        "Failure: RequiredHeaders not satisfied",
-			isRequest:   true,
-			method:      "POST",
-			url:         "https://example.com/",
-			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256", headers: []string{"host", "date", "(request-target)"}},
-			verifyOpts:  verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"digest"}},
-			expectError: true,
-			wantErr:     sigre.ErrRequiredHeaderMissing,
+			name:       "Failure: RequiredHeaders not satisfied",
+			isRequest:  true,
+			method:     "POST",
+			url:        "https://example.com/",
+			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256", headers: []string{"host", "date", "(request-target)"}},
+			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey, requiredHeaders: []string{"digest"}},
+			wantErr:    sigre.ErrRequiredHeaderMissing,
 		},
 		{
 			name:      "Failure: MaxSignatureAge exceeded",
@@ -214,28 +209,25 @@ func TestSignAndVerify(t *testing.T) {
 				maxSignatureAge: 1 * time.Minute,
 				overrideNowFunc: func() time.Time { return time.Date(2024, 6, 8, 10, 31, 1, 0, time.UTC) },
 			},
-			expectError: true,
-			wantErr:     sigre.ErrInvalidCreationTime,
+			wantErr: sigre.ErrInvalidCreationTime,
 		},
 		{
-			name:        "Failure: request header tampered after signing",
-			isRequest:   true,
-			method:      "POST",
-			url:         "https://example.com/",
-			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
-			verifyOpts:  verifyOptsPartial{publicKey: rsaPubKey, tamperHeader: &tamperAction{key: "Date", value: "tampered"}},
-			expectError: true,
-			wantErr:     sigre.ErrVerification,
+			name:       "Failure: request header tampered after signing",
+			isRequest:  true,
+			method:     "POST",
+			url:        "https://example.com/",
+			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
+			verifyOpts: verifyOptsPartial{publicKey: rsaPubKey, tamperHeader: &tamperAction{key: "Date", value: "tampered"}},
+			wantErr:    sigre.ErrVerification,
 		},
 		{
-			name:        "Failure: verification with wrong public key",
-			isRequest:   true,
-			method:      "POST",
-			url:         "https://example.com/",
-			signOpts:    signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
-			verifyOpts:  verifyOptsPartial{publicKey: generateRSAKeys(t).public},
-			expectError: true,
-			wantErr:     sigre.ErrVerification,
+			name:       "Failure: verification with wrong public key",
+			isRequest:  true,
+			method:     "POST",
+			url:        "https://example.com/",
+			signOpts:   signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
+			verifyOpts: verifyOptsPartial{publicKey: generateRSAKeys(t).public},
+			wantErr:    sigre.ErrVerification,
 		},
 	}
 
@@ -266,11 +258,6 @@ func TestSignAndVerify(t *testing.T) {
 			targetHeader := req.Header
 			if !tc.isRequest {
 				targetHeader = res.Header
-			}
-			if tc.headers != nil {
-				for k, v := range tc.headers {
-					targetHeader[k] = v
-				}
 			}
 
 			if targetHeader.Get("Date") == "" {
@@ -361,10 +348,10 @@ func TestSignAndVerify(t *testing.T) {
 				signature, err = verifier.ParseResponse(res)
 			}
 			if err != nil {
-				if !tc.expectError {
+				if tc.wantErr == nil {
 					t.Fatalf("Parse failed: %v", err)
 				}
-				if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				if !errors.Is(err, tc.wantErr) {
 					t.Fatalf("expected error %v, got: %v", tc.wantErr, err)
 				}
 				return
@@ -376,11 +363,11 @@ func TestSignAndVerify(t *testing.T) {
 				err = verifier.Verify(signature, fixedPublicVerificationKey(keyId, algorithm, tc.verifyOpts.publicKey))
 			}
 
-			if tc.expectError {
+			if tc.wantErr != nil {
 				if err == nil {
 					t.Error("expected an error, but verification succeeded")
 				}
-				if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				if !errors.Is(err, tc.wantErr) {
 					t.Errorf("expected error %v, got: %v", tc.wantErr, err)
 				}
 			} else {

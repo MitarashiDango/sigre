@@ -340,7 +340,7 @@ func TestCavageVerifierReconstructsParsedResponseTransferEncoding(t *testing.T) 
 		"Signature: " + fixedCavageHMACHeader(t, want, "transfer-encoding") + "\r\n" +
 		"\r\n" +
 		"0\r\n\r\n"
-	res := readCavageResponse(t, raw, http.MethodGet)
+	res := readCavageResponse(t, raw)
 	if _, ok := res.Header["Transfer-Encoding"]; ok {
 		t.Fatal("http.ReadResponse() retained Transfer-Encoding in Header")
 	}
@@ -359,7 +359,7 @@ func TestCavageVerifierReconstructsParsedResponseTrailer(t *testing.T) {
 		"Signature: " + fixedCavageHMACHeader(t, want, "trailer") + "\r\n" +
 		"\r\n" +
 		"0\r\n\r\n"
-	res := readCavageResponse(t, raw, http.MethodGet)
+	res := readCavageResponse(t, raw)
 	if _, ok := res.Header["Trailer"]; ok {
 		t.Fatal("http.ReadResponse() retained chunked Trailer in Header")
 	}
@@ -428,7 +428,7 @@ func TestCavageVerifierUsesParsedResponseContentLengthHeader(t *testing.T) {
 				"Content-Length: " + tt.contentLength + "\r\n" +
 				"Signature: " + fixedCavageHMACHeader(t, tt.wantSigningString, "content-length") + "\r\n" +
 				"\r\n" + tt.body
-			res := readCavageResponse(t, raw, http.MethodGet)
+			res := readCavageResponse(t, raw)
 			if res.ContentLength != tt.wantParsedLength || !slices.Equal(res.Header["Content-Length"], []string{tt.contentLength}) {
 				t.Fatalf("ContentLength/Header = %d/%q, want %d/[%s]", res.ContentLength, res.Header["Content-Length"], tt.wantParsedLength, tt.contentLength)
 			}
@@ -440,7 +440,7 @@ func TestCavageVerifierUsesParsedResponseContentLengthHeader(t *testing.T) {
 		raw := "HTTP/1.1 200 OK\r\n" +
 			"Signature: " + fixedCavageHMACHeader(t, "content-length: -1", "content-length") + "\r\n" +
 			"\r\n"
-		res := readCavageResponse(t, raw, http.MethodGet)
+		res := readCavageResponse(t, raw)
 		if res.ContentLength != -1 {
 			t.Fatalf("ContentLength = %d, want -1", res.ContentLength)
 		}
@@ -455,7 +455,7 @@ func TestCavageVerifierUsesNonChunkedResponseTrailerHeader(t *testing.T) {
 		"Trailer: X-Zeta, x-alpha\r\n" +
 		"Signature: " + fixedCavageHMACHeader(t, want, "trailer") + "\r\n" +
 		"\r\n"
-	res := readCavageResponse(t, raw, http.MethodGet)
+	res := readCavageResponse(t, raw)
 	if res.Trailer != nil || !slices.Equal(res.Header["Trailer"], []string{"X-Zeta, x-alpha"}) {
 		t.Fatalf("Trailer/Header = %#v/%q, want nil/[X-Zeta, x-alpha]", res.Trailer, res.Header["Trailer"])
 	}
@@ -469,7 +469,7 @@ func TestCavageVerifierParsedResponseNormalFieldOrder(t *testing.T) {
 		"X-Order: second\r\n" +
 		"Signature: " + fixedCavageHMACHeader(t, want, "x-order") + "\r\n" +
 		"\r\n"
-	res := readCavageResponse(t, raw, http.MethodGet)
+	res := readCavageResponse(t, raw)
 	if !slices.Equal(res.Header["X-Order"], []string{"first", "second"}) {
 		t.Fatalf("X-Order = %q, want [first second]", res.Header["X-Order"])
 	}
@@ -739,9 +739,9 @@ func readCavageRequest(t *testing.T, raw string) *http.Request {
 	return req
 }
 
-func readCavageResponse(t *testing.T, raw, method string) *http.Response {
+func readCavageResponse(t *testing.T, raw string) *http.Response {
 	t.Helper()
-	associatedRequest := &http.Request{Method: method}
+	associatedRequest := &http.Request{Method: http.MethodGet}
 	res, err := http.ReadResponse(bufio.NewReader(strings.NewReader(raw)), associatedRequest)
 	if err != nil {
 		t.Fatalf("http.ReadResponse() failed: %v", err)

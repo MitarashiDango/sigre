@@ -10,13 +10,6 @@ import (
 	"strings"
 )
 
-const (
-	outgoingHost             = "host"
-	outgoingContentLength    = "content-length"
-	outgoingTransferEncoding = "transfer-encoding"
-	outgoingTrailer          = "trailer"
-)
-
 type outgoingHTTPField struct {
 	value   string
 	present bool
@@ -31,57 +24,42 @@ type outgoingTransferFields struct {
 
 func resolveOutgoingRequestFields(req *http.Request, header http.Header, signedHeaders []string) (http.Header, error) {
 	resolved := header
-	transferFieldsNeeded := slices.Contains(signedHeaders, outgoingContentLength) ||
-		slices.Contains(signedHeaders, outgoingTransferEncoding) ||
-		slices.Contains(signedHeaders, outgoingTrailer)
-	if transferFieldsNeeded || slices.Contains(signedHeaders, outgoingHost) {
+	transferFieldsNeeded := slices.Contains(signedHeaders, "content-length") ||
+		slices.Contains(signedHeaders, "transfer-encoding") ||
+		slices.Contains(signedHeaders, "trailer")
+	if transferFieldsNeeded || slices.Contains(signedHeaders, "host") {
 		resolved = header.Clone()
 	}
 	var transfer outgoingTransferFields
 	var err error
 	if transferFieldsNeeded {
-		transfer, err = outgoingRequestTransferFields(req, slices.Contains(signedHeaders, outgoingTrailer))
+		transfer, err = outgoingRequestTransferFields(req, slices.Contains(signedHeaders, "trailer"))
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	for _, name := range signedHeaders {
+		var field outgoingHTTPField
+		var normalize func(string) (string, error)
 		switch name {
-		case outgoingHost:
-			if req.URL == nil {
-				return nil, fmt.Errorf("%w: request host cannot be determined without URL", ErrInvalidHTTPMessage)
-			}
-			source := req.Host
-			if source == "" {
-				source = req.URL.Host
-			}
-			if err := validateOutgoingHTTPFieldValue(outgoingHost, source); err != nil {
-				return nil, err
-			}
-			host, err := normalizeOutgoingRequestHost(source)
+		case "host":
+			field, err = outgoingRequestHostField(req)
 			if err != nil {
 				return nil, err
 			}
-			resolved, err = resolveOutgoingField(header, resolved, outgoingHost, outgoingHTTPField{value: host, present: true, known: true}, normalizeOutgoingRequestHost)
-			if err != nil {
-				return nil, err
-			}
-		case outgoingContentLength:
-			resolved, err = resolveOutgoingField(header, resolved, outgoingContentLength, transfer.contentLength, nil)
-			if err != nil {
-				return nil, err
-			}
-		case outgoingTransferEncoding:
-			resolved, err = resolveOutgoingField(header, resolved, outgoingTransferEncoding, transfer.transferEncoding, nil)
-			if err != nil {
-				return nil, err
-			}
-		case outgoingTrailer:
-			resolved, err = resolveOutgoingField(header, resolved, outgoingTrailer, transfer.trailer, nil)
-			if err != nil {
-				return nil, err
-			}
+			normalize = normalizeOutgoingRequestHost
+		case "content-length":
+			field = transfer.contentLength
+		case "transfer-encoding":
+			field = transfer.transferEncoding
+		case "trailer":
+			field = transfer.trailer
+		default:
+			continue
+		}
+		if err = resolveOutgoingField(header, resolved, name, field, normalize); err != nil {
+			return nil, err
 		}
 	}
 
@@ -90,16 +68,16 @@ func resolveOutgoingRequestFields(req *http.Request, header http.Header, signedH
 
 func resolveOutgoingResponseFields(res *http.Response, header http.Header, signedHeaders []string) (http.Header, error) {
 	// Response Host is an ordinary field and must be present in the response itself.
-	if slices.Contains(signedHeaders, outgoingHost) && len(header["Host"]) == 0 {
+	if slices.Contains(signedHeaders, "host") && len(header["Host"]) == 0 {
 		return nil, fmt.Errorf("%w: host", ErrSignedHeaderMissing)
 	}
-	transferFieldsNeeded := slices.Contains(signedHeaders, outgoingContentLength) ||
-		slices.Contains(signedHeaders, outgoingTransferEncoding) ||
-		slices.Contains(signedHeaders, outgoingTrailer)
+	transferFieldsNeeded := slices.Contains(signedHeaders, "content-length") ||
+		slices.Contains(signedHeaders, "transfer-encoding") ||
+		slices.Contains(signedHeaders, "trailer")
 	if !transferFieldsNeeded {
 		return header, nil
 	}
-	transfer, err := outgoingResponseTransferFields(res, slices.Contains(signedHeaders, outgoingTrailer))
+	transfer, err := outgoingResponseTransferFields(res, slices.Contains(signedHeaders, "trailer"))
 	if err != nil {
 		return nil, err
 	}
@@ -108,17 +86,16 @@ func resolveOutgoingResponseFields(res *http.Response, header http.Header, signe
 	for _, name := range signedHeaders {
 		var field outgoingHTTPField
 		switch name {
-		case outgoingContentLength:
+		case "content-length":
 			field = transfer.contentLength
-		case outgoingTransferEncoding:
+		case "transfer-encoding":
 			field = transfer.transferEncoding
-		case outgoingTrailer:
+		case "trailer":
 			field = transfer.trailer
 		default:
 			continue
 		}
-		resolved, err = resolveOutgoingField(header, resolved, name, field, nil)
-		if err != nil {
+		if err = resolveOutgoingField(header, resolved, name, field, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -131,46 +108,46 @@ func resolveOutgoingField(
 	name string,
 	field outgoingHTTPField,
 	normalize func(string) (string, error),
-) (http.Header, error) {
+) error {
 	canonicalName := http.CanonicalHeaderKey(name)
 	for key := range original {
 		if strings.EqualFold(key, canonicalName) && key != canonicalName {
-			return nil, fmt.Errorf("%w: non-canonical %s map key is ambiguous for outgoing signing", ErrInvalidHTTPMessage, canonicalName)
+			return fmt.Errorf("%w: non-canonical %s map key is ambiguous for outgoing signing", ErrInvalidHTTPMessage, canonicalName)
 		}
 	}
 
 	headerValues, headerPresent := original[canonicalName]
 	if !field.known {
-		return nil, fmt.Errorf("%w: outgoing %s cannot be determined without reading Body; use nil or http.NoBody for a known empty Body, or set a positive ContentLength or explicit TransferEncoding", ErrInvalidHTTPMessage, canonicalName)
+		return fmt.Errorf("%w: outgoing %s cannot be determined without reading Body; use nil or http.NoBody for a known empty Body, or set a positive ContentLength or explicit TransferEncoding", ErrInvalidHTTPMessage, canonicalName)
 	}
 	if !field.present {
 		if headerPresent {
-			return nil, fmt.Errorf("%w: %s in Header conflicts with the absent outgoing field", ErrInvalidHTTPMessage, canonicalName)
+			return fmt.Errorf("%w: %s in Header conflicts with the absent outgoing field", ErrInvalidHTTPMessage, canonicalName)
 		}
-		return nil, fmt.Errorf("%w: %s", ErrSignedHeaderMissing, name)
+		return fmt.Errorf("%w: %s", ErrSignedHeaderMissing, name)
 	}
 	if headerPresent {
 		if len(headerValues) != 1 {
-			return nil, fmt.Errorf("%w: %s in Header must contain exactly one value for outgoing signing", ErrInvalidHTTPMessage, canonicalName)
+			return fmt.Errorf("%w: %s in Header must contain exactly one value for outgoing signing", ErrInvalidHTTPMessage, canonicalName)
 		}
 		headerValue := trimCavageOWS(headerValues[0])
 		if err := validateOutgoingHTTPFieldValue(name, headerValue); err != nil {
-			return nil, err
+			return err
 		}
 		if normalize != nil {
 			var err error
 			headerValue, err = normalize(headerValue)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
 		if headerValue != field.value {
-			return nil, fmt.Errorf("%w: %s in Header conflicts with the outgoing field", ErrInvalidHTTPMessage, canonicalName)
+			return fmt.Errorf("%w: %s in Header conflicts with the outgoing field", ErrInvalidHTTPMessage, canonicalName)
 		}
 	}
 
 	resolved[canonicalName] = []string{field.value}
-	return resolved, nil
+	return nil
 }
 
 func validateOutgoingHTTPFieldValue(name, value string) error {
@@ -180,9 +157,29 @@ func validateOutgoingHTTPFieldValue(name, value string) error {
 	return nil
 }
 
+func outgoingRequestHostField(req *http.Request) (outgoingHTTPField, error) {
+	if req.URL == nil {
+		return outgoingHTTPField{}, fmt.Errorf("%w: request host cannot be determined without URL", ErrInvalidHTTPMessage)
+	}
+	source := req.Host
+	if source == "" {
+		source = req.URL.Host
+	}
+	if err := validateOutgoingHTTPFieldValue("host", source); err != nil {
+		return outgoingHTTPField{}, err
+	}
+	host, err := normalizeOutgoingRequestHost(source)
+	if err != nil {
+		return outgoingHTTPField{}, err
+	}
+	return outgoingHTTPField{value: host, present: true, known: true}, nil
+}
+
 // normalizeOutgoingRequestHost delegates to Request.Write so host IDNA
 // conversion, invalid-host clearing, and IPv6 zone removal stay aligned with
 // the Go 1.26 net/http request writer without copying its internal httpguts use.
+// TestCavageRequestSignerUsesOutgoingHost checks this behavior against
+// Request.Write output.
 func normalizeOutgoingRequestHost(host string) (string, error) {
 	req := &http.Request{
 		Method: "GET",
@@ -208,6 +205,9 @@ func normalizeOutgoingRequestHost(host string) (string, error) {
 // outgoingRequestTransferFields follows Request.outgoingLength,
 // newTransferWriter, and transferWriter.shouldSendContentLength in Go 1.26.
 // The Body-probe branch is represented as unknown rather than reading Body.
+// TestCavageRequestSignerUsesOutgoingContentLength and
+// TestCavageRequestSignerUsesOutgoingTransferEncodingAndTrailer compare
+// against Request.Write output.
 func outgoingRequestTransferFields(req *http.Request, includeTrailer bool) (outgoingTransferFields, error) {
 	if req.Body == nil && req.ContentLength != 0 {
 		return outgoingTransferFields{}, fmt.Errorf("%w: request ContentLength is nonzero with nil Body", ErrInvalidHTTPMessage)
@@ -231,7 +231,7 @@ func outgoingRequestTransferFields(req *http.Request, includeTrailer bool) (outg
 	if contentLength < 0 && len(transferEncoding) == 0 {
 		switch {
 		case method == "CONNECT":
-		case requestMethodUsuallyNeedsBodyProbe(method):
+		case requestMethodUsuallyLacksBody(method):
 			fields := outgoingTransferFields{
 				contentLength:    outgoingHTTPField{known: true},
 				transferEncoding: outgoingHTTPField{known: false},
@@ -267,7 +267,7 @@ func outgoingRequestTransferFields(req *http.Request, includeTrailer bool) (outg
 	return fields, nil
 }
 
-func requestMethodUsuallyNeedsBodyProbe(method string) bool {
+func requestMethodUsuallyLacksBody(method string) bool {
 	switch method {
 	case "GET", "HEAD", "DELETE", "OPTIONS", "PROPFIND", "SEARCH":
 		return true
@@ -279,6 +279,9 @@ func requestMethodUsuallyNeedsBodyProbe(method string) bool {
 // newTransferWriter in Go 1.26. Response.Write probes an arbitrary non-nil
 // Body when ContentLength is zero; only fields that differ across the empty
 // and non-empty outcomes are marked unknown.
+// TestCavageResponseSignerUsesOutgoingManagedFields and
+// TestCavageResponseSignerRejectsIndeterminateContentLengthWithoutBodyProbe
+// compare against Response.Write output.
 func outgoingResponseTransferFields(res *http.Response, includeTrailer bool) (outgoingTransferFields, error) {
 	if res.ContentLength == 0 && res.Body != nil && res.Body != http.NoBody {
 		empty, err := outgoingResponseTransferState(res, 0, false, includeTrailer)
@@ -325,6 +328,8 @@ func outgoingResponseTransferState(res *http.Response, contentLength int64, body
 	}
 
 	contentLengthField := outgoingContentLengthField(method, transferContentLength, transferEncoding)
+	// Match Response.Write's explicit Content-Length: 0 when the transfer writer
+	// has not already sent a Content-Length field.
 	if !contentLengthField.present && contentLength == 0 && !outgoingIsChunked(originalTransferEncoding) && outgoingBodyAllowedForStatus(res.StatusCode) {
 		contentLengthField = outgoingHTTPField{value: "0", present: true, known: true}
 	}

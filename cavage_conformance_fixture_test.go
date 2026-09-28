@@ -2,10 +2,8 @@ package sigre_test
 
 import (
 	"crypto"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"io"
 	"net/http"
 	"os"
@@ -205,32 +203,12 @@ func applyCavageFixtureHeaders(dst http.Header, headers []cavageFixtureHeader) {
 
 func loadCavageFixturePrivateKey(t *testing.T, name string) crypto.PrivateKey {
 	t.Helper()
-	block := loadCavageFixturePEM(t, name)
-	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		t.Fatalf("failed to parse fixture private key %q: %v", name, err)
-	}
-	return key
+	return loadTestPrivateKeyFile(t, filepath.Join(cavageConformanceFixtureDirectory, name))
 }
 
 func loadCavageFixturePublicKey(t *testing.T, name string) crypto.PublicKey {
 	t.Helper()
-	block := loadCavageFixturePEM(t, name)
-	key, err := x509.ParsePKIXPublicKey(block.Bytes)
-	if err != nil {
-		t.Fatalf("failed to parse fixture public key %q: %v", name, err)
-	}
-	return key
-}
-
-func loadCavageFixturePEM(t *testing.T, name string) *pem.Block {
-	t.Helper()
-	data := readCavageFixtureFile(t, name)
-	block, rest := pem.Decode(data)
-	if block == nil || len(strings.TrimSpace(string(rest))) != 0 {
-		t.Fatalf("fixture key %q is not a single PEM block", name)
-	}
-	return block
+	return loadTestPublicKeyFile(t, filepath.Join(cavageConformanceFixtureDirectory, name))
 }
 
 func loadCavageFixtureHMACSecret(t *testing.T, name string) []byte {

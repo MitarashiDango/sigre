@@ -129,9 +129,7 @@ func signerPolicySignatureBytes(t *testing.T, value string) []byte {
 func assertSignerPolicyHMAC(t *testing.T, value, signingString string, secret []byte) {
 	t.Helper()
 	mac := hmac.New(sha512.New, secret)
-	if _, err := mac.Write([]byte(signingString)); err != nil {
-		t.Fatalf("failed to calculate independent HMAC: %v", err)
-	}
+	mac.Write([]byte(signingString))
 	if !hmac.Equal(signerPolicySignatureBytes(t, value), mac.Sum(nil)) {
 		t.Fatalf("generated HMAC does not cover %q", signingString)
 	}
@@ -208,9 +206,9 @@ func TestCavageSignerStrictZeroValueWireFormat(t *testing.T) {
 }
 
 func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
-	rsaPrivateKey := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	ecdsaPrivateKey := parseECDSAPrivateKey(t, testECDSAPrivateKeyPEM)
-	ed25519PrivateKey := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
+	rsaPrivateKey := fixedRSAPrivateKey(t)
+	ecdsaPrivateKey := fixedECDSAPrivateKey(t)
+	ed25519PrivateKey := fixedEd25519PrivateKey(t)
 	ed25519PublicKey := ed25519PrivateKey.Public().(ed25519.PublicKey)
 	secret := []byte(testHMACSecret)
 
@@ -322,8 +320,8 @@ func TestCavageSignerECDSACurves(t *testing.T) {
 }
 
 func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
-	rsaPrivateKey := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	ecdsaPrivateKey := parseECDSAPrivateKey(t, testECDSAPrivateKeyPEM)
+	rsaPrivateKey := fixedRSAPrivateKey(t)
+	ecdsaPrivateKey := fixedECDSAPrivateKey(t)
 	secret := []byte(testHMACSecret)
 
 	tests := []struct {
@@ -452,7 +450,7 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			req.GetBody = nil
 			before := req.Clone(req.Context())
 			err := sigre.NewCavageSigner().SignRequest(req, key, sigre.CavageSignaturePlacementSignature, nil)
-			assertVerifierPolicyError(t, err, tt.wantErr)
+			assertPackageError(t, err, tt.wantErr)
 			if !reflect.DeepEqual(req, before) {
 				t.Fatal("signer modified the request after rejecting the Ed25519 key pointer")
 			}
@@ -465,7 +463,7 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			before.Header = res.Header.Clone()
 			before.Request = res.Request.Clone(res.Request.Context())
 			err := sigre.NewCavageSigner().SignResponse(res, key, sigre.CavageSignaturePlacementSignature, nil)
-			assertVerifierPolicyError(t, err, tt.wantErr)
+			assertPackageError(t, err, tt.wantErr)
 			if !reflect.DeepEqual(res, &before) {
 				t.Fatal("signer modified the response or associated request after rejecting the Ed25519 key pointer")
 			}
@@ -542,7 +540,7 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 }
 
 func TestCavageSignerSignedHeaderOptions(t *testing.T) {
-	privateKey := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
+	privateKey := fixedEd25519PrivateKey(t)
 	key := fixedSigningKey("header-key", sigre.AlgorithmEd25519, privateKey)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 
@@ -703,7 +701,7 @@ func TestCavageSignerMissingSignedFieldsWithoutMutation(t *testing.T) {
 }
 
 func TestCavageSignerExpiresAfter(t *testing.T) {
-	privateKey := parseEd25519PrivateKey(t, testEd25519PrivateKeyPEM)
+	privateKey := fixedEd25519PrivateKey(t)
 	key := fixedSigningKey("expires-key", sigre.AlgorithmEd25519, privateKey)
 	now := time.Unix(100, 900_000_000)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return now }}
@@ -873,8 +871,8 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 }
 
 func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
-	rsaPrivateKey := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
-	ecdsaPrivateKey := parseECDSAPrivateKey(t, testECDSAPrivateKeyPEM)
+	rsaPrivateKey := fixedRSAPrivateKey(t)
+	ecdsaPrivateKey := fixedECDSAPrivateKey(t)
 	secret := []byte(testHMACSecret)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 
@@ -1075,7 +1073,7 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 }
 
 func TestCavageSignerExtensionAlgorithm(t *testing.T) {
-	privateKey := parseRSAPrivateKey(t, testRSAPrivateKeyPEM)
+	privateKey := fixedRSAPrivateKey(t)
 	key := fixedSigningKey("extension-key", sigre.AlgorithmRSAPKCS1v15SHA512, privateKey)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 

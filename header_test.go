@@ -93,12 +93,12 @@ func TestCavageRequestSignatureSource(t *testing.T) {
 				t.Fatalf("NewCavageVerifier() failed: %v", err)
 			}
 			signature, err := verifier.ParseRequest(sourcePolicyRequest(test.header))
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("ParseRequest() error = %v, want %v", err, test.wantErr)
-			}
 			if test.wantErr != nil {
-				assertSigreError(t, err)
+				assertPackageError(t, err, test.wantErr)
 				return
+			}
+			if !errors.Is(err, nil) {
+				t.Fatalf("ParseRequest() error = %v, want %v", err, test.wantErr)
 			}
 			if signature.Placement() != test.placement {
 				t.Fatalf("Placement() = %d, want %d", signature.Placement(), test.placement)
@@ -176,13 +176,5 @@ func TestCavageVerifierNilMessages(t *testing.T) {
 	}
 	if _, err := verifier.ParseResponse(&http.Response{}); !errors.Is(err, sigre.ErrMissingSignature) {
 		t.Fatalf("nil Header response error = %v", err)
-	}
-}
-
-func assertSigreError(t *testing.T, err error) {
-	t.Helper()
-	var packageError *sigre.SigreError
-	if !errors.As(err, &packageError) {
-		t.Fatalf("error %v is not wrapped by *SigreError", err)
 	}
 }

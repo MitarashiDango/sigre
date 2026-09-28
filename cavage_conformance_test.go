@@ -227,9 +227,7 @@ func verifyGeneratedSignatureOverExpectedString(t *testing.T, fixture cavageConf
 		}
 	case "hmac":
 		mac := hmac.New(sha512.New, loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile))
-		if _, err := mac.Write(message); err != nil {
-			t.Fatalf("failed to compute independent HMAC: %v", err)
-		}
+		mac.Write(message)
 		if !hmac.Equal(signature, mac.Sum(nil)) {
 			t.Fatal("generated HMAC is not over expected signing string")
 		}

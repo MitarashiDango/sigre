@@ -159,9 +159,7 @@ func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
 func TestCavageRequestSignerDefaultsEmptyMethodToGET(t *testing.T) {
 	const wantSigningString = "(request-target): get /resource?x=%2F\n(created): 100"
 	mac := hmac.New(sha512.New, signingStringTestSecret)
-	if _, err := mac.Write([]byte(wantSigningString)); err != nil {
-		t.Fatalf("failed to calculate fixed HMAC: %v", err)
-	}
+	mac.Write([]byte(wantSigningString))
 	wantSignature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	key := HMACSigningKey{
 		Metadata: TrustedKeyMetadata{KeyID: "test-key", Algorithm: AlgorithmHMACSHA512},
@@ -337,7 +335,7 @@ func TestCavageRequestSignerRejectsCONNECTRequestTarget(t *testing.T) {
 			urlBefore := *req.URL
 
 			err := tt.sign(req)
-			assertInvalidRequestTargetError(t, err, "CONNECT")
+			assertConnectRequestTargetError(t, err)
 			if !reflect.DeepEqual(req.Header, headerBefore) || !reflect.DeepEqual(req.URL, &urlBefore) || req.Body != body || req.Method != http.MethodConnect || req.RequestURI != "" {
 				t.Fatal("failed CONNECT signing modified the request")
 			}
@@ -379,7 +377,7 @@ func TestCavageResponseSignerRejectsAssociatedCONNECTRequestTarget(t *testing.T)
 		CavageSignaturePlacementSignature,
 		signingStringOptions([]string{RequestTarget}),
 	)
-	assertInvalidRequestTargetError(t, err, "CONNECT")
+	assertConnectRequestTargetError(t, err)
 	if !reflect.DeepEqual(res.Header, headerBefore) || res.Body != resBody || res.Request != req {
 		t.Fatal("failed response signing modified the response")
 	}
@@ -932,13 +930,7 @@ func TestCavageSignerRejectsForbiddenHostWithoutMutation(t *testing.T) {
 			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"host"}),
 		)
-		if !errors.Is(err, ErrInvalidHTTPMessage) {
-			t.Fatalf("SignRequestWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
-		}
-		var sigreErr *SigreError
-		if !errors.As(err, &sigreErr) {
-			t.Fatalf("SignRequestWithHMAC() error type = %T, want *SigreError", err)
-		}
+		assertPackageError(t, err, ErrInvalidHTTPMessage)
 		if !reflect.DeepEqual(header, beforeHeader) {
 			t.Fatalf("Header changed after failed signing\ngot:  %#v\nwant: %#v", header, beforeHeader)
 		}
@@ -976,13 +968,7 @@ func TestCavageSignerRejectsForbiddenHostWithoutMutation(t *testing.T) {
 			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"host"}),
 		)
-		if !errors.Is(err, ErrInvalidHTTPMessage) {
-			t.Fatalf("SignResponseWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
-		}
-		var sigreErr *SigreError
-		if !errors.As(err, &sigreErr) {
-			t.Fatalf("SignResponseWithHMAC() error type = %T, want *SigreError", err)
-		}
+		assertPackageError(t, err, ErrInvalidHTTPMessage)
 		for _, want := range []string{`HTTP field "host"`, "value index 0", "byte position 7"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("error = %q, want it to contain %q", err, want)
@@ -1090,14 +1076,7 @@ func TestCavageSignerNilHeaderContract(t *testing.T) {
 				if tt.isRequest {
 					wantError = ErrInvalidHTTPMessage
 				}
-				var sigreErr *SigreError
-				isSigreError := errors.As(err, &sigreErr)
-				if !errors.Is(err, wantError) {
-					t.Fatalf("signing error = %v, want %v", err, wantError)
-				}
-				if !isSigreError {
-					t.Fatalf("signing error type = %T, want *SigreError", err)
-				}
+				assertPackageError(t, err, wantError)
 				if tt.isRequest {
 					for _, want := range []string{"failed to create signing string", `HTTP field "host"`, "value index 0", "byte position 7"} {
 						if !strings.Contains(err.Error(), want) {
@@ -1634,7 +1613,7 @@ func TestCavageRequestVerifierRejectsCONNECTRequestTarget(t *testing.T) {
 			if signature != nil {
 				t.Fatal("ParseRequest() returned a snapshot for CONNECT")
 			}
-			assertInvalidRequestTargetError(t, err, "CONNECT")
+			assertConnectRequestTargetError(t, err)
 			if !reflect.DeepEqual(req.Header, headerBefore) || !reflect.DeepEqual(req.URL, &urlBefore) || req.Body != body || req.Method != http.MethodConnect || req.RequestURI != rawRequestTarget {
 				t.Fatal("failed CONNECT parsing modified the request")
 			}
@@ -1671,7 +1650,7 @@ func TestCavageResponseVerifierRejectsAssociatedCONNECTRequestTarget(t *testing.
 	if signature != nil {
 		t.Fatal("ParseResponse() returned a snapshot for an associated CONNECT request")
 	}
-	assertInvalidRequestTargetError(t, err, "CONNECT")
+	assertConnectRequestTargetError(t, err)
 	if !reflect.DeepEqual(res.Header, headerBefore) || res.Body != body || res.Request != req || !reflect.DeepEqual(req.URL, &urlBefore) || req.Method != http.MethodConnect || req.RequestURI != "" {
 		t.Fatal("failed response parsing modified the response or associated CONNECT request")
 	}
@@ -2011,9 +1990,7 @@ func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
 func TestCavageResponseRequestTargetDefaultsEmptyOutgoingMethodToGET(t *testing.T) {
 	const wantSigningString = "(request-target): get /resource?x=%2F"
 	mac := hmac.New(sha512.New, signingStringTestSecret)
-	if _, err := mac.Write([]byte(wantSigningString)); err != nil {
-		t.Fatalf("failed to calculate fixed HMAC: %v", err)
-	}
+	mac.Write([]byte(wantSigningString))
 	wantSignature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	key := HMACSigningKey{
 		Metadata: TrustedKeyMetadata{KeyID: "test-key", Algorithm: AlgorithmHMACSHA512},
@@ -2116,9 +2093,7 @@ func TestCavageVerifierPreservesExpiresDecimalSignature(t *testing.T) {
 	const signingString = "(expires): 1.1234567890"
 	privateKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x42}, ed25519.SeedSize))
 	mac := hmac.New(sha512.New, signingStringTestSecret)
-	if _, err := mac.Write([]byte(signingString)); err != nil {
-		t.Fatalf("failed to calculate fixed HMAC: %v", err)
-	}
+	mac.Write([]byte(signingString))
 	verifier, err := NewCavageVerifier(&CavageVerificationOptions{
 		Now: func() time.Time { return time.Unix(1, 123456789) },
 	})
@@ -2177,13 +2152,7 @@ func TestCavageVerifierPreservesExpiresDecimalSignature(t *testing.T) {
 				}
 				err = test.verify(signature)
 				if value == "1.123456789" {
-					if !errors.Is(err, ErrVerification) {
-						t.Fatalf("verification error = %v, want ErrVerification", err)
-					}
-					var packageError *SigreError
-					if !errors.As(err, &packageError) {
-						t.Fatalf("verification error is not wrapped by *SigreError: %v", err)
-					}
+					assertPackageError(t, err, ErrVerification)
 				} else if err != nil {
 					t.Fatalf("verification failed: %v", err)
 				}
@@ -2420,9 +2389,7 @@ func parseSigningStringTestURL(t *testing.T, rawURL string) *url.URL {
 func fixedCavageHMACHeader(t *testing.T, signingString, signedHeaders string) string {
 	t.Helper()
 	mac := hmac.New(sha256.New, signingStringTestSecret)
-	if _, err := mac.Write([]byte(signingString)); err != nil {
-		t.Fatalf("failed to calculate fixed HMAC: %v", err)
-	}
+	mac.Write([]byte(signingString))
 	signature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
 	return `keyId="test-key",signature="` + signature + `",algorithm="hmac-sha256",headers="` + signedHeaders + `"`
 }
@@ -2487,37 +2454,23 @@ func assertCavageHMACSignature(t *testing.T, headerValue, signingString string) 
 	}
 
 	mac := hmac.New(sha256.New, signingStringTestSecret)
-	if _, err := mac.Write([]byte(signingString)); err != nil {
-		t.Fatalf("failed to calculate expected HMAC: %v", err)
-	}
+	mac.Write([]byte(signingString))
 	if !hmac.Equal(got, mac.Sum(nil)) {
 		t.Fatalf("signature does not cover fixed signing string %q", signingString)
 	}
 }
 
-func assertInvalidRequestTargetError(t *testing.T, err error, form string) {
+func assertConnectRequestTargetError(t *testing.T, err error) {
 	t.Helper()
-	if !errors.Is(err, ErrInvalidHTTPMessage) {
-		t.Fatalf("error = %v, want ErrInvalidHTTPMessage", err)
-	}
-	var sigreErr *SigreError
-	if !errors.As(err, &sigreErr) {
-		t.Fatalf("error type = %T, want *SigreError", err)
-	}
-	if !strings.Contains(err.Error(), form) {
-		t.Errorf("error = %q, want it to contain %q", err, form)
+	assertPackageError(t, err, ErrInvalidHTTPMessage)
+	if !strings.Contains(err.Error(), "CONNECT") {
+		t.Errorf("error = %q, want it to contain %q", err, "CONNECT")
 	}
 }
 
 func assertInvalidPlacementError(t *testing.T, err error, detail string) {
 	t.Helper()
-	if !errors.Is(err, ErrInvalidSignaturePlacement) {
-		t.Fatalf("signing error = %v, want ErrInvalidSignaturePlacement", err)
-	}
-	var sigreErr *SigreError
-	if !errors.As(err, &sigreErr) {
-		t.Fatalf("signing error type = %T, want *SigreError", err)
-	}
+	assertPackageError(t, err, ErrInvalidSignaturePlacement)
 	if !strings.Contains(err.Error(), detail) {
 		t.Fatalf("signing error = %q, want it to contain %q", err, detail)
 	}

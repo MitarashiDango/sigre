@@ -6,7 +6,6 @@ import (
 	"crypto/hmac"
 	"crypto/sha512"
 	"encoding/base64"
-	"errors"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -45,7 +44,7 @@ func TestCavageVerifierRejectsRawResponseMissingHost(t *testing.T) {
 	if signature != nil {
 		t.Errorf("ParseResponse() returned a snapshot for missing Host; VerifyHMAC() = %v", verifier.VerifyHMAC(signature, key))
 	}
-	assertResponseHostError(t, err, ErrSignedHeaderMissing)
+	assertPackageError(t, err, ErrSignedHeaderMissing)
 }
 
 func TestCavageResponseMissingHostDoesNotUseRequestOrModifyInput(t *testing.T) {
@@ -106,7 +105,7 @@ func TestCavageResponseMissingHostDoesNotUseRequestOrModifyInput(t *testing.T) {
 							want = ErrMissingSignature
 						}
 					}
-					assertResponseHostError(t, err, want)
+					assertPackageError(t, err, want)
 				})
 			}
 		})
@@ -177,7 +176,7 @@ func TestCavageResponseRejectsForbiddenHostValues(t *testing.T) {
 					t.Error("ParseResponse() returned a snapshot for forbidden Host bytes")
 				}
 			}
-			assertResponseHostError(t, err, ErrInvalidHTTPMessage)
+			assertPackageError(t, err, ErrInvalidHTTPMessage)
 			if err != nil {
 				for _, want := range []string{`HTTP field "host"`, "value index 1", "byte position 2"} {
 					if !strings.Contains(err.Error(), want) {
@@ -246,17 +245,6 @@ func TestCavageResponseHostMatchesHTTPWireForm(t *testing.T) {
 			}
 			verifyCavageResponseHMAC(t, received)
 		})
-	}
-}
-
-func assertResponseHostError(t *testing.T, err, want error) {
-	t.Helper()
-	if !errors.Is(err, want) {
-		t.Errorf("error = %v, want %v", err, want)
-	}
-	var sigreErr *SigreError
-	if !errors.As(err, &sigreErr) {
-		t.Errorf("error type = %T, want *SigreError", err)
 	}
 }
 

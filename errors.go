@@ -59,7 +59,7 @@ var (
 	ErrKeyIDMismatch = errors.New("signature keyId does not match trusted key metadata")
 	// ErrInvalidKeyMetadata is returned when trusted key metadata is incomplete or unsupported.
 	ErrInvalidKeyMetadata = errors.New("invalid trusted key metadata")
-	// ErrInvalidVerificationOptions is returned when verification options contain an invalid value.
+	// ErrInvalidVerificationOptions is returned when verification options contain an invalid value or conflicting values.
 	ErrInvalidVerificationOptions = errors.New("invalid verification options")
 	// ErrInvalidDate is returned when MaxDateAge is positive and the signed Date
 	// field is missing, has multiple values, is malformed, or differs from the

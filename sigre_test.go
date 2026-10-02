@@ -170,7 +170,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:    "POST",
 			url:       "https://example.com/",
 			body:      `{"hello": "world"}`,
-			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: "rsa-sha256"},
+			signOpts:  signOptsPartial{privateKey: rsaPrivateKey, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, wireLabel: ""},
 			verifyOpts: verifyOptsPartial{
 				publicKey:         rsaPubKey,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512},
@@ -182,7 +182,7 @@ func TestSignAndVerify(t *testing.T) {
 			isRequest: true,
 			method:    "POST",
 			url:       "https://example.com/",
-			signOpts:  signOptsPartial{secret: hmacSecret, algorithm: sigre.AlgorithmHMACSHA256, wireLabel: "hmac-sha256", headers: []string{"(request-target)", "date"}},
+			signOpts:  signOptsPartial{secret: hmacSecret, algorithm: sigre.AlgorithmHMACSHA256, wireLabel: "", headers: []string{"(request-target)", "date"}},
 			verifyOpts: verifyOptsPartial{
 				secret:            hmacSecret,
 				allowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA512},

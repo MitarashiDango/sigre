@@ -122,12 +122,16 @@ type CavageVerificationCompatibility struct {
 	AllowedExpiredSkew time.Duration
 	// AllowedLegacyAlgorithms explicitly enables the corresponding deprecated
 	// SHA-256 wire labels. Each AlgorithmID must also appear in AllowedAlgorithms.
+	// Otherwise, [NewCavageVerifier] returns [ErrInvalidVerificationOptions].
 	AllowedLegacyAlgorithms []AlgorithmID
 	// ExtensionAlgorithms maps an exact wire label to one trusted algorithm. The
-	// mapped AlgorithmID must also be allowed and must equal trusted key metadata.
+	// mapped AlgorithmID must also be allowed; otherwise, [NewCavageVerifier]
+	// returns [ErrInvalidVerificationOptions]. [CavageVerifier.Verify] and
+	// [CavageVerifier.VerifyHMAC] check that it equals the trusted key's AlgorithmID.
 	ExtensionAlgorithms map[string]AlgorithmID
 	// AllowHS2019WithSHA256 permits the Fediverse hs2019 interpretation only for
 	// RSA PKCS #1 v1.5 with SHA-256. That AlgorithmID must also be allowed.
+	// Otherwise, [NewCavageVerifier] returns [ErrInvalidVerificationOptions].
 	AllowHS2019WithSHA256 bool
 }
 

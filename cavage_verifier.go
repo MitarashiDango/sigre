@@ -319,6 +319,9 @@ func newCavageVerificationConfig(opts *CavageVerificationOptions) (cavageVerific
 		if !isLegacyCavageAlgorithm(id) {
 			return cavageVerificationConfig{}, fmt.Errorf("%w: AllowedLegacyAlgorithms contains non-legacy AlgorithmID %d", ErrInvalidVerificationOptions, id)
 		}
+		if _, ok := config.allowedAlgorithms[id]; !ok {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: AllowedLegacyAlgorithms contains AlgorithmID %d that is not allowed", ErrInvalidVerificationOptions, id)
+		}
 		config.allowedLegacyAlgorithms[id] = struct{}{}
 	}
 	config.extensionAlgorithms = make(map[string]AlgorithmID, len(compatibility.ExtensionAlgorithms))
@@ -326,7 +329,15 @@ func newCavageVerificationConfig(opts *CavageVerificationOptions) (cavageVerific
 		if err := validateCavageExtensionAlgorithm(label, id); err != nil {
 			return cavageVerificationConfig{}, fmt.Errorf("%w: ExtensionAlgorithms label %q: %v", ErrInvalidVerificationOptions, label, err)
 		}
+		if _, ok := config.allowedAlgorithms[id]; !ok {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: ExtensionAlgorithms label %q maps to AlgorithmID %d that is not allowed", ErrInvalidVerificationOptions, label, id)
+		}
 		config.extensionAlgorithms[label] = id
+	}
+	if compatibility.AllowHS2019WithSHA256 {
+		if _, ok := config.allowedAlgorithms[AlgorithmRSAPKCS1v15SHA256]; !ok {
+			return cavageVerificationConfig{}, fmt.Errorf("%w: AllowHS2019WithSHA256 requires AlgorithmRSAPKCS1v15SHA256 to be allowed", ErrInvalidVerificationOptions)
+		}
 	}
 	return config, nil
 }
@@ -567,16 +578,10 @@ func (v *CavageVerifier) validateWireAlgorithmBeforeKey(params *cavageParams, he
 			if _, ok := v.config.allowedLegacyAlgorithms[legacyID]; !ok {
 				return fmt.Errorf("%w: deprecated algorithm %q is not enabled", ErrInvalidSignatureAlgorithm, label)
 			}
-			if !v.isAlgorithmAllowed(legacyID) {
-				return fmt.Errorf("%w: AlgorithmID %d is not permitted", ErrInvalidSignatureAlgorithm, legacyID)
-			}
 		} else {
-			extensionID, ok := v.config.extensionAlgorithms[label]
+			_, ok := v.config.extensionAlgorithms[label]
 			if !ok {
 				return fmt.Errorf("%w: unregistered algorithm label %q", ErrInvalidSignatureAlgorithm, label)
-			}
-			if !v.isAlgorithmAllowed(extensionID) {
-				return fmt.Errorf("%w: extension AlgorithmID %d is not permitted", ErrInvalidSignatureAlgorithm, extensionID)
 			}
 		}
 	}

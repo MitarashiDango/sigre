@@ -70,6 +70,9 @@ func TestNewCavageVerifierValidationAndDeepCopy(t *testing.T) {
 		{Compatibility: &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"hs2019": sigre.AlgorithmEd25519}}},
 		{Compatibility: &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"rsa-sha1": sigre.AlgorithmEd25519}}},
 		{Compatibility: &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"ecdsa-sha256": sigre.AlgorithmEd25519}}},
+		{Compatibility: &sigre.CavageVerificationCompatibility{AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256}}},
+		{AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmEd25519}, Compatibility: &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"vendor-rsa512": sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{Compatibility: &sigre.CavageVerificationCompatibility{AllowHS2019WithSHA256: true}},
 	}
 	for i, options := range invalid {
 		if _, err := sigre.NewCavageVerifier(options); err == nil {
@@ -643,15 +646,6 @@ func TestCavageVerifierAlgorithmPolicy(t *testing.T) {
 		{name: "non-empty allowed set replaces defaults", algorithm: "hs2019", opts: &sigre.CavageVerificationOptions{AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmEd25519}}, key: rsa512Key, verifyErr: sigre.ErrInvalidSignatureAlgorithm},
 		{name: "label is case-sensitive", algorithm: "HS2019", key: rsa512Key, parseError: sigre.ErrInvalidSignatureAlgorithm},
 		{name: "legacy label disabled", algorithm: "rsa-sha256", key: rsa256Key, parseError: sigre.ErrInvalidSignatureAlgorithm},
-		{
-			name:      "legacy permission does not allow cryptographic algorithm",
-			algorithm: "rsa-sha256",
-			opts: &sigre.CavageVerificationOptions{Compatibility: &sigre.CavageVerificationCompatibility{
-				AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
-			}},
-			key:        rsa256Key,
-			parseError: sigre.ErrInvalidSignatureAlgorithm,
-		},
 		{
 			name:      "legacy exact permission",
 			algorithm: "rsa-sha256",

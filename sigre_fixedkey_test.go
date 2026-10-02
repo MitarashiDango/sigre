@@ -1290,20 +1290,16 @@ func TestFixedKeyCavageVerificationOptions(t *testing.T) {
 			req,
 			fixedSigningKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
 			sigre.CavageSignaturePlacementSignature,
-			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "", []string{"(request-target)", "host", "date", "digest"}, 0),
 		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
 
-		opts := fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256")
+		opts := fixedVerificationOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "")
 		opts.AllowedAlgorithms = []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512}
-		opts.Now = nowFunc
-		verifier, err := sigre.NewCavageVerifier(opts)
-		if err != nil {
-			t.Fatalf("NewCavageVerifier() failed: %v", err)
-		}
-		_, err = verifier.ParseRequest(req)
+		verifier, signature := parseFixedRequest(t, req, opts, nowFunc)
+		err = verifier.Verify(signature, fixedPublicVerificationKey("test-key-rsa", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPub))
 		if err == nil {
 			t.Error("verification succeeded with non-permitted hash algorithm")
 		}

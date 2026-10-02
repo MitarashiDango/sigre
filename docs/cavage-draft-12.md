@@ -110,9 +110,9 @@ return verifier.Verify(signature, verificationKey)
 
 厳格な既定値では、`hs2019`表現とSHA-512方式またはEd25519を使用します。次の互換性設定は自動では有効になりません。
 
-- `AlgorithmFieldLegacy`と`AllowedLegacyAlgorithms`: `rsa-sha256`、`ecdsa-sha256`、`hmac-sha256`という非推奨ラベル。検証側では、対応する方式を`AllowedAlgorithms`にも含めます。
-- `AlgorithmFieldHS2019WithSHA256`と`AllowHS2019WithSHA256`: Fediverse実装で使用例がある、`hs2019`をRSA PKCS #1 v1.5/SHA-256として扱う設定。
-- `Extension`と`ExtensionAlgorithms`: 未登録ラベルと1つの`AlgorithmID`を明示的に対応付ける設定。
+- `AlgorithmFieldLegacy`と`AllowedLegacyAlgorithms`: `rsa-sha256`、`ecdsa-sha256`、`hmac-sha256`という非推奨ラベル。検証側では、対応する方式を`AllowedAlgorithms`にも含めます。含めない場合、`NewCavageVerifier`は`ErrInvalidVerificationOptions`を返します。
+- `AlgorithmFieldHS2019WithSHA256`と`AllowHS2019WithSHA256`: Fediverse実装で使用例がある、`hs2019`をRSA PKCS #1 v1.5/SHA-256として扱う設定。検証側で有効にする場合、`AllowedAlgorithms`に`AlgorithmRSAPKCS1v15SHA256`を含める必要があり、含めない場合、`NewCavageVerifier`は`ErrInvalidVerificationOptions`を返します。
+- `Extension`と`ExtensionAlgorithms`: 未登録ラベルと1つの`AlgorithmID`を明示的に対応付ける設定。検証側では、対応付けた方式が`AllowedAlgorithms`の実効的な許可集合（`nil`または空なら既定の4方式）に含まれない場合、`NewCavageVerifier`は`ErrInvalidVerificationOptions`を返します。
 - `ExactHeaders`: 接続先が要求する署名対象全体を指定する設定。
 
 ## エラー処理

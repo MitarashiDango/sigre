@@ -73,29 +73,29 @@ var (
 	ErrInvalidSigningOptions = errors.New("invalid signing options")
 )
 
-// SigreError wraps an internal error with package context.
-type SigreError struct {
+// Error wraps an internal error with package context.
+type Error struct {
 	// Err is the wrapped error. Use [errors.Is] or [errors.As] to inspect it.
 	Err error
 }
 
-func wrapSigreError(err error) error {
+func wrapError(err error) error {
 	if err == nil {
 		return nil
 	}
-	var se *SigreError
+	var se *Error
 	if errors.As(err, &se) {
 		return err
 	}
-	return &SigreError{Err: err}
+	return &Error{Err: err}
 }
 
 // Unwrap returns the error wrapped with sigre package context.
-func (e *SigreError) Unwrap() error {
+func (e *Error) Unwrap() error {
 	return e.Err
 }
 
 // Error returns the wrapped error message with sigre package context.
-func (e *SigreError) Error() string {
+func (e *Error) Error() string {
 	return fmt.Sprintf("sigre error: %s", e.Err)
 }

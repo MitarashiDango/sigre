@@ -88,9 +88,9 @@ The successful path requires only the matching, explicit compatibility choice:
 - the extension vector maps the exact `sigre-test-rsa-sha512` label to
   `AlgorithmRSAPKCS1v15SHA512` in `ExtensionAlgorithms`.
 
-On the signing side, the product vectors select `AlgorithmFieldLegacy`, the
-Fediverse vector selects `AlgorithmFieldHS2019WithSHA256`, and the extension
-vector supplies an `ExtensionAlgorithm`. Every vector supplies `ExactHeaders`
+On the signing side, the product vectors select `CavageAlgorithmFieldLegacy`, the
+Fediverse vector selects `CavageAlgorithmFieldHS2019WithSHA256`, and the extension
+vector supplies a `CavageExtensionAlgorithm`. Every vector supplies `ExactHeaders`
 and explicitly chooses `Signature` or `Authorization` placement. In every case,
 `SigningKey.Metadata.Algorithm` determines the cryptographic operation; the
 wire label does not.

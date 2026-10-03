@@ -149,7 +149,7 @@ func (f cavageConformanceFixture) algorithmID(t *testing.T) sigre.AlgorithmID {
 	case "rsa/sha512":
 		return sigre.AlgorithmRSAPKCS1v15SHA512
 	case "ecdsa/sha512":
-		return sigre.AlgorithmECDSASHA512
+		return sigre.AlgorithmECDSAASN1SHA512
 	case "ed25519/":
 		return sigre.AlgorithmEd25519
 	case "hmac/sha512":

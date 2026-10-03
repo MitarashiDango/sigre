@@ -6,8 +6,9 @@
 //
 // Create signatures with [NewCavageSigner] and the SignRequest, SignResponse,
 // SignRequestWithHMAC, or SignResponseWithHMAC methods on [CavageSigner]. Every
-// signing call receives a [SigningKey] or [HMACSigningKey] and an explicit
-// [CavageSignaturePlacement].
+// signing call receives a [SigningKey] or [HMACSigningKey]. Request signing also
+// requires an explicit [CavageSignaturePlacement]; response signing always
+// writes to the Signature header.
 //
 // Construct a [CavageVerifier], parse a received signature with ParseRequest or
 // ParseResponse, resolve the snapshot's KeyID to a trusted [VerificationKey] or
@@ -30,8 +31,8 @@
 package sigre
 
 const (
-	// Authorization is the HTTP header used for Authorization: Signature placement.
-	Authorization = "Authorization"
-	// Signature is the HTTP header used for direct Cavage signature placement.
-	Signature = "Signature"
+	// HeaderAuthorization is the HTTP header used for Authorization: Signature placement.
+	HeaderAuthorization = "Authorization"
+	// HeaderSignature is the HTTP header used for direct Cavage signature placement.
+	HeaderSignature = "Signature"
 )

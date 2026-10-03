@@ -78,10 +78,10 @@ func TestCavageResponseMissingHostDoesNotUseRequestOrModifyInput(t *testing.T) {
 						}
 					}
 					if res.Header != nil {
-						res.Header.Set(Authorization, "Bearer response-token")
+						res.Header.Set(HeaderAuthorization, "Bearer response-token")
 						res.Header.Set("X-Unrelated", "unchanged")
 						if operation == "ParseResponse" {
-							res.Header.Set(Signature, fixedCavageHMACHeader(t, "host: request.example", "host"))
+							res.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, "host: request.example", "host"))
 						}
 					}
 					assertResponseHostInputUnchanged(t, res)
@@ -92,9 +92,9 @@ func TestCavageResponseMissingHostDoesNotUseRequestOrModifyInput(t *testing.T) {
 						err = NewCavageSigner().SignResponse(res, SigningKey{
 							Metadata:   TrustedKeyMetadata{KeyID: "response-host-key", Algorithm: AlgorithmEd25519},
 							PrivateKey: privateKey,
-						}, CavageSignaturePlacementSignature, signingStringOptions([]string{"host"}))
+						}, signingStringOptions([]string{"host"}))
 					case "SignResponseWithHMAC":
-						err = NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"host"}))
+						err = NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), signingStringOptions([]string{"host"}))
 					case "ParseResponse":
 						var signature *CavageSignature
 						signature, err = newSigningStringVerifier(t).ParseResponse(res)
@@ -138,17 +138,17 @@ func TestCavageResponseUsesOwnHost(t *testing.T) {
 				res.Request = &http.Request{Host: tt.requestHost, Body: &receivedCountingBody{}}
 			}
 			wantHeader := res.Header.Clone()
-			if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"host"})); err != nil {
+			if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), signingStringOptions([]string{"host"})); err != nil {
 				t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 			}
-			assertCavageHMACSignature(t, res.Header.Get(Signature), tt.want)
-			wantHeader.Set(Signature, res.Header.Get(Signature))
+			assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), tt.want)
+			wantHeader.Set(HeaderSignature, res.Header.Get(HeaderSignature))
 			if !reflect.DeepEqual(res.Header, wantHeader) {
 				t.Error("signing modified fields other than Signature")
 			}
 
 			// Verify an independently calculated signature over the fixed string.
-			res.Header.Set(Signature, fixedCavageHMACHeader(t, tt.want, "host"))
+			res.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, tt.want, "host"))
 			assertResponseHostInputUnchanged(t, res)
 			verifyCavageResponseHMAC(t, res)
 		})
@@ -163,12 +163,12 @@ func TestCavageResponseRejectsForbiddenHostValues(t *testing.T) {
 				Body:   &receivedCountingBody{},
 			}
 			if operation == "ParseResponse" {
-				res.Header.Set(Signature, fixedCavageHMACHeader(t, "host: first.example, a\x7fb", "host"))
+				res.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, "host: first.example, a\x7fb", "host"))
 			}
 			assertResponseHostInputUnchanged(t, res)
 			var err error
 			if operation == "SignResponseWithHMAC" {
-				err = NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"host"}))
+				err = NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), signingStringOptions([]string{"host"}))
 			} else {
 				var signature *CavageSignature
 				signature, err = newSigningStringVerifier(t).ParseResponse(res)
@@ -204,11 +204,11 @@ func TestCavageResponseDoesNotResolveUnsignedHost(t *testing.T) {
 				Request: &http.Request{Host: tt.host, Body: &receivedCountingBody{}},
 			}
 			res.Header.Set("X-Test", "signed")
-			if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"x-test"})); err != nil {
+			if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), signingStringOptions([]string{"x-test"})); err != nil {
 				t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 			}
-			assertCavageHMACSignature(t, res.Header.Get(Signature), "x-test: signed")
-			res.Header.Set(Signature, fixedCavageHMACHeader(t, "x-test: signed", "x-test"))
+			assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), "x-test: signed")
+			res.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, "x-test: signed", "x-test"))
 			assertResponseHostInputUnchanged(t, res)
 			verifyCavageResponseHMAC(t, res)
 		})
@@ -229,10 +229,10 @@ func TestCavageResponseHostMatchesHTTPWireForm(t *testing.T) {
 			res.Body = http.NoBody
 			res.Request = outgoingTestRequest(http.MethodGet)
 			res.Header["Host"] = []string{tt.value}
-			if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"host"})); err != nil {
+			if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), signingStringOptions([]string{"host"})); err != nil {
 				t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 			}
-			assertCavageHMACSignature(t, res.Header.Get(Signature), tt.want)
+			assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), tt.want)
 			wire := writeOutgoingResponse(t, res)
 			assertOutgoingWireField(t, wire, "Host", []string{tt.value})
 			received, err := http.ReadResponse(bufio.NewReader(strings.NewReader(wire)), res.Request)

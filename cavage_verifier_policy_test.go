@@ -111,7 +111,7 @@ func TestNewCavageVerifierValidationAndDeepCopy(t *testing.T) {
 	required[0] = "missing"
 	allowed[0] = sigre.AlgorithmRSAPKCS1v15SHA256
 	compatibility.AllowedLegacyAlgorithms[0] = sigre.AlgorithmHMACSHA256
-	compatibility.ExtensionAlgorithms["vendor-rsa512"] = sigre.AlgorithmECDSASHA512
+	compatibility.ExtensionAlgorithms["vendor-rsa512"] = sigre.AlgorithmECDSAASN1SHA512
 	compatibility.AllowedCreatedFutureSkew = -time.Second
 
 	req := rawVerifierPolicyRequest(verifierPolicyParameters("vendor-rsa512", "x-test", ""))
@@ -151,7 +151,7 @@ func TestCavageVerifierSnapshotIsImmutable(t *testing.T) {
 		fixedHMACSigningKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, secret),
 		sigre.CavageSignaturePlacementSignature,
 		&sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-			ExactHeaders: []string{sigre.RequestTarget, "host", "x-test"},
+			ExactHeaders: []string{sigre.CavageRequestTarget, "host", "x-test"},
 		}},
 	); err != nil {
 		t.Fatalf("signing failed: %v", err)
@@ -181,7 +181,7 @@ func TestCavageVerifierSnapshotIsImmutable(t *testing.T) {
 	req.URL.Path = "/changed-url"
 	req.URL.RawQuery = "changed=true"
 	req.Header.Set("X-Test", "changed")
-	req.Header.Set(sigre.Signature, "malformed")
+	req.Header.Set(sigre.HeaderSignature, "malformed")
 	if err := verifier.VerifyHMAC(signature, fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, secret)); err != nil {
 		t.Fatalf("request mutation changed verification result: %v", err)
 	}
@@ -195,8 +195,7 @@ func TestCavageVerifierSnapshotIsImmutable(t *testing.T) {
 	if err := signer.SignResponseWithHMAC(
 		response,
 		fixedHMACSigningKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, secret),
-		sigre.CavageSignaturePlacementSignature,
-		&sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.RequestTarget, "host", "x-test"}}},
+		&sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.CavageRequestTarget, "host", "x-test"}}},
 	); err != nil {
 		t.Fatalf("response signing failed: %v", err)
 	}
@@ -260,7 +259,7 @@ func TestCavageSignatureAccessors(t *testing.T) {
 	if expires, ok := signature.Expires(); !ok || !expires.Equal(time.Unix(101, 500_000_000)) {
 		t.Fatalf("Expires() = %v/%t", expires, ok)
 	}
-	if !signature.HeadersExplicit() || !slices.Equal(signature.SignedHeaders(), []string{sigre.Created, sigre.Expires, "x-test"}) {
+	if !signature.HeadersExplicit() || !slices.Equal(signature.SignedHeaders(), []string{sigre.CavageCreated, sigre.CavageExpires, "x-test"}) {
 		t.Fatalf("unexpected signed headers: explicit=%t headers=%q", signature.HeadersExplicit(), signature.SignedHeaders())
 	}
 
@@ -269,7 +268,7 @@ func TestCavageSignatureAccessors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("omitted parameters failed: %v", err)
 	}
-	if _, ok := omittedSignature.AlgorithmLabel(); ok || omittedSignature.HeadersExplicit() || !slices.Equal(omittedSignature.SignedHeaders(), []string{sigre.Created}) {
+	if _, ok := omittedSignature.AlgorithmLabel(); ok || omittedSignature.HeadersExplicit() || !slices.Equal(omittedSignature.SignedHeaders(), []string{sigre.CavageCreated}) {
 		t.Fatalf("omitted accessor state is incorrect")
 	}
 }
@@ -809,7 +808,7 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 		{name: "ECDSA custom curve", key: &ecdsa.PublicKey{Curve: &customParams, X: ecdsaPrivateKey.X, Y: ecdsaPrivateKey.Y}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			key := fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, tt.key)
+			key := fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSAASN1SHA512, tt.key)
 			assertPackageError(t, verifier.Verify(signature, key), sigre.ErrUnsupportedKeyFormat)
 			assertPackageError(t, restrictedVerifier.Verify(restrictedSignature, key), sigre.ErrUnsupportedKeyFormat)
 		})
@@ -818,19 +817,19 @@ func TestCavageVerifierVerifyPriorityAndOwnership(t *testing.T) {
 	t.Run("ECDSA signature with another public key", func(t *testing.T) {
 		req := newSignerPolicyRequest(t)
 		signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
-		if err := signer.SignRequest(req, fixedSigningKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
+		if err := signer.SignRequest(req, fixedSigningKey(verifierPolicyKeyID, sigre.AlgorithmECDSAASN1SHA512, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
 			t.Fatalf("SignRequest() failed: %v", err)
 		}
 		req.RequestURI = req.URL.RequestURI()
 		ecdsaVerifier, ecdsaSignature := parseSignerPolicyRequest(t, req, testFixedTime, nil)
-		if err := ecdsaVerifier.Verify(ecdsaSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, &ecdsaPrivateKey.PublicKey)); err != nil {
+		if err := ecdsaVerifier.Verify(ecdsaSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSAASN1SHA512, &ecdsaPrivateKey.PublicKey)); err != nil {
 			t.Fatalf("Verify() with the signing key failed: %v", err)
 		}
 		otherPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 		if err != nil {
 			t.Fatalf("failed to generate another ECDSA key: %v", err)
 		}
-		err = ecdsaVerifier.Verify(ecdsaSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSASHA512, &otherPrivateKey.PublicKey))
+		err = ecdsaVerifier.Verify(ecdsaSignature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmECDSAASN1SHA512, &otherPrivateKey.PublicKey))
 		assertPackageError(t, err, sigre.ErrVerification)
 	})
 
@@ -859,7 +858,7 @@ func TestCavageVerifierErrorPriority(t *testing.T) {
 			t.Fatal(err)
 		}
 		req := rawVerifierPolicyRequest("malformed")
-		req.Header.Set(sigre.Authorization, "Signature malformed")
+		req.Header.Set(sigre.HeaderAuthorization, "Signature malformed")
 		_, err = verifier.ParseRequest(req)
 		assertPackageError(t, err, sigre.ErrSignatureSourceConflict)
 	})
@@ -1027,7 +1026,7 @@ func FuzzCavageVerifierParseRequest(f *testing.F) {
 		req := rawVerifierPolicyRequest(parameters)
 		_, err = verifier.ParseRequest(req)
 		if err != nil {
-			var packageError *sigre.SigreError
+			var packageError *sigre.Error
 			if !errors.As(err, &packageError) {
 				t.Fatalf("ParseRequest() returned an unwrapped error: %v", err)
 			}
@@ -1067,7 +1066,7 @@ func TestCavageVerifierConcurrentUse(t *testing.T) {
 		req,
 		fixedHMACSigningKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, secret),
 		sigre.CavageSignaturePlacementSignature,
-		&sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.RequestTarget, "host", "x-test"}}},
+		&sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.CavageRequestTarget, "host", "x-test"}}},
 	); err != nil {
 		t.Fatalf("signing failed: %v", err)
 	}

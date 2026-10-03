@@ -10,8 +10,8 @@ func assertPackageError(t *testing.T, err, want error) {
 	if !errors.Is(err, want) {
 		t.Fatalf("error = %v, want %v", err, want)
 	}
-	var packageError *SigreError
+	var packageError *Error
 	if !errors.As(err, &packageError) {
-		t.Fatalf("error %v is not wrapped by *SigreError", err)
+		t.Fatalf("error %v is not wrapped by *Error", err)
 	}
 }

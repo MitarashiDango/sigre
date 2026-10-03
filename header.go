@@ -33,7 +33,7 @@ func requestCavageSignatureCandidate(h http.Header, source CavageRequestSignatur
 }
 
 func signatureHeaderCandidate(h http.Header) (cavageSignatureCandidate, error) {
-	values := h.Values(Signature)
+	values := h.Values(HeaderSignature)
 	if len(values) > 1 {
 		return cavageSignatureCandidate{}, fmt.Errorf("%w: multiple Signature field values are present", ErrSignatureSourceConflict)
 	}
@@ -45,7 +45,7 @@ func signatureHeaderCandidate(h http.Header) (cavageSignatureCandidate, error) {
 
 func authorizationSignatureCandidate(h http.Header) (cavageSignatureCandidate, error) {
 	var candidate cavageSignatureCandidate
-	for _, value := range h.Values(Authorization) {
+	for _, value := range h.Values(HeaderAuthorization) {
 		params, ok := cavageAuthorizationParams(value)
 		if !ok {
 			continue
@@ -66,7 +66,7 @@ func cavageAuthorizationParams(value string) (string, bool) {
 	for pos < len(value) && isCavageTokenByte(value[pos]) {
 		pos++
 	}
-	if pos == 0 || !strings.EqualFold(value[:pos], Signature) {
+	if pos == 0 || !strings.EqualFold(value[:pos], HeaderSignature) {
 		return "", false
 	}
 	if pos == len(value) {

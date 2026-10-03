@@ -29,7 +29,7 @@ func signingStringHMACSigningKey(keyID string) HMACSigningKey {
 func signingStringOptions(headers []string) *CavageSigningOptions {
 	return &CavageSigningOptions{
 		Compatibility: &CavageSigningCompatibility{
-			AlgorithmField: AlgorithmFieldOmitted,
+			AlgorithmField: CavageAlgorithmFieldOmitted,
 			ExactHeaders:   headers,
 		},
 	}
@@ -134,14 +134,14 @@ func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
 				req,
 				signingStringHMACSigningKey("request-target-key"),
 				CavageSignaturePlacementSignature,
-				signingStringOptions([]string{RequestTarget}),
+				signingStringOptions([]string{CavageRequestTarget}),
 			)
 			if err != nil {
 				t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 			}
 
 			wantSigningString := "(request-target): " + strings.ToLower(tt.method) + " " + tt.want
-			assertCavageHMACSignature(t, req.Header.Get(Signature), wantSigningString)
+			assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), wantSigningString)
 
 			var wire bytes.Buffer
 			if err := req.Write(&wire); err != nil {
@@ -181,14 +181,14 @@ func TestCavageRequestSignerDefaultsEmptyMethodToGET(t *testing.T) {
 			if err := signer.SignRequestWithHMAC(req, key, CavageSignaturePlacementSignature, nil); err != nil {
 				t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 			}
-			params, err := parseCavageParams(req.Header.Get(Signature))
+			params, err := parseCavageParams(req.Header.Get(HeaderSignature))
 			if err != nil {
 				t.Fatalf("parseCavageParams() failed: %v", err)
 			}
-			if params.Signature != wantSignature || params.Created != "100" || !reflect.DeepEqual(params.Headers, []string{RequestTarget, Created}) {
+			if params.Signature != wantSignature || params.Created != "100" || !reflect.DeepEqual(params.Headers, []string{CavageRequestTarget, CavageCreated}) {
 				t.Fatalf("signature parameters = %+v, want the fixed HMAC over %q with default headers", params, wantSigningString)
 			}
-			headerBefore.Set(Signature, req.Header.Get(Signature))
+			headerBefore.Set(HeaderSignature, req.Header.Get(HeaderSignature))
 			if req.Method != method || req.RequestURI != "" || req.URL != urlBefore || *req.URL != urlValueBefore || !reflect.DeepEqual(req.Header, headerBefore) || req.Body != http.NoBody {
 				t.Fatal("SignRequestWithHMAC() modified the request beyond its Signature field")
 			}
@@ -223,7 +223,7 @@ func TestCavageRequestSignerRejectsOpaqueRequestTarget(t *testing.T) {
 		req,
 		signingStringHMACSigningKey("opaque-key"),
 		CavageSignaturePlacementSignature,
-		signingStringOptions([]string{RequestTarget}),
+		signingStringOptions([]string{CavageRequestTarget}),
 	)
 	if !errors.Is(err, ErrInvalidHTTPMessage) || !strings.Contains(err.Error(), "request-target is missing") {
 		t.Fatalf("SignRequestWithHMAC() error = %v, want ErrInvalidHTTPMessage for a missing request-target", err)
@@ -241,12 +241,12 @@ func TestCavageRequestSignerRejectsNilURLRequestTarget(t *testing.T) {
 		req,
 		signingStringHMACSigningKey("nil-url-key"),
 		CavageSignaturePlacementSignature,
-		signingStringOptions([]string{RequestTarget}),
+		signingStringOptions([]string{CavageRequestTarget}),
 	)
 	if !errors.Is(err, ErrInvalidHTTPMessage) {
 		t.Fatalf("SignRequestWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
 	}
-	if !reflect.DeepEqual(req.Header, headerBefore) || req.Header.Get(Signature) != "" {
+	if !reflect.DeepEqual(req.Header, headerBefore) || req.Header.Get(HeaderSignature) != "" {
 		t.Fatalf("failed signing changed Header: %#v", req.Header)
 	}
 }
@@ -300,7 +300,7 @@ func TestCavageRequestSignerRejectsCONNECTRequestTarget(t *testing.T) {
 						PrivateKey: privateKey,
 					},
 					CavageSignaturePlacementSignature,
-					signingStringOptions([]string{RequestTarget}),
+					signingStringOptions([]string{CavageRequestTarget}),
 				)
 			},
 		},
@@ -312,7 +312,7 @@ func TestCavageRequestSignerRejectsCONNECTRequestTarget(t *testing.T) {
 					req,
 					signingStringHMACSigningKey("connect-hmac-key"),
 					CavageSignaturePlacementAuthorization,
-					signingStringOptions([]string{RequestTarget}),
+					signingStringOptions([]string{CavageRequestTarget}),
 				)
 			},
 		},
@@ -339,7 +339,7 @@ func TestCavageRequestSignerRejectsCONNECTRequestTarget(t *testing.T) {
 			if !reflect.DeepEqual(req.Header, headerBefore) || !reflect.DeepEqual(req.URL, &urlBefore) || req.Body != body || req.Method != http.MethodConnect || req.RequestURI != "" {
 				t.Fatal("failed CONNECT signing modified the request")
 			}
-			if req.Header.Get(Signature) != "" || req.Header.Get(Authorization) != "Bearer unchanged" {
+			if req.Header.Get(HeaderSignature) != "" || req.Header.Get(HeaderAuthorization) != "Bearer unchanged" {
 				t.Fatalf("failed CONNECT signing changed signature fields: %#v", req.Header)
 			}
 			if body.reads != 0 || body.closes != 0 {
@@ -374,8 +374,7 @@ func TestCavageResponseSignerRejectsAssociatedCONNECTRequestTarget(t *testing.T)
 	err = NewCavageSigner().SignResponseWithHMAC(
 		res,
 		signingStringHMACSigningKey("response-connect-key"),
-		CavageSignaturePlacementSignature,
-		signingStringOptions([]string{RequestTarget}),
+		signingStringOptions([]string{CavageRequestTarget}),
 	)
 	assertConnectRequestTargetError(t, err)
 	if !reflect.DeepEqual(res.Header, headerBefore) || res.Body != resBody || res.Request != req {
@@ -384,7 +383,7 @@ func TestCavageResponseSignerRejectsAssociatedCONNECTRequestTarget(t *testing.T)
 	if !reflect.DeepEqual(req.Header, requestHeaderBefore) || !reflect.DeepEqual(req.URL, &requestURLBefore) || req.Body != reqBody || req.Method != http.MethodConnect || req.RequestURI != "Tunnel.Example:443" {
 		t.Fatal("failed response signing modified the associated CONNECT request")
 	}
-	if res.Header.Get(Signature) != "" || res.Header.Get(Authorization) != "Bearer unchanged" {
+	if res.Header.Get(HeaderSignature) != "" || res.Header.Get(HeaderAuthorization) != "Bearer unchanged" {
 		t.Fatalf("failed response signing changed signature fields: %#v", res.Header)
 	}
 	if reqBody.reads != 0 || reqBody.closes != 0 || resBody.reads != 0 || resBody.closes != 0 {
@@ -423,10 +422,10 @@ func TestGenerateSignatureStringErrorSentinels(t *testing.T) {
 		wantError     error
 	}{
 		{name: "missing field", headerName: "date", wantError: ErrSignedHeaderMissing},
-		{name: "missing method", headerName: RequestTarget, requestTarget: "/", wantError: ErrInvalidHTTPMessage},
-		{name: "missing request-target", headerName: RequestTarget, method: "GET", wantError: ErrInvalidHTTPMessage},
-		{name: "empty created", headerName: Created, wantError: ErrInvalidCreationTime},
-		{name: "empty expires", headerName: Expires, wantError: ErrInvalidExpirationTime},
+		{name: "missing method", headerName: CavageRequestTarget, requestTarget: "/", wantError: ErrInvalidHTTPMessage},
+		{name: "missing request-target", headerName: CavageRequestTarget, method: "GET", wantError: ErrInvalidHTTPMessage},
+		{name: "empty created", headerName: CavageCreated, wantError: ErrInvalidCreationTime},
+		{name: "empty expires", headerName: CavageExpires, wantError: ErrInvalidExpirationTime},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := generateSignatureStringBuffer([]string{tt.headerName}, tt.method, tt.requestTarget, nil, "", "")
@@ -448,13 +447,13 @@ func TestCavageSignedHeaderNamesAreCaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 	}
-	value := req.Header.Get(Signature)
+	value := req.Header.Get(HeaderSignature)
 	assertCavageHMACSignature(t, value, "(request-target): get /\nx-foo: value")
 	const normalizedParameter = `headers="(request-target) x-foo"`
 	if !strings.Contains(value, normalizedParameter) {
 		t.Fatalf("signature parameters do not contain %s: %s", normalizedParameter, value)
 	}
-	req.Header.Set(Signature, strings.Replace(value, normalizedParameter, `headers="(Request-Target) X-FOO"`, 1))
+	req.Header.Set(HeaderSignature, strings.Replace(value, normalizedParameter, `headers="(Request-Target) X-FOO"`, 1))
 	req.RequestURI = "/"
 	opts := signingStringVerificationOptions()
 	opts.RequiredHeaders = headers
@@ -466,7 +465,7 @@ func TestCavageSignedHeaderNamesAreCaseInsensitive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRequest() failed: %v", err)
 	}
-	if got := signature.SignedHeaders(); !reflect.DeepEqual(got, []string{RequestTarget, "x-foo"}) {
+	if got := signature.SignedHeaders(); !reflect.DeepEqual(got, []string{CavageRequestTarget, "x-foo"}) {
 		t.Fatalf("SignedHeaders() = %v, want normalized names", got)
 	}
 	if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
@@ -501,12 +500,12 @@ func TestCavageSignerNormalHeaderCanonicalization(t *testing.T) {
 				err = signer.SignRequestWithHMAC(req, signingStringHMACSigningKey("normal-header-key"), CavageSignaturePlacementSignature, opts)
 			case "response":
 				res := &http.Response{Header: header}
-				err = signer.SignResponseWithHMAC(res, signingStringHMACSigningKey("normal-header-key"), CavageSignaturePlacementSignature, opts)
+				err = signer.SignResponseWithHMAC(res, signingStringHMACSigningKey("normal-header-key"), opts)
 			}
 			if err != nil {
 				t.Fatalf("signing failed: %v", err)
 			}
-			assertCavageHMACSignature(t, header.Get(Signature), want)
+			assertCavageHMACSignature(t, header.Get(HeaderSignature), want)
 		})
 	}
 }
@@ -520,21 +519,21 @@ func TestCavageSignerRejectsAuthorizationSelfReference(t *testing.T) {
 		{
 			name: "ExactHeaders with existing Bearer authorization",
 			header: http.Header{
-				Authorization: []string{"Bearer token"},
-				"X-Unrelated": []string{"unchanged"},
+				HeaderAuthorization: []string{"Bearer token"},
+				"X-Unrelated":       []string{"unchanged"},
 			},
 			opts: signingStringOptions([]string{"authorization"}),
 		},
 		{
 			name: "mixed-case AdditionalHeaders",
 			header: http.Header{
-				Authorization: []string{"Bearer token"},
-				"X-Unrelated": []string{"unchanged"},
+				HeaderAuthorization: []string{"Bearer token"},
+				"X-Unrelated":       []string{"unchanged"},
 			},
 			opts: &CavageSigningOptions{
 				AdditionalHeaders: []string{"AuThOrIzAtIoN"},
 				Compatibility: &CavageSigningCompatibility{
-					AlgorithmField: AlgorithmFieldOmitted,
+					AlgorithmField: CavageAlgorithmFieldOmitted,
 				},
 			},
 		},
@@ -569,91 +568,14 @@ func TestCavageSignerRejectsAuthorizationSelfReference(t *testing.T) {
 			if !reflect.DeepEqual(req.Header, beforeHeader) {
 				t.Fatalf("Header changed after failed signing\ngot:  %#v\nwant: %#v", req.Header, beforeHeader)
 			}
-			if req.Header.Get(Authorization) != tt.header.Get(Authorization) {
-				t.Fatalf("Authorization = %q, want %q", req.Header.Get(Authorization), tt.header.Get(Authorization))
+			if req.Header.Get(HeaderAuthorization) != tt.header.Get(HeaderAuthorization) {
+				t.Fatalf("Authorization = %q, want %q", req.Header.Get(HeaderAuthorization), tt.header.Get(HeaderAuthorization))
 			}
-			if req.Header.Get(Signature) != "" {
-				t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(Signature))
+			if req.Header.Get(HeaderSignature) != "" {
+				t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(HeaderSignature))
 			}
 			if req.Host != "example.test" || !reflect.DeepEqual(req.URL, &beforeURL) || req.Body != beforeBody {
 				t.Fatal("request fields changed after failed signing")
-			}
-		})
-	}
-}
-
-func TestCavageSignerRejectsResponseAuthorizationPlacement(t *testing.T) {
-	privateKey := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
-	asymmetricKey := SigningKey{
-		Metadata:   TrustedKeyMetadata{KeyID: "response-asymmetric-key", Algorithm: AlgorithmEd25519},
-		PrivateKey: privateKey,
-	}
-	hmacKey := HMACSigningKey{
-		Metadata: TrustedKeyMetadata{KeyID: "response-hmac-key", Algorithm: AlgorithmHMACSHA512},
-		Secret:   []byte("response-placement-secret"),
-	}
-
-	tests := []struct {
-		name   string
-		header http.Header
-		sign   func(*http.Response) error
-	}{
-		{
-			name: "asymmetric",
-			header: http.Header{
-				Authorization: []string{"Bearer token"},
-				"X-Unrelated": []string{"unchanged"},
-			},
-			sign: func(res *http.Response) error {
-				return NewCavageSigner().SignResponse(res, asymmetricKey, CavageSignaturePlacementAuthorization, nil)
-			},
-		},
-		{
-			name: "HMAC with existing signature",
-			header: http.Header{
-				Authorization: []string{"Bearer token"},
-				Signature:     []string{`keyId="existing"`},
-				"X-Unrelated": []string{"first", "second"},
-			},
-			sign: func(res *http.Response) error {
-				return NewCavageSigner().SignResponseWithHMAC(res, hmacKey, CavageSignaturePlacementAuthorization, nil)
-			},
-		},
-		{
-			name:   "HMAC with nil Header",
-			header: nil,
-			sign: func(res *http.Response) error {
-				return NewCavageSigner().SignResponseWithHMAC(res, hmacKey, CavageSignaturePlacementAuthorization, nil)
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			associatedRequest := &http.Request{Host: "example.test", Body: http.NoBody}
-			res := &http.Response{
-				Status:        "200 OK",
-				StatusCode:    http.StatusOK,
-				Header:        tt.header,
-				Body:          http.NoBody,
-				ContentLength: 17,
-				Request:       associatedRequest,
-			}
-			beforeHeader := tt.header.Clone()
-			beforeBody := res.Body
-			beforeRequest := res.Request
-
-			err := tt.sign(res)
-			assertInvalidPlacementError(t, err, "response")
-
-			if !reflect.DeepEqual(res.Header, beforeHeader) {
-				t.Fatalf("Header changed after failed signing\ngot:  %#v\nwant: %#v", res.Header, beforeHeader)
-			}
-			if res.Status != "200 OK" || res.StatusCode != http.StatusOK || res.ContentLength != 17 {
-				t.Fatal("response fields changed after failed signing")
-			}
-			if res.Body != beforeBody || res.Request != beforeRequest || res.Request != associatedRequest {
-				t.Fatal("response Body or associated Request changed after failed signing")
 			}
 		})
 	}
@@ -670,16 +592,16 @@ func TestCavageSignerAllowsNonSelfReferentialPlacement(t *testing.T) {
 			Host:   "example.test",
 			Header: http.Header{"X-Unrelated": []string{"unchanged"}},
 		}
-		opts := &CavageSigningOptions{Compatibility: &CavageSigningCompatibility{AlgorithmField: AlgorithmFieldOmitted}}
+		opts := &CavageSigningOptions{Compatibility: &CavageSigningCompatibility{AlgorithmField: CavageAlgorithmFieldOmitted}}
 
 		if err := signer.SignRequestWithHMAC(req, signingStringHMACSigningKey("authorization-output-key"), CavageSignaturePlacementAuthorization, opts); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		authorization := req.Header.Get(Authorization)
+		authorization := req.Header.Get(HeaderAuthorization)
 		if !strings.HasPrefix(authorization, "Signature keyId=") {
 			t.Fatalf("Authorization = %q, want Signature scheme", authorization)
 		}
-		if req.Header.Get(Signature) != "" || req.Header.Get("X-Unrelated") != "unchanged" {
+		if req.Header.Get(HeaderSignature) != "" || req.Header.Get("X-Unrelated") != "unchanged" {
 			t.Fatalf("unexpected final Header: %#v", req.Header)
 		}
 		assertCavageHMACSignature(t, authorization, "(request-target): post /resource?x=1\n(created): 1700000000")
@@ -690,30 +612,30 @@ func TestCavageSignerAllowsNonSelfReferentialPlacement(t *testing.T) {
 			Method: "GET",
 			URL:    &url.URL{Scheme: "https", Host: "example.test", Path: "/"},
 			Host:   "example.test",
-			Header: http.Header{Authorization: []string{"Bearer token"}},
+			Header: http.Header{HeaderAuthorization: []string{"Bearer token"}},
 		}
 
 		if err := signer.SignRequestWithHMAC(req, signingStringHMACSigningKey("authorization-input-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"Authorization"})); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		if req.Header.Get(Authorization) != "Bearer token" {
-			t.Fatalf("Authorization = %q, want existing Bearer value", req.Header.Get(Authorization))
+		if req.Header.Get(HeaderAuthorization) != "Bearer token" {
+			t.Fatalf("Authorization = %q, want existing Bearer value", req.Header.Get(HeaderAuthorization))
 		}
-		if req.Header.Get(Signature) == "" {
+		if req.Header.Get(HeaderSignature) == "" {
 			t.Fatal("Signature header is missing")
 		}
-		assertCavageHMACSignature(t, req.Header.Get(Signature), "authorization: Bearer token")
+		assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "authorization: Bearer token")
 	})
 
 	t.Run("response Signature placement", func(t *testing.T) {
 		res := &http.Response{Header: http.Header{"X-Response": []string{"signed value"}}}
-		if err := signer.SignResponseWithHMAC(res, signingStringHMACSigningKey("response-signature-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{"X-Response"})); err != nil {
+		if err := signer.SignResponseWithHMAC(res, signingStringHMACSigningKey("response-signature-key"), signingStringOptions([]string{"X-Response"})); err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		if res.Header.Get(Signature) == "" || res.Header.Get(Authorization) != "" {
+		if res.Header.Get(HeaderSignature) == "" || res.Header.Get(HeaderAuthorization) != "" {
 			t.Fatalf("unexpected final Header: %#v", res.Header)
 		}
-		assertCavageHMACSignature(t, res.Header.Get(Signature), "x-response: signed value")
+		assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), "x-response: signed value")
 	})
 }
 
@@ -729,10 +651,9 @@ func TestCavageSignerRejectsInvalidPlacementBeforeSigningWork(t *testing.T) {
 		detail    string
 	}{
 		{name: "request self-reference", isRequest: true, detail: "self-reference"},
-		{name: "response Authorization placement", detail: "response"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			header := http.Header{Authorization: []string{"Bearer token"}}
+			header := http.Header{HeaderAuthorization: []string{"Bearer token"}}
 			beforeHeader := header.Clone()
 			resolveCalls := 0
 			timeCalls := 0
@@ -799,7 +720,7 @@ func TestCavageSignerRejectsCONNECTBeforeCryptographicWork(t *testing.T) {
 		TrustedKeyMetadata{KeyID: "connect-callback-key", Algorithm: AlgorithmHMACSHA256},
 		algorithm,
 		CavageSignaturePlacementSignature,
-		signingStringOptions([]string{RequestTarget}),
+		signingStringOptions([]string{CavageRequestTarget}),
 		func([]byte) ([]byte, error) {
 			signCalls++
 			return []byte("signature"), nil
@@ -943,11 +864,11 @@ func TestCavageSignerRejectsForbiddenHostWithoutMutation(t *testing.T) {
 		if req.Body != beforeBody {
 			t.Fatal("Request.Body changed after failed signing")
 		}
-		if _, ok := header[Signature]; ok {
-			t.Fatalf("Signature was set after failed signing: %q", header.Values(Signature))
+		if _, ok := header[HeaderSignature]; ok {
+			t.Fatalf("Signature was set after failed signing: %q", header.Values(HeaderSignature))
 		}
-		if _, ok := header[Authorization]; ok {
-			t.Fatalf("Authorization was set after failed signing: %q", header.Values(Authorization))
+		if _, ok := header[HeaderAuthorization]; ok {
+			t.Fatalf("Authorization was set after failed signing: %q", header.Values(HeaderAuthorization))
 		}
 	})
 
@@ -965,7 +886,6 @@ func TestCavageSignerRejectsForbiddenHostWithoutMutation(t *testing.T) {
 		err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("invalid-host-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"host"}),
 		)
 		assertPackageError(t, err, ErrInvalidHTTPMessage)
@@ -983,11 +903,11 @@ func TestCavageSignerRejectsForbiddenHostWithoutMutation(t *testing.T) {
 		if res.Body != beforeBody {
 			t.Fatal("Response.Body changed after failed signing")
 		}
-		if _, ok := header[Signature]; ok {
-			t.Fatalf("Signature was set after failed signing: %q", header.Values(Signature))
+		if _, ok := header[HeaderSignature]; ok {
+			t.Fatalf("Signature was set after failed signing: %q", header.Values(HeaderSignature))
 		}
-		if _, ok := header[Authorization]; ok {
-			t.Fatalf("Authorization was set after failed signing: %q", header.Values(Authorization))
+		if _, ok := header[HeaderAuthorization]; ok {
+			t.Fatalf("Authorization was set after failed signing: %q", header.Values(HeaderAuthorization))
 		}
 	})
 }
@@ -1020,8 +940,8 @@ func TestCavageSignerNilHeaderContract(t *testing.T) {
 		{
 			name:      "asymmetric response",
 			placement: CavageSignaturePlacementSignature,
-			sign: func(_ *http.Request, res *http.Response, placement CavageSignaturePlacement, opts *CavageSigningOptions) error {
-				return signer.SignResponse(res, asymmetricKey, placement, opts)
+			sign: func(_ *http.Request, res *http.Response, _ CavageSignaturePlacement, opts *CavageSigningOptions) error {
+				return signer.SignResponse(res, asymmetricKey, opts)
 			},
 		},
 		{
@@ -1037,8 +957,8 @@ func TestCavageSignerNilHeaderContract(t *testing.T) {
 			name:      "HMAC response",
 			isHMAC:    true,
 			placement: CavageSignaturePlacementSignature,
-			sign: func(_ *http.Request, res *http.Response, placement CavageSignaturePlacement, opts *CavageSigningOptions) error {
-				return signer.SignResponseWithHMAC(res, hmacKey, placement, opts)
+			sign: func(_ *http.Request, res *http.Response, _ CavageSignaturePlacement, opts *CavageSigningOptions) error {
+				return signer.SignResponseWithHMAC(res, hmacKey, opts)
 			},
 		},
 	}
@@ -1119,7 +1039,7 @@ func TestCavageSignerNilHeaderContract(t *testing.T) {
 				opts := signingStringOptions([]string{"host"})
 				wantSigningString := "host: example.test"
 				if !tt.isRequest {
-					opts = signingStringOptions([]string{Created})
+					opts = signingStringOptions([]string{CavageCreated})
 					wantSigningString = "(created): 1700000000"
 				}
 				if err := tt.sign(req, res, tt.placement, opts); err != nil {
@@ -1136,9 +1056,9 @@ func TestCavageSignerNilHeaderContract(t *testing.T) {
 				if !tt.isRequest && req.Header != nil {
 					t.Fatalf("associated Request.Header = %#v after successful response signing, want nil", req.Header)
 				}
-				field := Signature
+				field := HeaderSignature
 				if tt.placement == CavageSignaturePlacementAuthorization {
-					field = Authorization
+					field = HeaderAuthorization
 				}
 				if got := header.Get(field); got == "" {
 					t.Fatalf("%s header was not set after successful signing", field)
@@ -1214,7 +1134,7 @@ func TestCavageSignerRejectsForbiddenHeaderValuesWithoutMutation(t *testing.T) {
 				}
 			} else {
 				res := &http.Response{Header: header}
-				err = signer.SignResponseWithHMAC(res, signingStringHMACSigningKey("invalid-value-key"), tt.placement, opts)
+				err = signer.SignResponseWithHMAC(res, signingStringHMACSigningKey("invalid-value-key"), opts)
 			}
 
 			if !errors.Is(err, ErrInvalidHTTPMessage) {
@@ -1223,11 +1143,11 @@ func TestCavageSignerRejectsForbiddenHeaderValuesWithoutMutation(t *testing.T) {
 			if !reflect.DeepEqual(header, before) {
 				t.Fatalf("Header changed after failed signing\ngot:  %#v\nwant: %#v", header, before)
 			}
-			if got := header.Get(Authorization); got != "Bearer existing-token" {
+			if got := header.Get(HeaderAuthorization); got != "Bearer existing-token" {
 				t.Fatalf("Authorization = %q, want existing Bearer value", got)
 			}
-			if _, ok := header[Signature]; ok {
-				t.Fatalf("Signature was set after failed signing: %q", header.Values(Signature))
+			if _, ok := header[HeaderSignature]; ok {
+				t.Fatalf("Signature was set after failed signing: %q", header.Values(HeaderSignature))
 			}
 		})
 	}
@@ -1247,8 +1167,8 @@ func TestCavageVerifierRejectsForbiddenSignedHeaderValues(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			wantSigningString := "x-signed: " + tt.value
 			header := http.Header{
-				"X-Signed": []string{tt.value},
-				Signature:  []string{fixedCavageHMACHeader(t, wantSigningString, "x-signed")},
+				"X-Signed":      []string{tt.value},
+				HeaderSignature: []string{fixedCavageHMACHeader(t, wantSigningString, "x-signed")},
 			}
 			before := header.Clone()
 			verifier, err := NewCavageVerifier(signingStringVerificationOptions())
@@ -1297,7 +1217,7 @@ func TestCavageSignerNormalHeaderValuesMatchHTTPWireForm(t *testing.T) {
 				if err := NewCavageSigner().SignRequestWithHMAC(req, signingStringHMACSigningKey("wire-key"), CavageSignaturePlacementSignature, opts); err != nil {
 					t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 				}
-				assertCavageHMACSignature(t, header.Get(Signature), wantSigningString)
+				assertCavageHMACSignature(t, header.Get(HeaderSignature), wantSigningString)
 				if err := req.Write(&wire); err != nil {
 					t.Fatalf("Request.Write() failed: %v", err)
 				}
@@ -1319,10 +1239,10 @@ func TestCavageSignerNormalHeaderValuesMatchHTTPWireForm(t *testing.T) {
 					Body:          http.NoBody,
 					ContentLength: 0,
 				}
-				if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("wire-key"), CavageSignaturePlacementSignature, opts); err != nil {
+				if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("wire-key"), opts); err != nil {
 					t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 				}
-				assertCavageHMACSignature(t, header.Get(Signature), wantSigningString)
+				assertCavageHMACSignature(t, header.Get(HeaderSignature), wantSigningString)
 				if err := res.Write(&wire); err != nil {
 					t.Fatalf("Response.Write() failed: %v", err)
 				}
@@ -1387,7 +1307,7 @@ func TestCavageRequestVerifierUsesRequestURI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			header := make(http.Header)
-			header.Set(Signature, fixedCavageHMACHeader(t, tt.want, RequestTarget))
+			header.Set(HeaderSignature, fixedCavageHMACHeader(t, tt.want, CavageRequestTarget))
 			req := &http.Request{
 				Method:     tt.method,
 				RequestURI: tt.requestURI,
@@ -1534,7 +1454,7 @@ func TestCavageRequestVerifierHandlesAbsoluteFormRequestTarget(t *testing.T) {
 			}
 
 			wantSigningString := "(request-target): " + strings.ToLower(tt.method) + " " + tt.wantTarget
-			req.Header.Set(Signature, fixedCavageHMACHeader(t, wantSigningString, RequestTarget))
+			req.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, wantSigningString, CavageRequestTarget))
 			verifier, signature := parseSigningStringRequest(t, req)
 			if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
 				t.Fatalf("VerifyHMAC() failed: %v", err)
@@ -1547,7 +1467,7 @@ func TestCavageRequestVerifierHandlesAbsoluteFormRequestTarget(t *testing.T) {
 		const wantSigningString = "(request-target): get /a%2Fb?b=2&a=%2F&a=0"
 		req := readAbsoluteRequest(t, http.MethodGet, rawRequestTarget)
 		defer req.Body.Close()
-		req.Header.Set(Signature, fixedCavageHMACHeader(t, wantSigningString, RequestTarget))
+		req.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, wantSigningString, CavageRequestTarget))
 		headerBefore := req.Header.Clone()
 		urlBefore := *req.URL
 		bodyBefore := req.Body
@@ -1582,7 +1502,7 @@ func TestCavageRequestVerifierRejectsAbsoluteURIRequestTargetSignature(t *testin
 	defer req.Body.Close()
 
 	oldSigningString := "(request-target): get " + rawRequestTarget
-	req.Header.Set(Signature, fixedCavageHMACHeader(t, oldSigningString, RequestTarget))
+	req.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, oldSigningString, CavageRequestTarget))
 	verifier, signature := parseSigningStringRequest(t, req)
 	if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); !errors.Is(err, ErrVerification) {
 		t.Fatalf("VerifyHMAC() error = %v, want ErrVerification for the absolute-URI signing form", err)
@@ -1601,7 +1521,7 @@ func TestCavageRequestVerifierRejectsCONNECTRequestTarget(t *testing.T) {
 			defer req.Body.Close()
 			body := &receivedCountingBody{}
 			req.Body = body
-			req.Header.Set(Signature, fixedCavageHMACHeader(t, "(request-target): connect invalid", RequestTarget))
+			req.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, "(request-target): connect invalid", CavageRequestTarget))
 			headerBefore := req.Header.Clone()
 			urlBefore := *req.URL
 
@@ -1635,7 +1555,7 @@ func TestCavageResponseVerifierRejectsAssociatedCONNECTRequestTarget(t *testing.
 	res := &http.Response{
 		Request: req,
 		Header: http.Header{
-			Signature: {fixedCavageHMACHeader(t, "(request-target): connect invalid", RequestTarget)},
+			HeaderSignature: {fixedCavageHMACHeader(t, "(request-target): connect invalid", CavageRequestTarget)},
 		},
 		Body: body,
 	}
@@ -1673,7 +1593,7 @@ func TestCavageCONNECTAllowedWithoutRequestTarget(t *testing.T) {
 		if err := NewCavageSigner().SignRequestWithHMAC(req, signingStringHMACSigningKey("connect-no-target-key"), CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, req.Header.Get(Signature), wantSigningString)
+		assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), wantSigningString)
 	})
 
 	t.Run("response signer", func(t *testing.T) {
@@ -1684,10 +1604,10 @@ func TestCavageCONNECTAllowedWithoutRequestTarget(t *testing.T) {
 			Host:       "Tunnel.Example:443",
 		}
 		res := &http.Response{Request: req, Header: http.Header{"X-Test": {"value"}}}
-		if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("response-connect-no-target-key"), CavageSignaturePlacementSignature, opts); err != nil {
+		if err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("response-connect-no-target-key"), opts); err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, res.Header.Get(Signature), wantSigningString)
+		assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), wantSigningString)
 	})
 
 	t.Run("request verifier", func(t *testing.T) {
@@ -1697,7 +1617,7 @@ func TestCavageCONNECTAllowedWithoutRequestTarget(t *testing.T) {
 			t.Fatalf("http.ReadRequest() failed: %v", err)
 		}
 		defer req.Body.Close()
-		req.Header.Set(Signature, fixedCavageHMACHeader(t, wantSigningString, "x-test"))
+		req.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, wantSigningString, "x-test"))
 		verifier, signature := parseSigningStringRequest(t, req)
 		if err := verifier.VerifyHMAC(signature, signingStringVerificationKey()); err != nil {
 			t.Fatalf("VerifyHMAC() failed: %v", err)
@@ -1713,8 +1633,8 @@ func TestCavageCONNECTAllowedWithoutRequestTarget(t *testing.T) {
 		res := &http.Response{
 			Request: req,
 			Header: http.Header{
-				"X-Test":  {"value"},
-				Signature: {fixedCavageHMACHeader(t, wantSigningString, "x-test")},
+				"X-Test":        {"value"},
+				HeaderSignature: {fixedCavageHMACHeader(t, wantSigningString, "x-test")},
 			},
 		}
 		verifier, signature := parseSigningStringResponse(t, res)
@@ -1727,7 +1647,7 @@ func TestCavageCONNECTAllowedWithoutRequestTarget(t *testing.T) {
 func TestCavageRequestVerifierDoesNotRebuildMissingRequestURI(t *testing.T) {
 	want := "(request-target): get /from-url"
 	header := make(http.Header)
-	header.Set(Signature, fixedCavageHMACHeader(t, want, RequestTarget))
+	header.Set(HeaderSignature, fixedCavageHMACHeader(t, want, CavageRequestTarget))
 	req := &http.Request{
 		Method: "GET",
 		URL:    &url.URL{Path: "/from-url"},
@@ -1784,18 +1704,17 @@ func TestCavageResponseRequestTargetUsesAssociatedRequestURI(t *testing.T) {
 				err := NewCavageSigner().SignResponseWithHMAC(
 					res,
 					signingStringHMACSigningKey("response-request-uri-key"),
-					CavageSignaturePlacementSignature,
-					signingStringOptions([]string{RequestTarget}),
+					signingStringOptions([]string{CavageRequestTarget}),
 				)
 				if err != nil {
 					t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 				}
-				assertCavageHMACSignature(t, res.Header.Get(Signature), tt.expectedSigningString)
+				assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), tt.expectedSigningString)
 			})
 
 			t.Run("verifier", func(t *testing.T) {
 				header := make(http.Header)
-				header.Set(Signature, fixedCavageHMACHeader(t, tt.expectedSigningString, RequestTarget))
+				header.Set(HeaderSignature, fixedCavageHMACHeader(t, tt.expectedSigningString, CavageRequestTarget))
 				res := &http.Response{Request: req, Header: header}
 
 				verifier, signature := parseSigningStringResponse(t, res)
@@ -1832,13 +1751,12 @@ func TestCavageResponseRequestTargetUsesReceivedAbsoluteForm(t *testing.T) {
 		err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("response-absolute-form-key"),
-			CavageSignaturePlacementSignature,
-			signingStringOptions([]string{RequestTarget}),
+			signingStringOptions([]string{CavageRequestTarget}),
 		)
 		if err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, res.Header.Get(Signature), wantSigningString)
+		assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), wantSigningString)
 		if !reflect.DeepEqual(req.Header, requestHeaderBefore) || !reflect.DeepEqual(req.URL, &requestURLBefore) || req.Body != requestBodyBefore || req.Method != "PaTcH" || req.RequestURI != rawRequestTarget {
 			t.Fatal("SignResponseWithHMAC() modified the associated request")
 		}
@@ -1850,7 +1768,7 @@ func TestCavageResponseRequestTargetUsesReceivedAbsoluteForm(t *testing.T) {
 		res := &http.Response{
 			Request: req,
 			Header: http.Header{
-				Signature: {fixedCavageHMACHeader(t, wantSigningString, RequestTarget)},
+				HeaderSignature: {fixedCavageHMACHeader(t, wantSigningString, CavageRequestTarget)},
 			},
 		}
 		verifier, signature := parseSigningStringResponse(t, res)
@@ -1887,12 +1805,11 @@ func TestCavageResponseRequestTargetUsesReceivedAbsoluteForm(t *testing.T) {
 			if err := NewCavageSigner().SignResponseWithHMAC(
 				res,
 				signingStringHMACSigningKey("response-options-key"),
-				CavageSignaturePlacementSignature,
-				signingStringOptions([]string{RequestTarget}),
+				signingStringOptions([]string{CavageRequestTarget}),
 			); err != nil {
 				t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 			}
-			assertCavageHMACSignature(t, res.Header.Get(Signature), optionsSigningString)
+			assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), optionsSigningString)
 		})
 
 		t.Run("verifier", func(t *testing.T) {
@@ -1901,7 +1818,7 @@ func TestCavageResponseRequestTargetUsesReceivedAbsoluteForm(t *testing.T) {
 			res := &http.Response{
 				Request: req,
 				Header: http.Header{
-					Signature: {fixedCavageHMACHeader(t, optionsSigningString, RequestTarget)},
+					HeaderSignature: {fixedCavageHMACHeader(t, optionsSigningString, CavageRequestTarget)},
 				},
 			}
 			verifier, signature := parseSigningStringResponse(t, res)
@@ -1964,18 +1881,17 @@ func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
 				err := NewCavageSigner().SignResponseWithHMAC(
 					res,
 					signingStringHMACSigningKey("response-outgoing-url-key"),
-					CavageSignaturePlacementSignature,
-					signingStringOptions([]string{RequestTarget}),
+					signingStringOptions([]string{CavageRequestTarget}),
 				)
 				if err != nil {
 					t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 				}
-				assertCavageHMACSignature(t, res.Header.Get(Signature), tt.expectedSigningString)
+				assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), tt.expectedSigningString)
 			})
 
 			t.Run("verifier", func(t *testing.T) {
 				header := make(http.Header)
-				header.Set(Signature, fixedCavageHMACHeader(t, tt.expectedSigningString, RequestTarget))
+				header.Set(HeaderSignature, fixedCavageHMACHeader(t, tt.expectedSigningString, CavageRequestTarget))
 				res := &http.Response{Request: req, Header: header}
 
 				verifier, signature := parseSigningStringResponse(t, res)
@@ -2016,10 +1932,10 @@ func TestCavageResponseRequestTargetDefaultsEmptyOutgoingMethodToGET(t *testing.
 
 			t.Run("signer", func(t *testing.T) {
 				res := &http.Response{Request: req, Header: make(http.Header)}
-				if err := NewCavageSigner().SignResponseWithHMAC(res, key, CavageSignaturePlacementSignature, signingStringOptions([]string{RequestTarget})); err != nil {
+				if err := NewCavageSigner().SignResponseWithHMAC(res, key, signingStringOptions([]string{CavageRequestTarget})); err != nil {
 					t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 				}
-				params, err := parseCavageParams(res.Header.Get(Signature))
+				params, err := parseCavageParams(res.Header.Get(HeaderSignature))
 				if err != nil {
 					t.Fatalf("parseCavageParams() failed: %v", err)
 				}
@@ -2034,7 +1950,7 @@ func TestCavageResponseRequestTargetDefaultsEmptyOutgoingMethodToGET(t *testing.
 			t.Run("verifier", func(t *testing.T) {
 				res := &http.Response{
 					Request: req,
-					Header:  http.Header{Signature: {`keyId="test-key",algorithm="hs2019",headers="(request-target)",signature="` + wantSignature + `"`}},
+					Header:  http.Header{HeaderSignature: {`keyId="test-key",algorithm="hs2019",headers="(request-target)",signature="` + wantSignature + `"`}},
 				}
 				signature, err := verifier.ParseResponse(res)
 				if err != nil {
@@ -2068,7 +1984,7 @@ func TestCavageResponseRequestTargetRejectsEmptyReceivedMethod(t *testing.T) {
 	}
 	t.Run("signer", func(t *testing.T) {
 		res := &http.Response{Request: req, Header: make(http.Header)}
-		err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), CavageSignaturePlacementSignature, signingStringOptions([]string{RequestTarget}))
+		err := NewCavageSigner().SignResponseWithHMAC(res, signingStringHMACSigningKey("test-key"), signingStringOptions([]string{CavageRequestTarget}))
 		if !errors.Is(err, ErrInvalidHTTPMessage) {
 			t.Fatalf("SignResponseWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
 		}
@@ -2076,7 +1992,7 @@ func TestCavageResponseRequestTargetRejectsEmptyReceivedMethod(t *testing.T) {
 	t.Run("verifier", func(t *testing.T) {
 		res := &http.Response{
 			Request: req,
-			Header:  http.Header{Signature: {fixedCavageHMACHeader(t, "(request-target): get /resource?x=%2F", RequestTarget)}},
+			Header:  http.Header{HeaderSignature: {fixedCavageHMACHeader(t, "(request-target): get /resource?x=%2F", CavageRequestTarget)}},
 		}
 		verifier, err := NewCavageVerifier(signingStringVerificationOptions())
 		if err != nil {
@@ -2138,7 +2054,7 @@ func TestCavageVerifierPreservesExpiresDecimalSignature(t *testing.T) {
 			t.Run(test.name+"/"+value, func(t *testing.T) {
 				parameters := `keyId="test-key",algorithm="hs2019",headers="(expires)",expires=` + value +
 					`,signature="` + base64.StdEncoding.EncodeToString(test.signature) + `"`
-				header := http.Header{Signature: {parameters}}
+				header := http.Header{HeaderSignature: {parameters}}
 				signature, err := test.parse(header)
 				if err != nil {
 					t.Fatalf("parse failed: %v", err)
@@ -2147,7 +2063,7 @@ func TestCavageVerifierPreservesExpiresDecimalSignature(t *testing.T) {
 				if !present || !expires.Equal(time.Unix(1, 123456789)) {
 					t.Fatalf("Expires() = %v/%t, want %v/true", expires, present, time.Unix(1, 123456789))
 				}
-				if header.Get(Signature) != parameters {
+				if header.Get(HeaderSignature) != parameters {
 					t.Fatal("parsing modified the received Signature field")
 				}
 				err = test.verify(signature)
@@ -2173,7 +2089,7 @@ func TestCavageVerifierNormalHeaderCanonicalization(t *testing.T) {
 	for _, messageType := range []string{"request", "response"} {
 		t.Run(messageType, func(t *testing.T) {
 			header := signingStringTestHeaders()
-			header.Set(Signature, fixedCavageHMACHeader(t, want, signedHeaders))
+			header.Set(HeaderSignature, fixedCavageHMACHeader(t, want, signedHeaders))
 
 			var verifier *CavageVerifier
 			var signature *CavageSignature
@@ -2246,7 +2162,7 @@ func TestCavageSignerRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 						Header: header,
 					}, signingStringHMACSigningKey("invalid-header-key"), CavageSignaturePlacementSignature, opts)
 				case "response":
-					err = signer.SignResponseWithHMAC(&http.Response{Header: header}, signingStringHMACSigningKey("invalid-header-key"), CavageSignaturePlacementSignature, opts)
+					err = signer.SignResponseWithHMAC(&http.Response{Header: header}, signingStringHMACSigningKey("invalid-header-key"), opts)
 				}
 				if err == nil {
 					t.Fatal("signing unexpectedly succeeded")
@@ -2306,7 +2222,7 @@ func TestCavageVerifierRejectsInvalidOrMissingSignedHeader(t *testing.T) {
 			t.Run(messageType+"/"+tt.name, func(t *testing.T) {
 				header := make(http.Header)
 				tt.setHeader(header)
-				header.Set(Signature, fixedCavageHMACHeader(t, "fixed invalid-header input", tt.signedHeaders))
+				header.Set(HeaderSignature, fixedCavageHMACHeader(t, "fixed invalid-header input", tt.signedHeaders))
 
 				verifier, err := NewCavageVerifier(signingStringVerificationOptions())
 				if err != nil {

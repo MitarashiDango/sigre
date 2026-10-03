@@ -147,7 +147,7 @@ func TestCavageSignerStrictZeroValueWireFormat(t *testing.T) {
 			if err := signer.SignRequestWithHMAC(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 				t.Fatalf("strict request signing failed: %v", err)
 			}
-			value := req.Header.Get(sigre.Signature)
+			value := req.Header.Get(sigre.HeaderSignature)
 			if algorithm, _ := signerPolicyParameter(t, value, "algorithm"); algorithm != "hs2019" {
 				t.Fatalf("algorithm = %q, want hs2019", algorithm)
 			}
@@ -179,10 +179,10 @@ func TestCavageSignerStrictZeroValueWireFormat(t *testing.T) {
 		for _, opts := range []*sigre.CavageSigningOptions{nil, {}} {
 			res := newSignerPolicyResponse()
 			key := fixedHMACSigningKey("strict-response", sigre.AlgorithmHMACSHA512, secret)
-			if err := signer.SignResponseWithHMAC(res, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
+			if err := signer.SignResponseWithHMAC(res, key, opts); err != nil {
 				t.Fatalf("strict response signing failed: %v", err)
 			}
-			value := res.Header.Get(sigre.Signature)
+			value := res.Header.Get(sigre.HeaderSignature)
 			if algorithm, _ := signerPolicyParameter(t, value, "algorithm"); algorithm != "hs2019" {
 				t.Fatalf("algorithm = %q, want hs2019", algorithm)
 			}
@@ -221,7 +221,7 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 	}{
 		{name: "RSA SHA-512", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, privateKey: rsaPrivateKey, publicKey: &rsaPrivateKey.PublicKey},
 		{name: "RSA SHA-512 without primes", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, privateKey: &rsa.PrivateKey{PublicKey: rsaPrivateKey.PublicKey, D: rsaPrivateKey.D}, publicKey: &rsaPrivateKey.PublicKey},
-		{name: "ECDSA SHA-512", algorithm: sigre.AlgorithmECDSASHA512, privateKey: ecdsaPrivateKey, publicKey: &ecdsaPrivateKey.PublicKey},
+		{name: "ECDSA SHA-512", algorithm: sigre.AlgorithmECDSAASN1SHA512, privateKey: ecdsaPrivateKey, publicKey: &ecdsaPrivateKey.PublicKey},
 		{name: "Ed25519", algorithm: sigre.AlgorithmEd25519, privateKey: ed25519PrivateKey, publicKey: ed25519PrivateKey.Public()},
 		{name: "Ed25519 private key pointer with public key value", algorithm: sigre.AlgorithmEd25519, privateKey: &ed25519PrivateKey, publicKey: ed25519PublicKey},
 		{name: "Ed25519 private and public key pointers", algorithm: sigre.AlgorithmEd25519, privateKey: &ed25519PrivateKey, publicKey: &ed25519PublicKey},
@@ -248,7 +248,7 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 						if err := signer.SignRequest(valueRequest, fixedSigningKey("active-key", tt.algorithm, ed25519PrivateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
 							t.Fatalf("request signing with a key value failed: %v", err)
 						}
-						if req.Header.Get(sigre.Signature) != valueRequest.Header.Get(sigre.Signature) {
+						if req.Header.Get(sigre.HeaderSignature) != valueRequest.Header.Get(sigre.HeaderSignature) {
 							t.Fatal("Ed25519 private key pointer and value produced different request signatures")
 						}
 					}
@@ -268,19 +268,19 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 				res := newSignerPolicyResponse()
 				var err error
 				if tt.secret != nil {
-					err = signer.SignResponseWithHMAC(res, fixedHMACSigningKey("active-key", tt.algorithm, tt.secret), sigre.CavageSignaturePlacementSignature, nil)
+					err = signer.SignResponseWithHMAC(res, fixedHMACSigningKey("active-key", tt.algorithm, tt.secret), nil)
 				} else {
-					err = signer.SignResponse(res, fixedSigningKey("active-key", tt.algorithm, tt.privateKey), sigre.CavageSignaturePlacementSignature, nil)
+					err = signer.SignResponse(res, fixedSigningKey("active-key", tt.algorithm, tt.privateKey), nil)
 				}
 				if err != nil {
 					t.Fatalf("response signing failed: %v", err)
 				}
 				if _, ok := tt.privateKey.(*ed25519.PrivateKey); ok {
 					valueResponse := newSignerPolicyResponse()
-					if err := signer.SignResponse(valueResponse, fixedSigningKey("active-key", tt.algorithm, ed25519PrivateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
+					if err := signer.SignResponse(valueResponse, fixedSigningKey("active-key", tt.algorithm, ed25519PrivateKey), nil); err != nil {
 						t.Fatalf("response signing with a key value failed: %v", err)
 					}
-					if res.Header.Get(sigre.Signature) != valueResponse.Header.Get(sigre.Signature) {
+					if res.Header.Get(sigre.HeaderSignature) != valueResponse.Header.Get(sigre.HeaderSignature) {
 						t.Fatal("Ed25519 private key pointer and value produced different response signatures")
 					}
 				}
@@ -307,12 +307,12 @@ func TestCavageSignerECDSACurves(t *testing.T) {
 			}
 			req := newSignerPolicyRequest(t)
 			signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
-			if err := signer.SignRequest(req, fixedSigningKey("ecdsa-key", sigre.AlgorithmECDSASHA512, privateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
+			if err := signer.SignRequest(req, fixedSigningKey("ecdsa-key", sigre.AlgorithmECDSAASN1SHA512, privateKey), sigre.CavageSignaturePlacementSignature, nil); err != nil {
 				t.Fatalf("SignRequest() failed: %v", err)
 			}
 			req.RequestURI = req.URL.RequestURI()
 			verifier, signature := parseSignerPolicyRequest(t, req, testFixedTime, nil)
-			if err := verifier.Verify(signature, fixedPublicVerificationKey("ecdsa-key", sigre.AlgorithmECDSASHA512, &privateKey.PublicKey)); err != nil {
+			if err := verifier.Verify(signature, fixedPublicVerificationKey("ecdsa-key", sigre.AlgorithmECDSAASN1SHA512, &privateKey.PublicKey)); err != nil {
 				t.Fatalf("Verify() failed: %v", err)
 			}
 		})
@@ -368,7 +368,7 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			name:    "nil ECDSA private key pointer",
 			wantErr: sigre.ErrMissingPrivateKey,
 			run: func(req *http.Request) error {
-				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmECDSASHA512, (*ecdsa.PrivateKey)(nil)), sigre.CavageSignaturePlacementSignature, nil)
+				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmECDSAASN1SHA512, (*ecdsa.PrivateKey)(nil)), sigre.CavageSignaturePlacementSignature, nil)
 			},
 		},
 		{
@@ -422,7 +422,7 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("error = %v, want errors.Is(_, %v)", err, tt.wantErr)
 			}
-			if req.Header.Get(sigre.Signature) != "" || strings.HasPrefix(req.Header.Get(sigre.Authorization), "Signature ") {
+			if req.Header.Get(sigre.HeaderSignature) != "" || strings.HasPrefix(req.Header.Get(sigre.HeaderAuthorization), "Signature ") {
 				t.Fatal("signer wrote a signature after rejecting the key or placement")
 			}
 		})
@@ -462,7 +462,7 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			before := *res
 			before.Header = res.Header.Clone()
 			before.Request = res.Request.Clone(res.Request.Context())
-			err := sigre.NewCavageSigner().SignResponse(res, key, sigre.CavageSignaturePlacementSignature, nil)
+			err := sigre.NewCavageSigner().SignResponse(res, key, nil)
 			assertPackageError(t, err, tt.wantErr)
 			if !reflect.DeepEqual(res, &before) {
 				t.Fatal("signer modified the response or associated request after rejecting the Ed25519 key pointer")
@@ -477,33 +477,33 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 		algorithm  sigre.AlgorithmID
 		privateKey crypto.PrivateKey
 	}{
-		{name: "empty ECDSA key", algorithm: sigre.AlgorithmECDSASHA512, privateKey: &ecdsa.PrivateKey{}},
+		{name: "empty ECDSA key", algorithm: sigre.AlgorithmECDSAASN1SHA512, privateKey: &ecdsa.PrivateKey{}},
 		{
-			name: "ECDSA nil Curve", algorithm: sigre.AlgorithmECDSASHA512,
+			name: "ECDSA nil Curve", algorithm: sigre.AlgorithmECDSAASN1SHA512,
 			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{X: ecdsaPrivateKey.X, Y: ecdsaPrivateKey.Y}, D: ecdsaPrivateKey.D},
 		},
 		{
-			name: "ECDSA nil X", algorithm: sigre.AlgorithmECDSASHA512,
+			name: "ECDSA nil X", algorithm: sigre.AlgorithmECDSAASN1SHA512,
 			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: ecdsaPrivateKey.Curve, Y: ecdsaPrivateKey.Y}, D: ecdsaPrivateKey.D},
 		},
 		{
-			name: "ECDSA nil Y", algorithm: sigre.AlgorithmECDSASHA512,
+			name: "ECDSA nil Y", algorithm: sigre.AlgorithmECDSAASN1SHA512,
 			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: ecdsaPrivateKey.Curve, X: ecdsaPrivateKey.X}, D: ecdsaPrivateKey.D},
 		},
 		{
-			name: "ECDSA nil D", algorithm: sigre.AlgorithmECDSASHA512,
+			name: "ECDSA nil D", algorithm: sigre.AlgorithmECDSAASN1SHA512,
 			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsaPrivateKey.PublicKey},
 		},
 		{
-			name: "ECDSA zero D", algorithm: sigre.AlgorithmECDSASHA512,
+			name: "ECDSA zero D", algorithm: sigre.AlgorithmECDSAASN1SHA512,
 			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsaPrivateKey.PublicKey, D: new(big.Int)},
 		},
 		{
-			name: "ECDSA point off curve", algorithm: sigre.AlgorithmECDSASHA512,
+			name: "ECDSA point off curve", algorithm: sigre.AlgorithmECDSAASN1SHA512,
 			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: ecdsaPrivateKey.Curve, X: big.NewInt(1), Y: big.NewInt(1)}, D: ecdsaPrivateKey.D},
 		},
 		{
-			name: "ECDSA custom curve", algorithm: sigre.AlgorithmECDSASHA512,
+			name: "ECDSA custom curve", algorithm: sigre.AlgorithmECDSAASN1SHA512,
 			privateKey: &ecdsa.PrivateKey{PublicKey: ecdsa.PublicKey{Curve: &params, X: ecdsaPrivateKey.X, Y: ecdsaPrivateKey.Y}, D: ecdsaPrivateKey.D},
 		},
 		{name: "empty RSA key", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, privateKey: &rsa.PrivateKey{}},
@@ -528,7 +528,7 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			res := newSignerPolicyResponse()
 			before := *res
 			before.Header = res.Header.Clone()
-			err := sigre.NewCavageSigner().SignResponse(res, key, sigre.CavageSignaturePlacementSignature, nil)
+			err := sigre.NewCavageSigner().SignResponse(res, key, nil)
 			if !errors.Is(err, sigre.ErrUnsupportedKeyFormat) {
 				t.Fatalf("error = %v, want ErrUnsupportedKeyFormat", err)
 			}
@@ -550,7 +550,7 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		headers, _ := signerPolicyParameter(t, req.Header.Get(sigre.Signature), "headers")
+		headers, _ := signerPolicyParameter(t, req.Header.Get(sigre.HeaderSignature), "headers")
 		if headers != "(request-target) (created) x-extra" {
 			t.Fatalf("headers = %q", headers)
 		}
@@ -559,10 +559,10 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 	t.Run("AdditionalHeaders appends to effective response default", func(t *testing.T) {
 		res := newSignerPolicyResponse()
 		opts := &sigre.CavageSigningOptions{AdditionalHeaders: []string{"X-Extra"}}
-		if err := signer.SignResponse(res, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
+		if err := signer.SignResponse(res, key, opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		headers, _ := signerPolicyParameter(t, res.Header.Get(sigre.Signature), "headers")
+		headers, _ := signerPolicyParameter(t, res.Header.Get(sigre.HeaderSignature), "headers")
 		if headers != "(created) x-extra" {
 			t.Fatalf("headers = %q", headers)
 		}
@@ -571,16 +571,16 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 	t.Run("ExactHeaders completely replaces defaults", func(t *testing.T) {
 		req := newSignerPolicyRequest(t)
 		opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-			ExactHeaders: []string{"Date", sigre.RequestTarget},
+			ExactHeaders: []string{"Date", sigre.CavageRequestTarget},
 		}}
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		headers, _ := signerPolicyParameter(t, req.Header.Get(sigre.Signature), "headers")
+		headers, _ := signerPolicyParameter(t, req.Header.Get(sigre.HeaderSignature), "headers")
 		if headers != "date (request-target)" {
 			t.Fatalf("headers = %q", headers)
 		}
-		if _, present := signerPolicyParameter(t, req.Header.Get(sigre.Signature), "created"); present {
+		if _, present := signerPolicyParameter(t, req.Header.Get(sigre.HeaderSignature), "created"); present {
 			t.Fatal("ExactHeaders unexpectedly retained (created)")
 		}
 	})
@@ -591,7 +591,7 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		value := req.Header.Get(sigre.Signature)
+		value := req.Header.Get(sigre.HeaderSignature)
 		if _, present := signerPolicyParameter(t, value, "headers"); present {
 			t.Fatalf("headers was not omitted: %s", value)
 		}
@@ -602,15 +602,15 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 
 	t.Run("response OmitHeaders retains the strict wire form", func(t *testing.T) {
 		strictResponse := newSignerPolicyResponse()
-		if err := signer.SignResponse(strictResponse, key, sigre.CavageSignaturePlacementSignature, nil); err != nil {
+		if err := signer.SignResponse(strictResponse, key, nil); err != nil {
 			t.Fatalf("strict response signing failed: %v", err)
 		}
 		omittedResponse := newSignerPolicyResponse()
 		opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{OmitHeaders: true}}
-		if err := signer.SignResponse(omittedResponse, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
+		if err := signer.SignResponse(omittedResponse, key, opts); err != nil {
 			t.Fatalf("OmitHeaders response signing failed: %v", err)
 		}
-		if strictResponse.Header.Get(sigre.Signature) != omittedResponse.Header.Get(sigre.Signature) {
+		if strictResponse.Header.Get(sigre.HeaderSignature) != omittedResponse.Header.Get(sigre.HeaderSignature) {
 			t.Fatal("response OmitHeaders did not preserve the strict wire form")
 		}
 	})
@@ -623,7 +623,7 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 		{name: "AdditionalHeaders and ExactHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"x-extra"}, Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"date"}}}},
 		{name: "AdditionalHeaders and OmitHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"x-extra"}, Compatibility: &sigre.CavageSigningCompatibility{OmitHeaders: true}}},
 		{name: "ExactHeaders and OmitHeaders", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"date"}, OmitHeaders: true}}},
-		{name: "duplicate default", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{sigre.Created}}},
+		{name: "duplicate default", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{sigre.CavageCreated}}},
 		{name: "duplicate AdditionalHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"X-Extra", "x-extra"}}},
 		{name: "duplicate ExactHeaders", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"Date", "date"}}}},
 		{name: "non-ASCII field in AdditionalHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"\u212A-foo"}}},
@@ -646,7 +646,7 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 			res := newSignerPolicyResponse()
 			beforeResponse := *res
 			beforeResponse.Header = res.Header.Clone()
-			if err := signer.SignResponse(res, key, sigre.CavageSignaturePlacementSignature, tt.opts); !errors.Is(err, sigre.ErrInvalidSigningOptions) {
+			if err := signer.SignResponse(res, key, tt.opts); !errors.Is(err, sigre.ErrInvalidSigningOptions) {
 				t.Fatalf("response error = %v, want ErrInvalidSigningOptions", err)
 			}
 			if !reflect.DeepEqual(res, &beforeResponse) {
@@ -689,7 +689,7 @@ func TestCavageSignerMissingSignedFieldsWithoutMutation(t *testing.T) {
 			res.Header.Del(name)
 			before := *res
 			before.Header = res.Header.Clone()
-			err := signer.SignResponseWithHMAC(res, key, sigre.CavageSignaturePlacementSignature, opts)
+			err := signer.SignResponseWithHMAC(res, key, opts)
 			if !errors.Is(err, sigre.ErrSignedHeaderMissing) {
 				t.Fatalf("error = %v, want ErrSignedHeaderMissing", err)
 			}
@@ -709,7 +709,7 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 		return &sigre.CavageSigningOptions{
 			ExpiresAfter: expiresAfter,
 			Compatibility: &sigre.CavageSigningCompatibility{
-				ExactHeaders: []string{sigre.RequestTarget, sigre.Created, sigre.Expires},
+				ExactHeaders: []string{sigre.CavageRequestTarget, sigre.CavageCreated, sigre.CavageExpires},
 			},
 		}
 	}
@@ -731,7 +731,7 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, requestOptions(50*time.Millisecond)); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		value := req.Header.Get(sigre.Signature)
+		value := req.Header.Get(sigre.HeaderSignature)
 		if created, _ := signerPolicyParameter(t, value, "created"); created != "100" {
 			t.Fatalf("created = %q, want 100", created)
 		}
@@ -786,7 +786,7 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		value := req.Header.Get(sigre.Signature)
+		value := req.Header.Get(sigre.HeaderSignature)
 		if created, _ := signerPolicyParameter(t, value, "created"); created != "100" {
 			t.Fatalf("created = %q, want 100", created)
 		}
@@ -801,13 +801,13 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 		opts := &sigre.CavageSigningOptions{
 			ExpiresAfter: 50 * time.Millisecond,
 			Compatibility: &sigre.CavageSigningCompatibility{
-				ExactHeaders: []string{sigre.Created, sigre.Expires},
+				ExactHeaders: []string{sigre.CavageCreated, sigre.CavageExpires},
 			},
 		}
-		if err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey("expires-hmac-key", sigre.AlgorithmHMACSHA512, secret), sigre.CavageSignaturePlacementSignature, opts); err != nil {
+		if err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey("expires-hmac-key", sigre.AlgorithmHMACSHA512, secret), opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		value := res.Header.Get(sigre.Signature)
+		value := res.Header.Get(sigre.HeaderSignature)
 		if expires, _ := signerPolicyParameter(t, value, "expires"); expires != "100.95" {
 			t.Fatalf("expires = %q, want 100.95", expires)
 		}
@@ -832,7 +832,7 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 		if nowCalls != 1 {
 			t.Fatalf("Now calls = %d, want 1", nowCalls)
 		}
-		value := req.Header.Get(sigre.Signature)
+		value := req.Header.Get(sigre.HeaderSignature)
 		if created, _ := signerPolicyParameter(t, value, "created"); created != "100" {
 			t.Fatalf("created = %q, want 100", created)
 		}
@@ -848,7 +848,7 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 		{
 			name: "expires header without duration",
 			opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-				ExactHeaders: []string{sigre.Created, sigre.Expires},
+				ExactHeaders: []string{sigre.CavageCreated, sigre.CavageExpires},
 			}},
 		},
 		{
@@ -890,7 +890,7 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 			{
 				name: "ECDSA",
 				sign: func(req *http.Request) error {
-					return signer.SignRequest(req, fixedSigningKey("sha256-key", sigre.AlgorithmECDSASHA256, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, nil)
+					return signer.SignRequest(req, fixedSigningKey("sha256-key", sigre.AlgorithmECDSAASN1SHA256, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, nil)
 				},
 			},
 			{
@@ -913,13 +913,13 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 	t.Run("algorithm omission keeps the trusted SHA-256 algorithm", func(t *testing.T) {
 		req := newSignerPolicyRequest(t)
 		opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-			AlgorithmField: sigre.AlgorithmFieldOmitted,
+			AlgorithmField: sigre.CavageAlgorithmFieldOmitted,
 		}}
 		key := fixedHMACSigningKey("omitted-key", sigre.AlgorithmHMACSHA256, secret)
 		if err := signer.SignRequestWithHMAC(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		value := req.Header.Get(sigre.Signature)
+		value := req.Header.Get(sigre.HeaderSignature)
 		if _, present := signerPolicyParameter(t, value, "algorithm"); present {
 			t.Fatalf("algorithm was not omitted: %s", value)
 		}
@@ -949,9 +949,9 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 				},
 			},
 			{
-				name: "ECDSA", algorithm: sigre.AlgorithmECDSASHA256, label: "ecdsa-sha256",
+				name: "ECDSA", algorithm: sigre.AlgorithmECDSAASN1SHA256, label: "ecdsa-sha256",
 				sign: func(req *http.Request, opts *sigre.CavageSigningOptions) error {
-					return signer.SignRequest(req, fixedSigningKey("legacy-key", sigre.AlgorithmECDSASHA256, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, opts)
+					return signer.SignRequest(req, fixedSigningKey("legacy-key", sigre.AlgorithmECDSAASN1SHA256, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, opts)
 				},
 			},
 			{
@@ -965,16 +965,16 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				req := newSignerPolicyRequest(t)
 				opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-					AlgorithmField: sigre.AlgorithmFieldLegacy,
-					ExactHeaders:   []string{sigre.RequestTarget, "Date"},
+					AlgorithmField: sigre.CavageAlgorithmFieldLegacy,
+					ExactHeaders:   []string{sigre.CavageRequestTarget, "Date"},
 				}}
 				if err := tt.sign(req, opts); err != nil {
 					t.Fatalf("signing failed: %v", err)
 				}
-				if label, _ := signerPolicyParameter(t, req.Header.Get(sigre.Signature), "algorithm"); label != tt.label {
+				if label, _ := signerPolicyParameter(t, req.Header.Get(sigre.HeaderSignature), "algorithm"); label != tt.label {
 					t.Fatalf("algorithm = %q, want %q", label, tt.label)
 				}
-				if _, present := signerPolicyParameter(t, req.Header.Get(sigre.Signature), "created"); present {
+				if _, present := signerPolicyParameter(t, req.Header.Get(sigre.HeaderSignature), "created"); present {
 					t.Fatal("legacy signature unexpectedly contains created")
 				}
 			})
@@ -990,17 +990,17 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 		}{
 			{name: "request requires ExactHeaders", headers: nil},
 			{name: "request requires request-target", headers: []string{"date"}},
-			{name: "request requires date", headers: []string{sigre.RequestTarget}},
+			{name: "request requires date", headers: []string{sigre.CavageRequestTarget}},
 			{name: "response requires date", isResponse: true, headers: []string{"x-extra"}},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
 				opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-					AlgorithmField: sigre.AlgorithmFieldLegacy,
+					AlgorithmField: sigre.CavageAlgorithmFieldLegacy,
 					ExactHeaders:   tt.headers,
 				}}
 				var err error
 				if tt.isResponse {
-					err = signer.SignResponse(newSignerPolicyResponse(), key, sigre.CavageSignaturePlacementSignature, opts)
+					err = signer.SignResponse(newSignerPolicyResponse(), key, opts)
 				} else {
 					err = signer.SignRequest(newSignerPolicyRequest(t), key, sigre.CavageSignaturePlacementSignature, opts)
 				}
@@ -1012,13 +1012,13 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 
 		res := newSignerPolicyResponse()
 		opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-			AlgorithmField: sigre.AlgorithmFieldLegacy,
+			AlgorithmField: sigre.CavageAlgorithmFieldLegacy,
 			ExactHeaders:   []string{"date"},
 		}}
-		if err := signer.SignResponse(res, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
+		if err := signer.SignResponse(res, key, opts); err != nil {
 			t.Fatalf("legacy response signing failed: %v", err)
 		}
-		if label, _ := signerPolicyParameter(t, res.Header.Get(sigre.Signature), "algorithm"); label != "rsa-sha256" {
+		if label, _ := signerPolicyParameter(t, res.Header.Get(sigre.HeaderSignature), "algorithm"); label != "rsa-sha256" {
 			t.Fatalf("response algorithm = %q", label)
 		}
 	})
@@ -1027,8 +1027,8 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 		req := newSignerPolicyRequest(t)
 		req.Header.Del("Date")
 		opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-			AlgorithmField: sigre.AlgorithmFieldLegacy,
-			ExactHeaders:   []string{sigre.RequestTarget, "date"},
+			AlgorithmField: sigre.CavageAlgorithmFieldLegacy,
+			ExactHeaders:   []string{sigre.CavageRequestTarget, "date"},
 		}}
 		err := signer.SignRequest(req, fixedSigningKey("legacy-key", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey), sigre.CavageSignaturePlacementSignature, opts)
 		if !errors.Is(err, sigre.ErrSignedHeaderMissing) {
@@ -1041,14 +1041,14 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 
 	t.Run("Fediverse hs2019 SHA-256 is RSA-only", func(t *testing.T) {
 		opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-			AlgorithmField: sigre.AlgorithmFieldHS2019WithSHA256,
+			AlgorithmField: sigre.CavageAlgorithmFieldHS2019WithSHA256,
 		}}
 		req := newSignerPolicyRequest(t)
 		key := fixedSigningKey("fediverse-key", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey)
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("RSA signing failed: %v", err)
 		}
-		if label, _ := signerPolicyParameter(t, req.Header.Get(sigre.Signature), "algorithm"); label != "hs2019" {
+		if label, _ := signerPolicyParameter(t, req.Header.Get(sigre.HeaderSignature), "algorithm"); label != "hs2019" {
 			t.Fatalf("algorithm = %q, want hs2019", label)
 		}
 		req.RequestURI = req.URL.RequestURI()
@@ -1061,7 +1061,7 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 			t.Fatalf("Fediverse signature verification failed: %v", err)
 		}
 
-		err := signer.SignRequest(newSignerPolicyRequest(t), fixedSigningKey("key", sigre.AlgorithmECDSASHA256, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, opts)
+		err := signer.SignRequest(newSignerPolicyRequest(t), fixedSigningKey("key", sigre.AlgorithmECDSAASN1SHA256, ecdsaPrivateKey), sigre.CavageSignaturePlacementSignature, opts)
 		if !errors.Is(err, sigre.ErrInvalidSigningOptions) {
 			t.Fatalf("ECDSA error = %v, want ErrInvalidSigningOptions", err)
 		}
@@ -1080,12 +1080,12 @@ func TestCavageSignerExtensionAlgorithm(t *testing.T) {
 	t.Run("exact label-to-AlgorithmID binding", func(t *testing.T) {
 		req := newSignerPolicyRequest(t)
 		opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
-			Extension: &sigre.ExtensionAlgorithm{Label: "example-rsa512", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512},
+			Extension: &sigre.CavageExtensionAlgorithm{Label: "example-rsa512", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512},
 		}}
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		if label, _ := signerPolicyParameter(t, req.Header.Get(sigre.Signature), "algorithm"); label != "example-rsa512" {
+		if label, _ := signerPolicyParameter(t, req.Header.Get(sigre.HeaderSignature), "algorithm"); label != "example-rsa512" {
 			t.Fatalf("algorithm = %q", label)
 		}
 		req.RequestURI = req.URL.RequestURI()
@@ -1102,16 +1102,16 @@ func TestCavageSignerExtensionAlgorithm(t *testing.T) {
 		name          string
 		compatibility sigre.CavageSigningCompatibility
 	}{
-		{name: "empty label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "zero AlgorithmID", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "example", Algorithm: 0}}},
-		{name: "mismatched AlgorithmID", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmECDSASHA512}}},
-		{name: "known hs2019 label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "hs2019", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "known legacy label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "known rsa-sha1 label without created or expires", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.RequestTarget, "date"}, Extension: &sigre.ExtensionAlgorithm{Label: "rsa-sha1", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "known legacy label without created or expires", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.RequestTarget, "date"}, Extension: &sigre.ExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "extension and omitted mode", compatibility: sigre.CavageSigningCompatibility{AlgorithmField: sigre.AlgorithmFieldOmitted, Extension: &sigre.ExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "rsa prefix with created", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "rsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "ecdsa prefix with created", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.ExtensionAlgorithm{Label: "ecdsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "empty label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "zero AlgorithmID", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: 0}}},
+		{name: "mismatched AlgorithmID", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmECDSAASN1SHA512}}},
+		{name: "known hs2019 label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "hs2019", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "known legacy label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "known rsa-sha1 label without created or expires", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.CavageRequestTarget, "date"}, Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha1", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "known legacy label without created or expires", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.CavageRequestTarget, "date"}, Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "extension and omitted mode", compatibility: sigre.CavageSigningCompatibility{AlgorithmField: sigre.CavageAlgorithmFieldOmitted, Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "rsa prefix with created", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "ecdsa prefix with created", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "ecdsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1128,8 +1128,8 @@ func TestCavageSignerExtensionAlgorithm(t *testing.T) {
 		opts := &sigre.CavageSigningOptions{
 			ExpiresAfter: time.Second,
 			Compatibility: &sigre.CavageSigningCompatibility{
-				ExactHeaders: []string{sigre.RequestTarget, sigre.Expires},
-				Extension:    &sigre.ExtensionAlgorithm{Label: "rsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512},
+				ExactHeaders: []string{sigre.CavageRequestTarget, sigre.CavageExpires},
+				Extension:    &sigre.CavageExtensionAlgorithm{Label: "rsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512},
 			},
 		}
 		if err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts); !errors.Is(err, sigre.ErrInvalidSigningOptions) {
@@ -1148,10 +1148,10 @@ func TestCavageSignerPlacement(t *testing.T) {
 		if err := signer.SignRequestWithHMAC(req, key, sigre.CavageSignaturePlacementSignature, nil); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		if req.Header.Get(sigre.Signature) == "" {
+		if req.Header.Get(sigre.HeaderSignature) == "" {
 			t.Fatal("Signature header is missing")
 		}
-		if strings.HasPrefix(req.Header.Get(sigre.Authorization), "Signature ") {
+		if strings.HasPrefix(req.Header.Get(sigre.HeaderAuthorization), "Signature ") {
 			t.Fatal("Authorization also contains a Cavage signature")
 		}
 	})
@@ -1161,18 +1161,18 @@ func TestCavageSignerPlacement(t *testing.T) {
 		if err := signer.SignRequestWithHMAC(req, key, sigre.CavageSignaturePlacementAuthorization, nil); err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		if req.Header.Get(sigre.Signature) != "" {
+		if req.Header.Get(sigre.HeaderSignature) != "" {
 			t.Fatal("Signature header was also written")
 		}
-		if !strings.HasPrefix(req.Header.Get(sigre.Authorization), "Signature keyId=") {
-			t.Fatalf("Authorization = %q", req.Header.Get(sigre.Authorization))
+		if !strings.HasPrefix(req.Header.Get(sigre.HeaderAuthorization), "Signature keyId=") {
+			t.Fatalf("Authorization = %q", req.Header.Get(sigre.HeaderAuthorization))
 		}
 	})
 
 	t.Run("existing signature source is not overwritten", func(t *testing.T) {
 		for _, setup := range []func(*http.Request){
-			func(req *http.Request) { req.Header.Set(sigre.Signature, `keyId="existing"`) },
-			func(req *http.Request) { req.Header.Set(sigre.Authorization, `Signature keyId="existing"`) },
+			func(req *http.Request) { req.Header.Set(sigre.HeaderSignature, `keyId="existing"`) },
+			func(req *http.Request) { req.Header.Set(sigre.HeaderAuthorization, `Signature keyId="existing"`) },
 		} {
 			req := newSignerPolicyRequest(t)
 			setup(req)
@@ -1192,7 +1192,7 @@ func TestCavageSignerPlacement(t *testing.T) {
 		if !errors.Is(err, sigre.ErrInvalidSignaturePlacement) {
 			t.Fatalf("second error = %v, want ErrInvalidSignaturePlacement", err)
 		}
-		if strings.HasPrefix(req.Header.Get(sigre.Authorization), "Signature ") {
+		if strings.HasPrefix(req.Header.Get(sigre.HeaderAuthorization), "Signature ") {
 			t.Fatal("second placement was written")
 		}
 	})

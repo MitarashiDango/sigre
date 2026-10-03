@@ -46,7 +46,7 @@ func ExampleCavageSigner_SignRequest() {
 		panic(err)
 	}
 
-	fmt.Println("Signature header written:", req.Header.Get(sigre.Signature) != "")
+	fmt.Println("Signature header written:", req.Header.Get(sigre.HeaderSignature) != "")
 	// Output:
 	// Signature header written: true
 }
@@ -129,7 +129,7 @@ func ExampleCavageSigner_SignRequest_compatibility() {
 		sigre.CavageSignaturePlacementSignature,
 		&sigre.CavageSigningOptions{
 			Compatibility: &sigre.CavageSigningCompatibility{
-				AlgorithmField: sigre.AlgorithmFieldLegacy,
+				AlgorithmField: sigre.CavageAlgorithmFieldLegacy,
 				ExactHeaders:   []string{"(request-target)", "date"},
 			},
 		},
@@ -165,7 +165,7 @@ func ExampleCavageSigner_SignRequest_compatibility() {
 	// legacy rsa-sha256 verified: true
 }
 
-func ExampleSigreError() {
+func ExampleError() {
 	req, err := http.NewRequest(http.MethodGet, "https://example.test/unsigned", nil)
 	if err != nil {
 		panic(err)
@@ -176,9 +176,9 @@ func ExampleSigreError() {
 	}
 	_, err = verifier.ParseRequest(req)
 
-	var sigreError *sigre.SigreError
+	var packageError *sigre.Error
 	fmt.Println("missing signature:", errors.Is(err, sigre.ErrMissingSignature))
-	fmt.Println("package error:", errors.As(err, &sigreError))
+	fmt.Println("package error:", errors.As(err, &packageError))
 	// Output:
 	// missing signature: true
 	// package error: true

@@ -77,7 +77,7 @@ type CavageSignature struct {
 func NewCavageVerifier(opts *CavageVerificationOptions) (*CavageVerifier, error) {
 	config, err := newCavageVerificationConfig(opts)
 	if err != nil {
-		return nil, wrapSigreError(err)
+		return nil, wrapError(err)
 	}
 	return &CavageVerifier{
 		identity: &cavageVerifierIdentity{},
@@ -92,17 +92,17 @@ func NewCavageVerifier(opts *CavageVerificationOptions) (*CavageVerifier, error)
 // net/http then merges received fields and the declaration cannot be recovered.
 func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, error) {
 	if err := v.validateConstructed(); err != nil {
-		return nil, wrapSigreError(err)
+		return nil, wrapError(err)
 	}
 	if req == nil {
-		return nil, wrapSigreError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
+		return nil, wrapError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
 	}
 	candidate, err := requestCavageSignatureCandidate(req.Header, v.config.requestSource)
 	if err != nil {
-		return nil, wrapSigreError(err)
+		return nil, wrapError(err)
 	}
 	if candidate.placement == 0 {
-		return nil, wrapSigreError(ErrMissingSignature)
+		return nil, wrapError(ErrMissingSignature)
 	}
 	snapshot := cavageMessageSnapshot{
 		isRequest: true,
@@ -116,7 +116,7 @@ func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, erro
 		trailer:          req.Trailer,
 	}
 	signature, err := v.parse(candidate, snapshot)
-	return signature, wrapSigreError(err)
+	return signature, wrapError(err)
 }
 
 // ParseResponse parses only the response Signature field and returns an
@@ -126,17 +126,17 @@ func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, erro
 // net/http then merges received fields and the declaration cannot be recovered.
 func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, error) {
 	if err := v.validateConstructed(); err != nil {
-		return nil, wrapSigreError(err)
+		return nil, wrapError(err)
 	}
 	if res == nil {
-		return nil, wrapSigreError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
+		return nil, wrapError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
 	}
 	candidate, err := signatureHeaderCandidate(res.Header)
 	if err != nil {
-		return nil, wrapSigreError(err)
+		return nil, wrapError(err)
 	}
 	if candidate.placement == 0 {
-		return nil, wrapSigreError(ErrMissingSignature)
+		return nil, wrapError(ErrMissingSignature)
 	}
 	snapshot := cavageMessageSnapshot{
 		header:           res.Header,
@@ -150,7 +150,7 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 		}
 	}
 	signature, err := v.parse(candidate, snapshot)
-	return signature, wrapSigreError(err)
+	return signature, wrapError(err)
 }
 
 // Verify checks snapshot with an asymmetric trusted key. The received KeyID
@@ -159,48 +159,48 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 // the original HTTP message and does not compare a Digest field with a body.
 func (v *CavageVerifier) Verify(signature *CavageSignature, key VerificationKey) error {
 	if err := v.validateSignature(signature); err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
 	algorithm, err := validateVerificationMetadata(signature, key.Metadata)
 	if err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
 	publicKey := normalizeEd25519PublicKey(key.PublicKey)
 	if isMissingPublicKey(publicKey) {
-		return wrapSigreError(ErrMissingPublicKey)
+		return wrapError(ErrMissingPublicKey)
 	}
 	if algorithm.keyKind == algorithmKeyHMAC {
-		return wrapSigreError(fmt.Errorf("%w: HMAC AlgorithmID must be used with VerifyHMAC", ErrAlgorithmMismatch))
+		return wrapError(fmt.Errorf("%w: HMAC AlgorithmID must be used with VerifyHMAC", ErrAlgorithmMismatch))
 	}
 	if err := validateVerificationPublicKey(publicKey, algorithm.keyKind); err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
 	if err := v.validateTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
-	return wrapSigreError(verifyAsymmetric(publicKey, algorithm, signature.signature, signature.signingString))
+	return wrapError(verifyAsymmetric(publicKey, algorithm, signature.signature, signature.signingString))
 }
 
 // VerifyHMAC checks snapshot with trusted HMAC metadata and a shared secret.
 // It does not read the original HTTP message and never calls the verifier clock.
 func (v *CavageVerifier) VerifyHMAC(signature *CavageSignature, key HMACVerificationKey) error {
 	if err := v.validateSignature(signature); err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
 	algorithm, err := validateVerificationMetadata(signature, key.Metadata)
 	if err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
 	if len(key.Secret) == 0 {
-		return wrapSigreError(ErrMissingSharedSecret)
+		return wrapError(ErrMissingSharedSecret)
 	}
 	if algorithm.keyKind != algorithmKeyHMAC {
-		return wrapSigreError(fmt.Errorf("%w: asymmetric AlgorithmID must be used with Verify", ErrAlgorithmMismatch))
+		return wrapError(fmt.Errorf("%w: asymmetric AlgorithmID must be used with Verify", ErrAlgorithmMismatch))
 	}
 	if err := v.validateTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
-	return wrapSigreError(verifyHMAC(key.Secret, signature.signature, signature.signingString, algorithm.hash))
+	return wrapError(verifyHMAC(key.Secret, signature.signature, signature.signingString, algorithm.hash))
 }
 
 // KeyID returns the opaque, attacker-controlled keyId parameter.
@@ -453,18 +453,18 @@ func (v *CavageVerifier) checkCavageSignedHeaderPolicy(params *cavageParams, hea
 	if err := requireCavageHeaders(headers, v.config.requiredHeaders); err != nil {
 		return err
 	}
-	if v.config.maxSignatureAge > 0 && !slices.Contains(headers, Created) {
-		return fmt.Errorf("%w: MaxSignatureAge requires %s", ErrRequiredHeaderMissing, Created)
+	if v.config.maxSignatureAge > 0 && !slices.Contains(headers, CavageCreated) {
+		return fmt.Errorf("%w: MaxSignatureAge requires %s", ErrRequiredHeaderMissing, CavageCreated)
 	}
 	if v.config.maxDateAge > 0 && !slices.Contains(headers, "date") {
 		return fmt.Errorf("%w: MaxDateAge requires date", ErrRequiredHeaderMissing)
 	}
 
-	if slices.Contains(headers, Created) && !params.CreatedPresent {
-		return fmt.Errorf("%w: %s requires a created parameter", ErrInvalidCreationTime, Created)
+	if slices.Contains(headers, CavageCreated) && !params.CreatedPresent {
+		return fmt.Errorf("%w: %s requires a created parameter", ErrInvalidCreationTime, CavageCreated)
 	}
-	if slices.Contains(headers, Expires) && !params.ExpiresPresent {
-		return fmt.Errorf("%w: %s requires an expires parameter", ErrInvalidExpirationTime, Expires)
+	if slices.Contains(headers, CavageExpires) && !params.ExpiresPresent {
+		return fmt.Errorf("%w: %s requires an expires parameter", ErrInvalidExpirationTime, CavageExpires)
 	}
 
 	return v.validateWireAlgorithmBeforeKey(params, headers)
@@ -486,11 +486,11 @@ func (v *CavageVerifier) parseCavageDateForPolicy(header http.Header) (time.Time
 }
 
 func resolveCavageRequestTarget(message cavageMessageSnapshot, headers []string) (string, error) {
-	if !slices.Contains(headers, RequestTarget) {
+	if !slices.Contains(headers, CavageRequestTarget) {
 		return "", nil
 	}
 	if message.method == "" {
-		return "", fmt.Errorf("%w: method is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+		return "", fmt.Errorf("%w: method is required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
 	}
 	var requestTarget string
 	if message.resolveRequestTarget != nil {
@@ -501,7 +501,7 @@ func resolveCavageRequestTarget(message cavageMessageSnapshot, headers []string)
 		}
 	}
 	if requestTarget == "" {
-		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
 	}
 	return requestTarget, nil
 }
@@ -531,7 +531,7 @@ func (v *CavageVerifier) checkCavageTimePolicy(params *cavageParams, created, ex
 func effectiveCavageSignedHeaders(params *cavageParams) ([]string, error) {
 	configured := params.Headers
 	if !params.HeadersPresent {
-		configured = []string{Created}
+		configured = []string{CavageCreated}
 	}
 	headers := make([]string, 0, len(configured))
 	for _, configuredName := range configured {
@@ -596,7 +596,7 @@ func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []s
 	owned := make(http.Header)
 	for _, name := range signedHeaders {
 		switch name {
-		case RequestTarget, Created, Expires:
+		case CavageRequestTarget, CavageCreated, CavageExpires:
 			continue
 		case "host":
 			if message.isRequest {

@@ -186,11 +186,11 @@ func validateCavageInteroperabilityFixture(t *testing.T, fixture *cavageInterope
 	}
 
 	switch fixture.SignaturePlacement {
-	case sigre.Signature:
+	case sigre.HeaderSignature:
 		if strings.HasPrefix(fixture.SignatureHeaderValue, "Signature ") {
 			t.Fatalf("fixture %q Signature header value must not contain an auth scheme", fixture.ID)
 		}
-	case sigre.Authorization:
+	case sigre.HeaderAuthorization:
 		if !strings.HasPrefix(fixture.SignatureHeaderValue, "Signature ") {
 			t.Fatalf("fixture %q Authorization value must use the Signature scheme", fixture.ID)
 		}
@@ -224,8 +224,8 @@ func buildInteroperabilitySigningString(t *testing.T, fixture cavageInteroperabi
 	t.Helper()
 	lines := make([]string, 0, len(fixture.SignedHeaders))
 	for _, name := range fixture.SignedHeaders {
-		if name == sigre.RequestTarget {
-			lines = append(lines, sigre.RequestTarget+": "+strings.ToLower(fixture.Message.Method)+" "+fixture.Message.RequestTarget)
+		if name == sigre.CavageRequestTarget {
+			lines = append(lines, sigre.CavageRequestTarget+": "+strings.ToLower(fixture.Message.Method)+" "+fixture.Message.RequestTarget)
 			continue
 		}
 		values, ok := fixture.headerValues(name)
@@ -334,7 +334,7 @@ func (f cavageInteroperabilityFixture) verificationOptions(t *testing.T) *sigre.
 		AllowedAlgorithms: []sigre.AlgorithmID{f.algorithmID(t)},
 		Compatibility:     compatibility,
 	}
-	if f.SignaturePlacement == sigre.Authorization {
+	if f.SignaturePlacement == sigre.HeaderAuthorization {
 		options.RequestSignatureSource = sigre.CavageRequestSignatureSourceAuthorization
 	}
 	return options
@@ -346,15 +346,15 @@ func (f cavageInteroperabilityFixture) signingOptions(t *testing.T) *sigre.Cavag
 		ExactHeaders: append([]string(nil), f.SigningCompatibility.ExactHeaders...),
 	}
 	switch f.SigningCompatibility.AlgorithmField {
-	case "AlgorithmFieldLegacy":
-		compatibility.AlgorithmField = sigre.AlgorithmFieldLegacy
-	case "AlgorithmFieldHS2019WithSHA256":
-		compatibility.AlgorithmField = sigre.AlgorithmFieldHS2019WithSHA256
-	case "ExtensionAlgorithm":
+	case "CavageAlgorithmFieldLegacy":
+		compatibility.AlgorithmField = sigre.CavageAlgorithmFieldLegacy
+	case "CavageAlgorithmFieldHS2019WithSHA256":
+		compatibility.AlgorithmField = sigre.CavageAlgorithmFieldHS2019WithSHA256
+	case "CavageExtensionAlgorithm":
 		if f.SigningCompatibility.Extension == nil {
 			t.Fatalf("fixture %q is missing signing extension metadata", f.ID)
 		}
-		compatibility.Extension = &sigre.ExtensionAlgorithm{
+		compatibility.Extension = &sigre.CavageExtensionAlgorithm{
 			Label:     f.SigningCompatibility.Extension.Label,
 			Algorithm: interoperabilityAlgorithmID(t, f.ID, f.SigningCompatibility.Extension.Algorithm),
 		}
@@ -370,9 +370,9 @@ func (f cavageInteroperabilityFixture) signingOptions(t *testing.T) *sigre.Cavag
 func (f cavageInteroperabilityFixture) placement(t *testing.T) sigre.CavageSignaturePlacement {
 	t.Helper()
 	switch f.SignaturePlacement {
-	case sigre.Signature:
+	case sigre.HeaderSignature:
 		return sigre.CavageSignaturePlacementSignature
-	case sigre.Authorization:
+	case sigre.HeaderAuthorization:
 		return sigre.CavageSignaturePlacementAuthorization
 	default:
 		t.Fatalf("fixture %q has unsupported signature placement %q", f.ID, f.SignaturePlacement)
@@ -387,8 +387,8 @@ func interoperabilityAlgorithmID(t *testing.T, fixtureID, name string) sigre.Alg
 		return sigre.AlgorithmRSAPKCS1v15SHA256
 	case "AlgorithmRSAPKCS1v15SHA512":
 		return sigre.AlgorithmRSAPKCS1v15SHA512
-	case "AlgorithmECDSASHA512":
-		return sigre.AlgorithmECDSASHA512
+	case "AlgorithmECDSAASN1SHA512":
+		return sigre.AlgorithmECDSAASN1SHA512
 	default:
 		t.Fatalf("fixture %q refers to unsupported AlgorithmID name %q", fixtureID, name)
 		return 0

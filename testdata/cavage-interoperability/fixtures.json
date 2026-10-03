@@ -48,7 +48,7 @@
         "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
       },
       "signing_compatibility": {
-        "algorithm_field": "AlgorithmFieldLegacy",
+        "algorithm_field": "CavageAlgorithmFieldLegacy",
         "exact_headers": ["host", "date", "digest", "(request-target)"]
       }
     },
@@ -99,7 +99,7 @@
         "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
       },
       "signing_compatibility": {
-        "algorithm_field": "AlgorithmFieldLegacy",
+        "algorithm_field": "CavageAlgorithmFieldLegacy",
         "exact_headers": ["(request-target)", "date", "host", "digest"]
       }
     },
@@ -149,7 +149,7 @@
         "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
       },
       "signing_compatibility": {
-        "algorithm_field": "AlgorithmFieldLegacy",
+        "algorithm_field": "CavageAlgorithmFieldLegacy",
         "exact_headers": ["(request-target)", "date", "host"]
       }
     },
@@ -206,7 +206,7 @@
         "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
       },
       "signing_compatibility": {
-        "algorithm_field": "AlgorithmFieldLegacy",
+        "algorithm_field": "CavageAlgorithmFieldLegacy",
         "exact_headers": ["(request-target)", "content-length", "date", "digest", "host"]
       }
     },
@@ -250,7 +250,7 @@
         "allowed_legacy_algorithms": ["AlgorithmRSAPKCS1v15SHA256"]
       },
       "signing_compatibility": {
-        "algorithm_field": "AlgorithmFieldLegacy",
+        "algorithm_field": "CavageAlgorithmFieldLegacy",
         "exact_headers": ["date", "(request-target)", "host"]
       }
     },
@@ -301,7 +301,7 @@
         "allow_hs2019_with_sha256": true
       },
       "signing_compatibility": {
-        "algorithm_field": "AlgorithmFieldHS2019WithSHA256",
+        "algorithm_field": "CavageAlgorithmFieldHS2019WithSHA256",
         "exact_headers": ["(request-target)", "host", "date", "digest", "content-type"]
       }
     },
@@ -347,7 +347,7 @@
         }
       },
       "signing_compatibility": {
-        "algorithm_field": "ExtensionAlgorithm",
+        "algorithm_field": "CavageExtensionAlgorithm",
         "exact_headers": ["(request-target)", "host", "date"],
         "extension": {
           "label": "sigre-test-rsa-sha512",

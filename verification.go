@@ -17,10 +17,10 @@ const (
 	AlgorithmRSAPKCS1v15SHA512 AlgorithmID = iota + 1
 	// AlgorithmRSAPKCS1v15SHA256 identifies RSA PKCS #1 v1.5 with SHA-256.
 	AlgorithmRSAPKCS1v15SHA256
-	// AlgorithmECDSASHA512 identifies ECDSA with SHA-512 and an ASN.1 signature.
-	AlgorithmECDSASHA512
-	// AlgorithmECDSASHA256 identifies ECDSA with SHA-256 and an ASN.1 signature.
-	AlgorithmECDSASHA256
+	// AlgorithmECDSAASN1SHA512 identifies ECDSA with SHA-512 and an ASN.1 signature.
+	AlgorithmECDSAASN1SHA512
+	// AlgorithmECDSAASN1SHA256 identifies ECDSA with SHA-256 and an ASN.1 signature.
+	AlgorithmECDSAASN1SHA256
 	// AlgorithmEd25519 identifies plain Ed25519 over the un-hashed signing string.
 	AlgorithmEd25519
 	// AlgorithmHMACSHA512 identifies HMAC with SHA-512.
@@ -72,7 +72,7 @@ const (
 
 // CavageVerificationOptions configures Cavage HTTP signature verification.
 // Passing nil is equivalent to the strict zero value: only
-// AlgorithmRSAPKCS1v15SHA512, AlgorithmECDSASHA512, AlgorithmEd25519, and
+// AlgorithmRSAPKCS1v15SHA512, AlgorithmECDSAASN1SHA512, AlgorithmEd25519, and
 // AlgorithmHMACSHA512 are accepted; omitted algorithm and headers parameters
 // are accepted; omitted headers means (created); and no application age policy
 // is added. A SHA-256 AlgorithmID must be listed in AllowedAlgorithms, and a
@@ -156,9 +156,9 @@ func algorithmDefinitionFor(id AlgorithmID) (algorithmDefinition, error) {
 		return algorithmDefinition{id: id, keyKind: algorithmKeyRSA, hash: crypto.SHA512}, nil
 	case AlgorithmRSAPKCS1v15SHA256:
 		return algorithmDefinition{id: id, keyKind: algorithmKeyRSA, hash: crypto.SHA256}, nil
-	case AlgorithmECDSASHA512:
+	case AlgorithmECDSAASN1SHA512:
 		return algorithmDefinition{id: id, keyKind: algorithmKeyECDSA, hash: crypto.SHA512}, nil
-	case AlgorithmECDSASHA256:
+	case AlgorithmECDSAASN1SHA256:
 		return algorithmDefinition{id: id, keyKind: algorithmKeyECDSA, hash: crypto.SHA256}, nil
 	case AlgorithmEd25519:
 		return algorithmDefinition{id: id, keyKind: algorithmKeyEd25519}, nil
@@ -173,7 +173,7 @@ func algorithmDefinitionFor(id AlgorithmID) (algorithmDefinition, error) {
 
 var defaultCavageVerificationAlgorithms = []AlgorithmID{
 	AlgorithmRSAPKCS1v15SHA512,
-	AlgorithmECDSASHA512,
+	AlgorithmECDSAASN1SHA512,
 	AlgorithmEd25519,
 	AlgorithmHMACSHA512,
 }
@@ -183,7 +183,7 @@ var legacyCavageAlgorithms = [...]struct {
 	id    AlgorithmID
 }{
 	{label: "rsa-sha256", id: AlgorithmRSAPKCS1v15SHA256},
-	{label: "ecdsa-sha256", id: AlgorithmECDSASHA256},
+	{label: "ecdsa-sha256", id: AlgorithmECDSAASN1SHA256},
 	{label: "hmac-sha256", id: AlgorithmHMACSHA256},
 }
 

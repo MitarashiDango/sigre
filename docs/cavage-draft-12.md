@@ -10,8 +10,8 @@
 | ---------------------------- | ------- | ---------------- | ------------- | -------------------- |
 | `AlgorithmRSAPKCS1v15SHA512` | RSA     | SHA-512          | PKCS #1 v1.5  | 可                   |
 | `AlgorithmRSAPKCS1v15SHA256` | RSA     | SHA-256          | PKCS #1 v1.5  | 不可                 |
-| `AlgorithmECDSASHA512`       | ECDSA   | SHA-512          | ―             | 可                   |
-| `AlgorithmECDSASHA256`       | ECDSA   | SHA-256          | ―             | 不可                 |
+| `AlgorithmECDSAASN1SHA512`   | ECDSA   | SHA-512          | ―             | 可                   |
+| `AlgorithmECDSAASN1SHA256`   | ECDSA   | SHA-256          | ―             | 不可                 |
 | `AlgorithmEd25519`           | Ed25519 | 事前ハッシュなし | ―             | 可                   |
 | `AlgorithmHMACSHA512`        | 共通鍵  | SHA-512          | ―             | 可                   |
 | `AlgorithmHMACSHA256`        | 共通鍵  | SHA-256          | ―             | 不可                 |
@@ -22,7 +22,7 @@ ECDSA鍵の`Curve`には、`elliptic.P224()`、`elliptic.P256()`、`elliptic.P38
 
 ## 署名
 
-`NewCavageSigner`で署名器を作成します。非対称鍵では`SignRequest`または`SignResponse`を使用します。HMACでは`SignRequestWithHMAC`または`SignResponseWithHMAC`を使用します。署名の格納先は`CavageSignaturePlacementSignature`または`CavageSignaturePlacementAuthorization`で指定します。
+`NewCavageSigner`で署名器を作成します。非対称鍵では`SignRequest`または`SignResponse`を使用します。HMACでは`SignRequestWithHMAC`または`SignResponseWithHMAC`を使用します。リクエストの署名の格納先は`CavageSignaturePlacementSignature`または`CavageSignaturePlacementAuthorization`で指定します。レスポンスの署名は常に`Signature`ヘッダーに書き込みます。
 
 ```go
 err := signer.SignRequest(
@@ -110,14 +110,14 @@ return verifier.Verify(signature, verificationKey)
 
 厳格な既定値では、`hs2019`表現とSHA-512方式またはEd25519を使用します。次の互換性設定は自動では有効になりません。
 
-- `AlgorithmFieldLegacy`と`AllowedLegacyAlgorithms`: `rsa-sha256`、`ecdsa-sha256`、`hmac-sha256`という非推奨ラベル。検証側では、対応する方式を`AllowedAlgorithms`にも含めます。含めない場合、`NewCavageVerifier`は`ErrInvalidVerificationOptions`を返します。
-- `AlgorithmFieldHS2019WithSHA256`と`AllowHS2019WithSHA256`: Fediverse実装で使用例がある、`hs2019`をRSA PKCS #1 v1.5/SHA-256として扱う設定。検証側で有効にする場合、`AllowedAlgorithms`に`AlgorithmRSAPKCS1v15SHA256`を含める必要があり、含めない場合、`NewCavageVerifier`は`ErrInvalidVerificationOptions`を返します。
+- `CavageAlgorithmFieldLegacy`と`AllowedLegacyAlgorithms`: `rsa-sha256`、`ecdsa-sha256`、`hmac-sha256`という非推奨ラベル。検証側では、対応する方式を`AllowedAlgorithms`にも含めます。含めない場合、`NewCavageVerifier`は`ErrInvalidVerificationOptions`を返します。
+- `CavageAlgorithmFieldHS2019WithSHA256`と`AllowHS2019WithSHA256`: Fediverse実装で使用例がある、`hs2019`をRSA PKCS #1 v1.5/SHA-256として扱う設定。検証側で有効にする場合、`AllowedAlgorithms`に`AlgorithmRSAPKCS1v15SHA256`を含める必要があり、含めない場合、`NewCavageVerifier`は`ErrInvalidVerificationOptions`を返します。
 - `Extension`と`ExtensionAlgorithms`: 未登録ラベルと1つの`AlgorithmID`を明示的に対応付ける設定。検証側では、対応付けた方式が`AllowedAlgorithms`の実効的な許可集合（`nil`または空なら既定の4方式）に含まれない場合、`NewCavageVerifier`は`ErrInvalidVerificationOptions`を返します。
 - `ExactHeaders`: 接続先が要求する署名対象全体を指定する設定。
 
 ## エラー処理
 
-公開メソッドは、原因をラップした`*SigreError`を返します。
+公開メソッドは、原因をラップした`*Error`を返します。
 
 ```go
 verifier, err := sigre.NewCavageVerifier(nil)
@@ -127,7 +127,7 @@ if err == nil {
 if errors.Is(err, sigre.ErrMissingSignature) {
 	// 選択したリクエストの取得元に署名候補がない場合の処理
 }
-var packageError *sigre.SigreError
+var packageError *sigre.Error
 if errors.As(err, &packageError) {
 	// packageError.Errにラップされた原因がある
 }
@@ -156,4 +156,4 @@ if errors.As(err, &packageError) {
 | `ExampleCavageSigner_SignRequest`               | Ed25519によるリクエスト署名              |
 | `ExampleCavageVerifier_Verify`                  | 受信した`keyId`の解決とリクエスト検証    |
 | `ExampleCavageSigner_SignRequest_compatibility` | `rsa-sha256`互換設定による署名と検証     |
-| `ExampleSigreError`                             | `errors.Is`と`errors.As`によるエラー判定 |
+| `ExampleError`                                  | `errors.Is`と`errors.As`によるエラー判定 |

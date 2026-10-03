@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	// RequestTarget is the Cavage (request-target) pseudo-header name.
-	RequestTarget = "(request-target)"
-	// Created is the Cavage (created) pseudo-header name.
-	Created = "(created)"
-	// Expires is the Cavage (expires) pseudo-header name.
-	Expires = "(expires)"
+	// CavageRequestTarget is the Cavage (request-target) pseudo-header name.
+	CavageRequestTarget = "(request-target)"
+	// CavageCreated is the Cavage (created) pseudo-header name.
+	CavageCreated = "(created)"
+	// CavageExpires is the Cavage (expires) pseudo-header name.
+	CavageExpires = "(expires)"
 )
 
 // hs2019 is listed as active in draft-cavage-http-signatures-12 Appendix E.2.
@@ -399,10 +399,10 @@ func validateCavagePseudoHeadersForAlgorithmLabel(label string, headers []string
 	default:
 		return nil
 	}
-	if slices.Contains(headers, Created) {
+	if slices.Contains(headers, CavageCreated) {
 		return fmt.Errorf("%w: '(created)' MUST NOT be used with '%s' family algorithms", ErrInvalidSignatureAlgorithm, family)
 	}
-	if slices.Contains(headers, Expires) {
+	if slices.Contains(headers, CavageExpires) {
 		return fmt.Errorf("%w: '(expires)' MUST NOT be used with '%s' family algorithms", ErrInvalidSignatureAlgorithm, family)
 	}
 	return nil
@@ -412,10 +412,10 @@ func validateCavagePseudoHeadersForAlgorithmLabel(label string, headers []string
 // URL without reparsing or re-encoding its query.
 func requestTargetFromURL(u *url.URL) (string, error) {
 	if u == nil {
-		return "", fmt.Errorf("%w: %s is included, but request-target is missing because the request URL is nil", ErrInvalidHTTPMessage, RequestTarget)
+		return "", fmt.Errorf("%w: %s is included, but request-target is missing because the request URL is nil", ErrInvalidHTTPMessage, CavageRequestTarget)
 	}
 	if u.Opaque != "" {
-		return "", fmt.Errorf("%w: %s is included, but request-target is missing because an opaque URL does not define :path", ErrInvalidHTTPMessage, RequestTarget)
+		return "", fmt.Errorf("%w: %s is included, but request-target is missing because an opaque URL does not define :path", ErrInvalidHTTPMessage, CavageRequestTarget)
 	}
 	path := u.EscapedPath()
 	if path == "" {
@@ -428,14 +428,14 @@ func requestTargetFromURL(u *url.URL) (string, error) {
 }
 
 func invalidCONNECTRequestTarget() error {
-	return fmt.Errorf("%w: CONNECT request-target does not define the :path required by %s", ErrInvalidHTTPMessage, RequestTarget)
+	return fmt.Errorf("%w: CONNECT request-target does not define the :path required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
 }
 
 // outgoingRequestTarget resolves the :path-equivalent value that is signed
 // for a request sent from its URL.
 func outgoingRequestTarget(req *http.Request) (string, error) {
 	if req == nil {
-		return "", fmt.Errorf("%w: %s is included, but request-target is missing", ErrInvalidHTTPMessage, RequestTarget)
+		return "", fmt.Errorf("%w: %s is included, but request-target is missing", ErrInvalidHTTPMessage, CavageRequestTarget)
 	}
 	if req.Method == http.MethodConnect {
 		return "", invalidCONNECTRequestTarget()
@@ -447,13 +447,13 @@ func outgoingRequestTarget(req *http.Request) (string, error) {
 // request-target and parsed URL retained by net/http.
 func receivedRequestTarget(req *http.Request) (string, error) {
 	if req == nil {
-		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
 	}
 	if req.Method == http.MethodConnect {
 		return "", invalidCONNECTRequestTarget()
 	}
 	if req.RequestURI == "" {
-		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
 	}
 	if req.RequestURI == "*" {
 		return "*", nil
@@ -469,7 +469,7 @@ func receivedRequestTarget(req *http.Request) (string, error) {
 		}
 		return requestTargetFromURL(req.URL)
 	}
-	return "", fmt.Errorf("%w: authority-form request-target does not define the :path required by %s", ErrInvalidHTTPMessage, RequestTarget)
+	return "", fmt.Errorf("%w: authority-form request-target does not define the :path required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
 }
 
 // associatedRequestMethod uses the same client-side branch as associatedRequestTarget:
@@ -486,7 +486,7 @@ func associatedRequestMethod(req *http.Request) string {
 // a client-side request associated with a response.
 func associatedRequestTarget(req *http.Request) (string, error) {
 	if req == nil {
-		return "", fmt.Errorf("%w: associated request is required by %s", ErrInvalidHTTPMessage, RequestTarget)
+		return "", fmt.Errorf("%w: associated request is required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
 	}
 	if req.RequestURI != "" {
 		return receivedRequestTarget(req)
@@ -502,7 +502,7 @@ func normalizeCavageSignedHeaderName(name string) (string, error) {
 	}
 	lowerName := strings.ToLower(name)
 	switch lowerName {
-	case RequestTarget, Created, Expires:
+	case CavageRequestTarget, CavageCreated, CavageExpires:
 		return lowerName, nil
 	}
 
@@ -553,24 +553,24 @@ func generateSignatureStringBuffer(
 		buf.WriteString(": ")
 
 		switch name {
-		case RequestTarget:
+		case CavageRequestTarget:
 			if method == "" {
-				return nil, fmt.Errorf("%w: '%s' is included, but method is missing", ErrInvalidHTTPMessage, RequestTarget)
+				return nil, fmt.Errorf("%w: '%s' is included, but method is missing", ErrInvalidHTTPMessage, CavageRequestTarget)
 			}
 			if requestTarget == "" {
-				return nil, fmt.Errorf("%w: '%s' is included, but request-target is missing", ErrInvalidHTTPMessage, RequestTarget)
+				return nil, fmt.Errorf("%w: '%s' is included, but request-target is missing", ErrInvalidHTTPMessage, CavageRequestTarget)
 			}
 			buf.WriteString(strings.ToLower(method))
 			buf.WriteString(" ")
 			buf.WriteString(requestTarget)
-		case Created:
+		case CavageCreated:
 			if createdValue == "" {
-				return nil, fmt.Errorf("%w: '%s' is included in signing string, but 'created' value is empty", ErrInvalidCreationTime, Created)
+				return nil, fmt.Errorf("%w: '%s' is included in signing string, but 'created' value is empty", ErrInvalidCreationTime, CavageCreated)
 			}
 			buf.WriteString(createdValue)
-		case Expires:
+		case CavageExpires:
 			if expiresValue == "" {
-				return nil, fmt.Errorf("%w: '%s' is included in signing string, but 'expires' value is empty", ErrInvalidExpirationTime, Expires)
+				return nil, fmt.Errorf("%w: '%s' is included in signing string, but 'expires' value is empty", ErrInvalidExpirationTime, CavageExpires)
 			}
 			buf.WriteString(expiresValue)
 		default:

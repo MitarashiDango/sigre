@@ -274,14 +274,14 @@ func fixedSigningOptions(
 	switch wireLabel {
 	case "hs2019":
 		if algorithm == sigre.AlgorithmRSAPKCS1v15SHA256 {
-			compatibility.AlgorithmField = sigre.AlgorithmFieldHS2019WithSHA256
+			compatibility.AlgorithmField = sigre.CavageAlgorithmFieldHS2019WithSHA256
 		}
 	case "":
-		compatibility.AlgorithmField = sigre.AlgorithmFieldOmitted
+		compatibility.AlgorithmField = sigre.CavageAlgorithmFieldOmitted
 	case "rsa-sha256", "ecdsa-sha256", "hmac-sha256":
-		compatibility.AlgorithmField = sigre.AlgorithmFieldLegacy
+		compatibility.AlgorithmField = sigre.CavageAlgorithmFieldLegacy
 	case "rsa-sha512", "ecdsa-sha512", "hmac-sha512", "ed25519":
-		compatibility.Extension = &sigre.ExtensionAlgorithm{Label: wireLabel, Algorithm: algorithm}
+		compatibility.Extension = &sigre.CavageExtensionAlgorithm{Label: wireLabel, Algorithm: algorithm}
 	default:
 		panic("unsupported fixed signing wire label: " + wireLabel)
 	}
@@ -358,16 +358,16 @@ func TestFixedKeySignAndVerify(t *testing.T) {
 
 		err := signer.SignRequest(
 			req,
-			fixedSigningKey("test-key-ecdsa", sigre.AlgorithmECDSASHA256, ecPriv),
+			fixedSigningKey("test-key-ecdsa", sigre.AlgorithmECDSAASN1SHA256, ecPriv),
 			sigre.CavageSignaturePlacementSignature,
-			fixedSigningOptions(sigre.AlgorithmECDSASHA256, "ecdsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
+			fixedSigningOptions(sigre.AlgorithmECDSAASN1SHA256, "ecdsa-sha256", []string{"(request-target)", "host", "date", "digest"}, 0),
 		)
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
 
-		verifier, signature := newVerifier(t, req, "test-key-ecdsa", fixedVerificationOptions(sigre.AlgorithmECDSASHA256, "ecdsa-sha256"))
-		if err := verifier.Verify(signature, fixedPublicVerificationKey("test-key-ecdsa", sigre.AlgorithmECDSASHA256, ecPub)); err != nil {
+		verifier, signature := newVerifier(t, req, "test-key-ecdsa", fixedVerificationOptions(sigre.AlgorithmECDSAASN1SHA256, "ecdsa-sha256"))
+		if err := verifier.Verify(signature, fixedPublicVerificationKey("test-key-ecdsa", sigre.AlgorithmECDSAASN1SHA256, ecPub)); err != nil {
 			t.Errorf("verification failed: %v", err)
 		}
 	})
@@ -875,7 +875,6 @@ func TestFixedKeyWithCavageVerifier(t *testing.T) {
 		err := signer.SignResponse(
 			res,
 			fixedSigningKey("test-key-rsa-res", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
-			sigre.CavageSignaturePlacementSignature,
 			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"date", "digest"}, 0),
 		)
 		if err != nil {
@@ -924,7 +923,6 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		err := signer.SignResponse(
 			res,
 			fixedSigningKey("test-key-rsa-resp", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPriv),
-			sigre.CavageSignaturePlacementSignature,
 			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{"date", "digest"}, 0),
 		)
 		if err != nil {
@@ -954,7 +952,6 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		err := signer.SignResponse(
 			res,
 			fixedSigningKey("test-key-rsa-resp", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPriv),
-			sigre.CavageSignaturePlacementSignature,
 			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA512, "rsa-sha512", []string{"date", "digest"}, 0),
 		)
 		if err != nil {
@@ -981,7 +978,6 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		err := signer.SignResponseWithHMAC(
 			res,
 			fixedHMACSigningKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)),
-			sigre.CavageSignaturePlacementSignature,
 			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{"date", "digest"}, 0),
 		)
 		if err != nil {
@@ -1011,7 +1007,6 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		err := signer.SignResponseWithHMAC(
 			res,
 			fixedHMACSigningKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)),
-			sigre.CavageSignaturePlacementSignature,
 			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{"date", "digest"}, 0),
 		)
 		if err != nil {
@@ -1039,7 +1034,6 @@ func TestFixedKeyResponseSignAndVerify(t *testing.T) {
 		err := signer.SignResponseWithHMAC(
 			res,
 			fixedHMACSigningKey("test-key-hmac-resp", sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)),
-			sigre.CavageSignaturePlacementSignature,
 			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{"date", "digest"}, 0),
 		)
 		if err != nil {

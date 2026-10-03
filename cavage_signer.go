@@ -34,20 +34,20 @@ type HMACSigningKey struct {
 }
 
 // CavageSignaturePlacement identifies where a Cavage signature is written.
-// The zero value is invalid; every signing call must choose a placement.
+// The zero value is invalid; every request signing call must choose a placement.
 type CavageSignaturePlacement uint8
 
 const (
 	// CavageSignaturePlacementSignature writes the signature to the Signature header.
 	CavageSignaturePlacementSignature CavageSignaturePlacement = iota + 1
 	// CavageSignaturePlacementAuthorization writes a request signature as Authorization: Signature.
-	// It is invalid for responses and when authorization is among the signed fields.
+	// It is invalid when authorization is among the signed fields.
 	CavageSignaturePlacementAuthorization
 )
 
 // CavageSigningOptions configures how a Cavage HTTP signature is created.
 // Passing nil is equivalent to the strict zero value. The strict zero value
-// accepts AlgorithmRSAPKCS1v15SHA512, AlgorithmECDSASHA512, AlgorithmEd25519,
+// accepts AlgorithmRSAPKCS1v15SHA512, AlgorithmECDSAASN1SHA512, AlgorithmEd25519,
 // or AlgorithmHMACSHA512; emits hs2019; signs (request-target) and (created) for
 // a request; and omits the response headers parameter so that its effective
 // value is (created). SHA-256 algorithms require an explicit Compatibility
@@ -68,7 +68,7 @@ type CavageSigningOptions struct {
 type CavageSigningCompatibility struct {
 	// AlgorithmField selects the representation of the algorithm parameter.
 	// It never selects the cryptographic algorithm.
-	AlgorithmField AlgorithmFieldMode
+	AlgorithmField CavageAlgorithmFieldMode
 	// ExactHeaders, when non-nil, completely replaces the effective signed-header
 	// list and causes an explicit headers parameter to be emitted.
 	ExactHeaders []string
@@ -77,28 +77,28 @@ type CavageSigningCompatibility struct {
 	// setting this field records that the omission is an interoperability choice.
 	OmitHeaders bool
 	// Extension binds an unregistered wire label to one trusted AlgorithmID.
-	Extension *ExtensionAlgorithm
+	Extension *CavageExtensionAlgorithm
 }
 
-// AlgorithmFieldMode identifies how the algorithm parameter is represented.
+// CavageAlgorithmFieldMode identifies how the algorithm parameter is represented.
 // The zero value is the strict draft-12 representation.
-type AlgorithmFieldMode uint8
+type CavageAlgorithmFieldMode uint8
 
 const (
-	// AlgorithmFieldStrict emits hs2019 for active SHA-512 and Ed25519 algorithms.
-	AlgorithmFieldStrict AlgorithmFieldMode = iota
-	// AlgorithmFieldOmitted omits the algorithm parameter.
-	AlgorithmFieldOmitted
-	// AlgorithmFieldLegacy emits a deprecated SHA-256 algorithm label. It requires
+	// CavageAlgorithmFieldStrict emits hs2019 for active SHA-512 and Ed25519 algorithms.
+	CavageAlgorithmFieldStrict CavageAlgorithmFieldMode = iota
+	// CavageAlgorithmFieldOmitted omits the algorithm parameter.
+	CavageAlgorithmFieldOmitted
+	// CavageAlgorithmFieldLegacy emits a deprecated SHA-256 algorithm label. It requires
 	// ExactHeaders containing date and, for requests, (request-target).
-	AlgorithmFieldLegacy
-	// AlgorithmFieldHS2019WithSHA256 emits the Fediverse hs2019 representation
+	CavageAlgorithmFieldLegacy
+	// CavageAlgorithmFieldHS2019WithSHA256 emits the Fediverse hs2019 representation
 	// for RSA PKCS #1 v1.5 with SHA-256.
-	AlgorithmFieldHS2019WithSHA256
+	CavageAlgorithmFieldHS2019WithSHA256
 )
 
-// ExtensionAlgorithm binds one unregistered wire label to one AlgorithmID.
-type ExtensionAlgorithm struct {
+// CavageExtensionAlgorithm binds one unregistered wire label to one AlgorithmID.
+type CavageExtensionAlgorithm struct {
 	// Label is the exact unregistered algorithm parameter value to emit.
 	Label string
 	// Algorithm is the trusted algorithm to which Label is bound.
@@ -127,39 +127,37 @@ func (s *CavageSigner) SignRequest(
 	opts *CavageSigningOptions,
 ) error {
 	if req == nil {
-		return wrapSigreError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
+		return wrapError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
 	}
 	algorithm, privateKey, err := validateSigningKey(key)
 	if err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
 	err = s.signRequestWith(req, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return signAsymmetric(privateKey, algorithm, data)
 	})
-	return wrapSigreError(err)
+	return wrapError(err)
 }
 
 // SignResponse signs res with the algorithm bound to key.Metadata and writes
-// the result to the Signature header. Placement must be
-// [CavageSignaturePlacementSignature]. Passing nil opts is equivalent to a
+// the result to the Signature header. Passing nil opts is equivalent to a
 // zero-value [CavageSigningOptions].
 func (s *CavageSigner) SignResponse(
 	res *http.Response,
 	key SigningKey,
-	placement CavageSignaturePlacement,
 	opts *CavageSigningOptions,
 ) error {
 	if res == nil {
-		return wrapSigreError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
+		return wrapError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
 	}
 	algorithm, privateKey, err := validateSigningKey(key)
 	if err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
-	err = s.signResponseWith(res, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
+	err = s.signResponseWith(res, key.Metadata, algorithm, opts, func(data []byte) ([]byte, error) {
 		return signAsymmetric(privateKey, algorithm, data)
 	})
-	return wrapSigreError(err)
+	return wrapError(err)
 }
 
 // SignRequestWithHMAC signs req with the HMAC algorithm bound to key.Metadata
@@ -173,39 +171,37 @@ func (s *CavageSigner) SignRequestWithHMAC(
 	opts *CavageSigningOptions,
 ) error {
 	if req == nil {
-		return wrapSigreError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
+		return wrapError(fmt.Errorf("%w: request is nil", ErrInvalidHTTPMessage))
 	}
 	algorithm, err := validateHMACSigningKey(key)
 	if err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
 	err = s.signRequestWith(req, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
 		return computeHMAC(algorithm.hash, key.Secret, data)
 	})
-	return wrapSigreError(err)
+	return wrapError(err)
 }
 
 // SignResponseWithHMAC signs res with the HMAC algorithm bound to key.Metadata
-// and writes the result to the Signature header. Placement must be
-// [CavageSignaturePlacementSignature]. Passing nil opts is equivalent to a
-// zero-value [CavageSigningOptions].
+// and writes the result to the Signature header. Passing nil opts is equivalent
+// to a zero-value [CavageSigningOptions].
 func (s *CavageSigner) SignResponseWithHMAC(
 	res *http.Response,
 	key HMACSigningKey,
-	placement CavageSignaturePlacement,
 	opts *CavageSigningOptions,
 ) error {
 	if res == nil {
-		return wrapSigreError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
+		return wrapError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
 	}
 	algorithm, err := validateHMACSigningKey(key)
 	if err != nil {
-		return wrapSigreError(err)
+		return wrapError(err)
 	}
-	err = s.signResponseWith(res, key.Metadata, algorithm, placement, opts, func(data []byte) ([]byte, error) {
+	err = s.signResponseWith(res, key.Metadata, algorithm, opts, func(data []byte) ([]byte, error) {
 		return computeHMAC(algorithm.hash, key.Secret, data)
 	})
-	return wrapSigreError(err)
+	return wrapError(err)
 }
 
 func (s *CavageSigner) signRequestWith(
@@ -232,7 +228,6 @@ func (s *CavageSigner) signResponseWith(
 	res *http.Response,
 	metadata TrustedKeyMetadata,
 	algorithm algorithmDefinition,
-	placement CavageSignaturePlacement,
 	opts *CavageSigningOptions,
 	sign func([]byte) ([]byte, error),
 ) error {
@@ -241,7 +236,7 @@ func (s *CavageSigner) signResponseWith(
 		header = make(http.Header)
 	}
 	message := responseSigningMessage(res, header)
-	err := s.signMessage(message, metadata, algorithm, placement, opts, sign)
+	err := s.signMessage(message, metadata, algorithm, CavageSignaturePlacementSignature, opts, sign)
 	if err == nil {
 		res.Header = header
 	}
@@ -307,9 +302,6 @@ func (s *CavageSigner) signMessage(
 	if err := validateCavageSignaturePlacement(placement); err != nil {
 		return err
 	}
-	if !message.isRequest && placement == CavageSignaturePlacementAuthorization {
-		return fmt.Errorf("%w: Authorization placement cannot be used for a response", ErrInvalidSignaturePlacement)
-	}
 	configuration, err := resolveCavageSigningConfiguration(message.isRequest, metadata.Algorithm, opts)
 	if err != nil {
 		return err
@@ -325,7 +317,7 @@ func (s *CavageSigner) signMessage(
 		return fmt.Errorf("failed to create signing string: %w", err)
 	}
 	requestTarget := ""
-	if slices.Contains(configuration.headers, RequestTarget) && message.resolveRequestTarget != nil {
+	if slices.Contains(configuration.headers, CavageRequestTarget) && message.resolveRequestTarget != nil {
 		requestTarget, err = message.resolveRequestTarget()
 		if err != nil {
 			return fmt.Errorf("failed to create signing string: %w", err)
@@ -491,17 +483,17 @@ func resolveCavageSigningConfiguration(
 		return cavageSigningConfiguration{}, err
 	}
 
-	if compatibility.AlgorithmField == AlgorithmFieldLegacy {
+	if compatibility.AlgorithmField == CavageAlgorithmFieldLegacy {
 		if compatibility.ExactHeaders == nil {
-			return cavageSigningConfiguration{}, invalidSigningOptions("AlgorithmFieldLegacy requires ExactHeaders")
+			return cavageSigningConfiguration{}, invalidSigningOptions("CavageAlgorithmFieldLegacy requires ExactHeaders")
 		}
 		required := []string{"date"}
 		if isRequest {
-			required = []string{RequestTarget, "date"}
+			required = []string{CavageRequestTarget, "date"}
 		}
 		for _, name := range required {
 			if !slices.Contains(headers, name) {
-				return cavageSigningConfiguration{}, invalidSigningOptions("AlgorithmFieldLegacy requires %q in ExactHeaders", name)
+				return cavageSigningConfiguration{}, invalidSigningOptions("CavageAlgorithmFieldLegacy requires %q in ExactHeaders", name)
 			}
 		}
 	}
@@ -509,12 +501,12 @@ func resolveCavageSigningConfiguration(
 		return cavageSigningConfiguration{}, invalidSigningAlgorithmOptions(err)
 	}
 
-	hasExpires := slices.Contains(headers, Expires)
+	hasExpires := slices.Contains(headers, CavageExpires)
 	if hasExpires && options.ExpiresAfter == 0 {
-		return cavageSigningConfiguration{}, invalidSigningOptions("%s requires a positive ExpiresAfter", Expires)
+		return cavageSigningConfiguration{}, invalidSigningOptions("%s requires a positive ExpiresAfter", CavageExpires)
 	}
 	if !hasExpires && options.ExpiresAfter > 0 {
-		return cavageSigningConfiguration{}, invalidSigningOptions("ExpiresAfter requires %s in the effective signed-header list", Expires)
+		return cavageSigningConfiguration{}, invalidSigningOptions("ExpiresAfter requires %s in the effective signed-header list", CavageExpires)
 	}
 
 	return cavageSigningConfiguration{
@@ -527,7 +519,7 @@ func resolveCavageSigningConfiguration(
 
 func resolveSigningAlgorithmField(id AlgorithmID, compatibility CavageSigningCompatibility) (string, error) {
 	if compatibility.Extension != nil {
-		if compatibility.AlgorithmField != AlgorithmFieldStrict {
+		if compatibility.AlgorithmField != CavageAlgorithmFieldStrict {
 			return "", invalidSigningOptions("Extension and a non-strict AlgorithmField cannot be combined")
 		}
 		extension := compatibility.Extension
@@ -541,23 +533,23 @@ func resolveSigningAlgorithmField(id AlgorithmID, compatibility CavageSigningCom
 	}
 
 	switch compatibility.AlgorithmField {
-	case AlgorithmFieldStrict:
+	case CavageAlgorithmFieldStrict:
 		if !isStrictCavageAlgorithm(id) {
 			return "", invalidSigningAlgorithmOptions(fmt.Errorf("%w: AlgorithmID %d is not active in strict mode", ErrInvalidSignatureAlgorithm, id))
 		}
 		return hs2019, nil
-	case AlgorithmFieldOmitted:
+	case CavageAlgorithmFieldOmitted:
 		if _, err := algorithmDefinitionFor(id); err != nil {
 			return "", invalidSigningOptions("invalid AlgorithmID: %v", err)
 		}
 		return "", nil
-	case AlgorithmFieldLegacy:
+	case CavageAlgorithmFieldLegacy:
 		label, ok := legacyAlgorithmLabel(id)
 		if !ok {
 			return "", invalidSigningAlgorithmOptions(fmt.Errorf("%w: AlgorithmID %d has no deprecated label", ErrInvalidSignatureAlgorithm, id))
 		}
 		return label, nil
-	case AlgorithmFieldHS2019WithSHA256:
+	case CavageAlgorithmFieldHS2019WithSHA256:
 		if id != AlgorithmRSAPKCS1v15SHA256 {
 			return "", invalidSigningAlgorithmOptions(fmt.Errorf("%w: hs2019 with SHA-256 is only defined for RSA PKCS #1 v1.5", ErrInvalidSignatureAlgorithm))
 		}
@@ -593,13 +585,13 @@ func resolveSigningHeaders(
 		if len(additional) > 0 {
 			return nil, false, invalidSigningOptions("AdditionalHeaders and OmitHeaders cannot be combined")
 		}
-		return []string{Created}, false, nil
+		return []string{CavageCreated}, false, nil
 	}
 
-	headers := []string{Created}
+	headers := []string{CavageCreated}
 	headersPresent := false
 	if isRequest {
-		headers = []string{RequestTarget, Created}
+		headers = []string{CavageRequestTarget, CavageCreated}
 		headersPresent = true
 	}
 	if len(additional) == 0 {
@@ -655,9 +647,9 @@ func ensureCavageSignatureAbsent(header http.Header) error {
 func setCavageSignature(header http.Header, placement CavageSignaturePlacement, value string) {
 	switch placement {
 	case CavageSignaturePlacementSignature:
-		header.Set(Signature, value)
+		header.Set(HeaderSignature, value)
 	case CavageSignaturePlacementAuthorization:
-		header.Set(Authorization, "Signature "+value)
+		header.Set(HeaderAuthorization, "Signature "+value)
 	}
 }
 
@@ -669,10 +661,10 @@ func (s *CavageSigner) currentTime() time.Time {
 }
 
 func signingTimestamps(now time.Time, headers []string, expiresAfter time.Duration) (created, expires string) {
-	if slices.Contains(headers, Created) {
+	if slices.Contains(headers, CavageCreated) {
 		created = strconv.FormatInt(now.Unix(), 10)
 	}
-	if slices.Contains(headers, Expires) {
+	if slices.Contains(headers, CavageExpires) {
 		deadline := now.Add(expiresAfter)
 		expires = formatCavageExpires(deadline)
 	}

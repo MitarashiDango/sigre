@@ -66,7 +66,7 @@ func TestSignAndVerify(t *testing.T) {
 			method:     "PUT",
 			url:        "https://example.com/baz",
 			body:       "update data",
-			signOpts:   signOptsPartial{privateKey: ecdsaPrivateKey, algorithm: sigre.AlgorithmECDSASHA256, wireLabel: "ecdsa-sha256"},
+			signOpts:   signOptsPartial{privateKey: ecdsaPrivateKey, algorithm: sigre.AlgorithmECDSAASN1SHA256, wireLabel: "ecdsa-sha256"},
 			verifyOpts: verifyOptsPartial{publicKey: ecdsaPubKey},
 		},
 		{
@@ -282,7 +282,7 @@ func TestSignAndVerify(t *testing.T) {
 			keyId := "test-key-id"
 			signedHeaders := append([]string(nil), tc.signOpts.headers...)
 			if signedHeaders == nil {
-				signedHeaders = []string{sigre.RequestTarget, "date"}
+				signedHeaders = []string{sigre.CavageRequestTarget, "date"}
 				if targetHeader.Get("Digest") != "" {
 					signedHeaders = append(signedHeaders, "digest")
 				}
@@ -306,11 +306,11 @@ func TestSignAndVerify(t *testing.T) {
 				}
 			} else {
 				if len(tc.signOpts.secret) != 0 {
-					if err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey(keyId, tc.signOpts.algorithm, tc.signOpts.secret), sigre.CavageSignaturePlacementSignature, signOptions); err != nil {
+					if err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey(keyId, tc.signOpts.algorithm, tc.signOpts.secret), signOptions); err != nil {
 						t.Fatalf("SignResponse failed: %v", err)
 					}
 				} else {
-					if err := signer.SignResponse(res, fixedSigningKey(keyId, tc.signOpts.algorithm, tc.signOpts.privateKey), sigre.CavageSignaturePlacementSignature, signOptions); err != nil {
+					if err := signer.SignResponse(res, fixedSigningKey(keyId, tc.signOpts.algorithm, tc.signOpts.privateKey), signOptions); err != nil {
 						t.Fatalf("SignResponse failed: %v", err)
 					}
 				}
@@ -412,7 +412,7 @@ func TestSignerInputValidation(t *testing.T) {
 
 		err := signer.SignResponse(res, sigre.SigningKey{
 			Metadata: sigre.TrustedKeyMetadata{KeyID: "test-key", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA256},
-		}, sigre.CavageSignaturePlacementSignature, nil)
+		}, nil)
 		if !errors.Is(err, sigre.ErrMissingPrivateKey) {
 			t.Fatalf("expected ErrMissingPrivateKey, got: %v", err)
 		}
@@ -439,7 +439,7 @@ func TestSignerInputValidation(t *testing.T) {
 
 		err := signer.SignResponseWithHMAC(res, sigre.HMACSigningKey{
 			Metadata: sigre.TrustedKeyMetadata{KeyID: "test-key", Algorithm: sigre.AlgorithmHMACSHA256},
-		}, sigre.CavageSignaturePlacementSignature, nil)
+		}, nil)
 		if !errors.Is(err, sigre.ErrMissingSharedSecret) {
 			t.Fatalf("expected ErrMissingSharedSecret, got: %v", err)
 		}
@@ -472,7 +472,7 @@ func TestSignerInputValidation(t *testing.T) {
 			req,
 			fixedSigningKey("test-key", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey),
 			sigre.CavageSignaturePlacementSignature,
-			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{sigre.RequestTarget, "date", sigre.Created}, 0),
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{sigre.CavageRequestTarget, "date", sigre.CavageCreated}, 0),
 		)
 		if !errors.Is(err, sigre.ErrInvalidSignatureAlgorithm) {
 			t.Fatalf("expected ErrInvalidSignatureAlgorithm, got: %v", err)
@@ -490,7 +490,7 @@ func TestSignerInputValidation(t *testing.T) {
 			req,
 			fixedHMACSigningKey("test-key", sigre.AlgorithmHMACSHA256, hmacSecret),
 			sigre.CavageSignaturePlacementSignature,
-			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{sigre.RequestTarget, "date", sigre.Expires}, time.Minute),
+			fixedSigningOptions(sigre.AlgorithmHMACSHA256, "hmac-sha256", []string{sigre.CavageRequestTarget, "date", sigre.CavageExpires}, time.Minute),
 		)
 		if !errors.Is(err, sigre.ErrInvalidSignatureAlgorithm) {
 			t.Fatalf("expected ErrInvalidSignatureAlgorithm, got: %v", err)
@@ -507,7 +507,7 @@ func TestSignerInputValidation(t *testing.T) {
 			req,
 			fixedSigningKey("test-key", sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey),
 			sigre.CavageSignaturePlacementSignature,
-			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{sigre.RequestTarget, "date"}, 0),
+			fixedSigningOptions(sigre.AlgorithmRSAPKCS1v15SHA256, "rsa-sha256", []string{sigre.CavageRequestTarget, "date"}, 0),
 		)
 		if !errors.Is(err, sigre.ErrSignedHeaderMissing) {
 			t.Fatalf("expected ErrSignedHeaderMissing, got: %v", err)
@@ -531,7 +531,7 @@ func TestSignerInputValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("signing failed: %v", err)
 		}
-		if got := req.Header.Get(sigre.Authorization); !strings.Contains(got, `keyId="key\"quote\\slash"`) {
+		if got := req.Header.Get(sigre.HeaderAuthorization); !strings.Contains(got, `keyId="key\"quote\\slash"`) {
 			t.Fatalf("Authorization keyId is not correctly escaped: %s", got)
 		}
 
@@ -585,7 +585,7 @@ func TestSignerInputValidation(t *testing.T) {
 				run: func(keyID string) (http.Header, error) {
 					res := &http.Response{Header: make(http.Header)}
 					res.Header.Set("Date", validationDateHeader)
-					err := signer.SignResponse(res, fixedSigningKey(keyID, sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey), sigre.CavageSignaturePlacementSignature, nil)
+					err := signer.SignResponse(res, fixedSigningKey(keyID, sigre.AlgorithmRSAPKCS1v15SHA256, rsaPrivateKey), nil)
 					return res.Header, err
 				},
 			},
@@ -594,7 +594,7 @@ func TestSignerInputValidation(t *testing.T) {
 				run: func(keyID string) (http.Header, error) {
 					res := &http.Response{Header: make(http.Header)}
 					res.Header.Set("Date", validationDateHeader)
-					err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey(keyID, sigre.AlgorithmHMACSHA256, hmacSecret), sigre.CavageSignaturePlacementSignature, nil)
+					err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey(keyID, sigre.AlgorithmHMACSHA256, hmacSecret), nil)
 					return res.Header, err
 				},
 			},
@@ -607,7 +607,7 @@ func TestSignerInputValidation(t *testing.T) {
 					if err == nil {
 						t.Fatal("expected invalid keyId to be rejected")
 					}
-					if header.Get(sigre.Signature) != "" || header.Get(sigre.Authorization) != "" {
+					if header.Get(sigre.HeaderSignature) != "" || header.Get(sigre.HeaderAuthorization) != "" {
 						t.Fatal("signer wrote a signature header after rejecting keyId")
 					}
 				})

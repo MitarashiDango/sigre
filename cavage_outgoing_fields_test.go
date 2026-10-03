@@ -78,7 +78,7 @@ func TestCavageRequestSignerUsesOutgoingHost(t *testing.T) {
 			); err != nil {
 				t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 			}
-			assertCavageHMACSignature(t, req.Header.Get(Signature), "host: "+tt.want)
+			assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "host: "+tt.want)
 
 			wireReq := &http.Request{
 				Method: "GET",
@@ -103,8 +103,8 @@ func TestCavageRequestSignerRejectsHostWithoutURL(t *testing.T) {
 	if !errors.Is(err, ErrInvalidHTTPMessage) {
 		t.Fatalf("SignRequestWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
 	}
-	if req.Header.Get(Signature) != "" {
-		t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(Signature))
+	if req.Header.Get(HeaderSignature) != "" {
+		t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(HeaderSignature))
 	}
 }
 
@@ -141,8 +141,8 @@ func TestCavageRequestSignerRejectsOutgoingHostConflictWithoutMutation(t *testin
 	if req.Body != body || body.reads != 0 || body.closes != 0 {
 		t.Fatalf("Body changed or was used: body=%p reads=%d closes=%d", req.Body, body.reads, body.closes)
 	}
-	if req.Header.Get(Signature) != "" {
-		t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(Signature))
+	if req.Header.Get(HeaderSignature) != "" {
+		t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(HeaderSignature))
 	}
 }
 
@@ -162,7 +162,7 @@ func TestCavageRequestSignerOutgoingHostRedundantHeaderPolicy(t *testing.T) {
 		); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, req.Header.Get(Signature), "host: xn--mnich-kva.example")
+		assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "host: xn--mnich-kva.example")
 	})
 
 	for _, key := range []string{"host", "HOST", "hOsT"} {
@@ -182,8 +182,8 @@ func TestCavageRequestSignerOutgoingHostRedundantHeaderPolicy(t *testing.T) {
 			if !errors.Is(err, ErrInvalidHTTPMessage) {
 				t.Fatalf("SignRequestWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
 			}
-			if req.Header.Get(Signature) != "" {
-				t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(Signature))
+			if req.Header.Get(HeaderSignature) != "" {
+				t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(HeaderSignature))
 			}
 		})
 	}
@@ -206,7 +206,7 @@ func TestCavageRequestSignerUsesOutgoingContentLength(t *testing.T) {
 		); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, req.Header.Get(Signature), "content-length: 3")
+		assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "content-length: 3")
 
 		wireReq, err := http.NewRequest("POST", "https://example.test/inbox", strings.NewReader("abc"))
 		if err != nil {
@@ -225,7 +225,7 @@ func TestCavageRequestSignerUsesOutgoingContentLength(t *testing.T) {
 		); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, req.Header.Get(Signature), "content-length: 0")
+		assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "content-length: 0")
 		assertOutgoingWireField(t, writeOutgoingRequest(t, outgoingTestRequest("POST")), "Content-Length", []string{"0"})
 	})
 
@@ -292,15 +292,15 @@ func TestCavageRequestSignerContentLengthHeaderConflictPolicy(t *testing.T) {
 				if !errors.Is(err, ErrInvalidHTTPMessage) {
 					t.Fatalf("SignRequestWithHMAC() error = %v, want ErrInvalidHTTPMessage", err)
 				}
-				if req.Header.Get(Signature) != "" {
-					t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(Signature))
+				if req.Header.Get(HeaderSignature) != "" {
+					t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(HeaderSignature))
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 			}
-			assertCavageHMACSignature(t, req.Header.Get(Signature), "content-length: 3")
+			assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "content-length: 3")
 		})
 	}
 }
@@ -320,7 +320,7 @@ func TestCavageRequestSignerUsesOutgoingTransferEncodingAndTrailer(t *testing.T)
 		); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, req.Header.Get(Signature), "transfer-encoding: chunked")
+		assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "transfer-encoding: chunked")
 		if body.reads != 0 || body.closes != 0 {
 			t.Fatalf("signing used Body: reads=%d closes=%d", body.reads, body.closes)
 		}
@@ -345,7 +345,7 @@ func TestCavageRequestSignerUsesOutgoingTransferEncodingAndTrailer(t *testing.T)
 		); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, req.Header.Get(Signature), "transfer-encoding: chunked")
+		assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "transfer-encoding: chunked")
 		if body.reads != 0 || body.closes != 0 {
 			t.Fatalf("signing used Body: reads=%d closes=%d", body.reads, body.closes)
 		}
@@ -387,7 +387,7 @@ func TestCavageRequestSignerUsesOutgoingTransferEncodingAndTrailer(t *testing.T)
 		); err != nil {
 			t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, req.Header.Get(Signature), "trailer: X-Alpha,X-Zeta")
+		assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "trailer: X-Alpha,X-Zeta")
 		if body.reads != 0 || body.closes != 0 {
 			t.Fatalf("signing used Body: reads=%d closes=%d", body.reads, body.closes)
 		}
@@ -450,8 +450,8 @@ func TestCavageRequestSignerRejectsMissingInvalidOrIndeterminateTransferFields(t
 		if body.reads != 0 || body.closes != 0 {
 			t.Fatalf("failed signing used Body: reads=%d closes=%d", body.reads, body.closes)
 		}
-		if req.Header.Get(Signature) != "" {
-			t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(Signature))
+		if req.Header.Get(HeaderSignature) != "" {
+			t.Fatalf("Signature was added after failed signing: %q", req.Header.Get(HeaderSignature))
 		}
 	})
 }
@@ -525,7 +525,7 @@ func TestCavageRequestSignerAcceptsMatchingTransferHeaders(t *testing.T) {
 	); err != nil {
 		t.Fatalf("SignRequestWithHMAC() failed: %v", err)
 	}
-	assertCavageHMACSignature(t, req.Header.Get(Signature), "transfer-encoding: chunked\ntrailer: X-Trace")
+	assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "transfer-encoding: chunked\ntrailer: X-Trace")
 	if body.reads != 0 || body.closes != 0 {
 		t.Fatalf("signing used Body: reads=%d closes=%d", body.reads, body.closes)
 	}
@@ -545,7 +545,7 @@ func TestCavageRequestSignerOnlyResolvesSelectedManagedFields(t *testing.T) {
 	); err != nil {
 		t.Fatalf("SignRequestWithHMAC() rejected an unselected Content-Length conflict: %v", err)
 	}
-	assertCavageHMACSignature(t, req.Header.Get(Signature), "host: example.test")
+	assertCavageHMACSignature(t, req.Header.Get(HeaderSignature), "host: example.test")
 	if body.reads != 0 || body.closes != 0 {
 		t.Fatalf("signing resolved an unselected transfer field: reads=%d closes=%d", body.reads, body.closes)
 	}
@@ -560,12 +560,11 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		if err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("response-length-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"content-length"}),
 		); err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, res.Header.Get(Signature), "content-length: 3")
+		assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), "content-length: 3")
 		if body.reads != 0 || body.closes != 0 {
 			t.Fatalf("signing used Body: reads=%d closes=%d", body.reads, body.closes)
 		}
@@ -583,12 +582,11 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		if err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("response-zero-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"content-length"}),
 		); err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, res.Header.Get(Signature), "content-length: 0")
+		assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), "content-length: 0")
 		wireRes := outgoingTestResponse()
 		wireRes.Body = nil
 		assertOutgoingWireField(t, writeOutgoingResponse(t, wireRes), "Content-Length", []string{"0"})
@@ -602,7 +600,6 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("response-status-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"content-length"}),
 		)
 		if !errors.Is(err, ErrSignedHeaderMissing) {
@@ -625,12 +622,11 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		if err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("response-transfer-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"transfer-encoding", "trailer"}),
 		); err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, res.Header.Get(Signature), "transfer-encoding: chunked\ntrailer: X-Alpha,X-Zeta")
+		assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), "transfer-encoding: chunked\ntrailer: X-Alpha,X-Zeta")
 		if body.reads != 0 || body.closes != 0 {
 			t.Fatalf("signing used Body: reads=%d closes=%d", body.reads, body.closes)
 		}
@@ -654,12 +650,11 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		if err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("response-zero-chunked-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"transfer-encoding"}),
 		); err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, res.Header.Get(Signature), "transfer-encoding: chunked")
+		assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), "transfer-encoding: chunked")
 		if body.reads != 0 || body.closes != 0 {
 			t.Fatalf("signing used Body: reads=%d closes=%d", body.reads, body.closes)
 		}
@@ -672,7 +667,6 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("response-nil-body-transfer-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"transfer-encoding"}),
 		)
 		if !errors.Is(err, ErrSignedHeaderMissing) {
@@ -700,18 +694,16 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		if err := NewCavageSigner().SignResponseWithHMAC(
 			lengthResponse,
 			signingStringHMACSigningKey("response-http10-length-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"content-length"}),
 		); err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, lengthResponse.Header.Get(Signature), "content-length: 3")
+		assertCavageHMACSignature(t, lengthResponse.Header.Get(HeaderSignature), "content-length: 3")
 
 		transferResponse := newResponse()
 		err := NewCavageSigner().SignResponseWithHMAC(
 			transferResponse,
 			signingStringHMACSigningKey("response-http10-transfer-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"transfer-encoding"}),
 		)
 		if !errors.Is(err, ErrSignedHeaderMissing) {
@@ -731,12 +723,11 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		if err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("response-head-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"transfer-encoding"}),
 		); err != nil {
 			t.Fatalf("SignResponseWithHMAC() failed: %v", err)
 		}
-		assertCavageHMACSignature(t, res.Header.Get(Signature), "transfer-encoding: chunked")
+		assertCavageHMACSignature(t, res.Header.Get(HeaderSignature), "transfer-encoding: chunked")
 		wireRes := outgoingTestResponse()
 		wireRes.Request = &http.Request{Method: "HEAD"}
 		wireRes.Body = nil
@@ -752,7 +743,6 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		err := NewCavageSigner().SignResponseWithHMAC(
 			lengthResponse,
 			signingStringHMACSigningKey("response-head-length-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"content-length"}),
 		)
 		if !errors.Is(err, ErrSignedHeaderMissing) {
@@ -814,7 +804,6 @@ func TestCavageResponseSignerRejectsManagedHeaderConflicts(t *testing.T) {
 			err := NewCavageSigner().SignResponseWithHMAC(
 				res,
 				signingStringHMACSigningKey("response-conflict-key"),
-				CavageSignaturePlacementSignature,
 				signingStringOptions([]string{tt.signedName}),
 			)
 			if !errors.Is(err, ErrInvalidHTTPMessage) {
@@ -838,7 +827,6 @@ func TestCavageResponseSignerRejectsIndeterminateContentLengthWithoutBodyProbe(t
 	err := NewCavageSigner().SignResponseWithHMAC(
 		res,
 		signingStringHMACSigningKey("response-indeterminate-length-key"),
-		CavageSignaturePlacementSignature,
 		signingStringOptions([]string{"content-length"}),
 	)
 	if !errors.Is(err, ErrInvalidHTTPMessage) || !strings.Contains(err.Error(), "Body") {
@@ -892,7 +880,6 @@ func TestCavageOutgoingResolverPreservesNilHeaderOnError(t *testing.T) {
 		err := NewCavageSigner().SignResponseWithHMAC(
 			res,
 			signingStringHMACSigningKey("nil-response-header-key"),
-			CavageSignaturePlacementSignature,
 			signingStringOptions([]string{"content-length"}),
 		)
 		if !errors.Is(err, ErrInvalidHTTPMessage) {
@@ -925,11 +912,11 @@ func TestCavageSignerAsymmetricUsesOutgoingFieldResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SignRequest() failed: %v", err)
 	}
-	if req.Header.Get(Signature) == "" {
+	if req.Header.Get(HeaderSignature) == "" {
 		t.Fatal("SignRequest() did not write Signature")
 	}
 
-	params, err := parseCavageParams(req.Header.Get(Signature))
+	params, err := parseCavageParams(req.Header.Get(HeaderSignature))
 	if err != nil {
 		t.Fatalf("parseCavageParams() failed: %v", err)
 	}

@@ -32,38 +32,38 @@ func TestCavageInteroperabilityFixtureCoverage(t *testing.T) {
 	expected := map[string]expectation{
 		"mastodon-cavage-post-rsa-sha256": {
 			target:        "Mastodon Cavage POST compatibility form",
-			placement:     sigre.Signature,
-			signedHeaders: []string{"host", "date", "digest", sigre.RequestTarget},
+			placement:     sigre.HeaderSignature,
+			signedHeaders: []string{"host", "date", "digest", sigre.CavageRequestTarget},
 		},
 		"misskey-inbox-post-rsa-sha256": {
 			target:        "Misskey inbox POST compatibility form",
-			placement:     sigre.Signature,
-			signedHeaders: []string{sigre.RequestTarget, "date", "host", "digest"},
+			placement:     sigre.HeaderSignature,
+			signedHeaders: []string{sigre.CavageRequestTarget, "date", "host", "digest"},
 		},
 		"misskey-signed-get-rsa-sha256": {
 			target:        "Misskey signed GET compatibility form",
-			placement:     sigre.Signature,
-			signedHeaders: []string{sigre.RequestTarget, "date", "host"},
+			placement:     sigre.HeaderSignature,
+			signedHeaders: []string{sigre.CavageRequestTarget, "date", "host"},
 		},
 		"pleroma-inbox-post-rsa-sha256": {
 			target:        "Pleroma inbox POST compatibility form",
-			placement:     sigre.Signature,
-			signedHeaders: []string{sigre.RequestTarget, "content-length", "date", "digest", "host"},
+			placement:     sigre.HeaderSignature,
+			signedHeaders: []string{sigre.CavageRequestTarget, "content-length", "date", "digest", "host"},
 		},
 		"oci-authorization-get-rsa-sha256": {
 			target:        "Oracle Cloud Infrastructure Signature Version 1 GET compatibility form",
-			placement:     sigre.Authorization,
-			signedHeaders: []string{"date", sigre.RequestTarget, "host"},
+			placement:     sigre.HeaderAuthorization,
+			signedHeaders: []string{"date", sigre.CavageRequestTarget, "host"},
 		},
 		"fediverse-hs2019-rsa-sha256": {
 			target:        "Fediverse hs2019 with RSA PKCS #1 v1.5 and SHA-256 compatibility form",
-			placement:     sigre.Signature,
-			signedHeaders: []string{sigre.RequestTarget, "host", "date", "digest", "content-type"},
+			placement:     sigre.HeaderSignature,
+			signedHeaders: []string{sigre.CavageRequestTarget, "host", "date", "digest", "content-type"},
 		},
 		"extension-sigre-test-rsa-sha512": {
 			target:        "Unregistered extension label compatibility form",
-			placement:     sigre.Signature,
-			signedHeaders: []string{sigre.RequestTarget, "host", "date"},
+			placement:     sigre.HeaderSignature,
+			signedHeaders: []string{sigre.CavageRequestTarget, "host", "date"},
 		},
 	}
 
@@ -327,7 +327,7 @@ func TestCavageInteroperabilityOCICallerPolicies(t *testing.T) {
 	key := interoperabilityVerificationKey(t, fixture, fixture.algorithmID(t), fixture.VerificationKeyFile)
 	opts := fixture.verificationOptions(t)
 	opts.AllowedAlgorithms = []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256}
-	opts.RequiredHeaders = []string{"date", sigre.RequestTarget, "host"}
+	opts.RequiredHeaders = []string{"date", sigre.CavageRequestTarget, "host"}
 	opts.MaxDateAge = 5 * time.Minute
 
 	verifier, signature, err := parseCavageInteroperability(t, fixture, fixture.verificationTime(t).Add(5*time.Minute), opts)
@@ -360,7 +360,7 @@ func TestCavageInteroperabilityAuthorizationCoexistsWithRFC9421(t *testing.T) {
 
 	fixture := cavageInteroperabilityFixtureByID(t, loadCavageInteroperabilityFixtures(t), coexist.BaseFixtureID)
 	req := fixture.newRequest(t, true)
-	req.Header.Set(sigre.Signature, coexist.RFC9421Signature)
+	req.Header.Set(sigre.HeaderSignature, coexist.RFC9421Signature)
 	req.Header.Set("Signature-Input", coexist.RFC9421SignatureInput)
 	options := fixture.verificationOptions(t)
 	if options.RequestSignatureSource != sigre.CavageRequestSignatureSourceAuthorization {
@@ -420,7 +420,7 @@ func parseCavageInteroperability(
 		options = *opts
 	}
 	options.Now = func() time.Time { return now }
-	if fixture.SignaturePlacement == sigre.Authorization {
+	if fixture.SignaturePlacement == sigre.HeaderAuthorization {
 		options.RequestSignatureSource = sigre.CavageRequestSignatureSourceAuthorization
 	}
 	verifier, err := sigre.NewCavageVerifier(&options)
@@ -438,16 +438,16 @@ func cavageInteroperabilitySignatureParameters(
 ) string {
 	t.Helper()
 	switch fixture.SignaturePlacement {
-	case sigre.Signature:
-		if value := req.Header.Get(sigre.Authorization); value != "" {
+	case sigre.HeaderSignature:
+		if value := req.Header.Get(sigre.HeaderAuthorization); value != "" {
 			t.Fatalf("Signature placement also wrote Authorization: %q", value)
 		}
-		return req.Header.Get(sigre.Signature)
-	case sigre.Authorization:
-		if value := req.Header.Get(sigre.Signature); value != "" {
+		return req.Header.Get(sigre.HeaderSignature)
+	case sigre.HeaderAuthorization:
+		if value := req.Header.Get(sigre.HeaderSignature); value != "" {
 			t.Fatalf("Authorization placement also wrote Signature: %q", value)
 		}
-		value := req.Header.Get(sigre.Authorization)
+		value := req.Header.Get(sigre.HeaderAuthorization)
 		if !strings.HasPrefix(value, "Signature ") {
 			t.Fatalf("Authorization did not use the Signature scheme: %q", value)
 		}

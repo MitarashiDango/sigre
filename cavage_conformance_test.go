@@ -71,7 +71,7 @@ func TestCavageConformanceSignerUsesExpectedSigningString(t *testing.T) {
 				}
 			}
 			placement := sigre.CavageSignaturePlacementSignature
-			if fixture.SignatureHeader == sigre.Authorization {
+			if fixture.SignatureHeader == sigre.HeaderAuthorization {
 				placement = sigre.CavageSignaturePlacementAuthorization
 			}
 
@@ -98,12 +98,12 @@ func TestCavageConformanceSignerUsesExpectedSigningString(t *testing.T) {
 					err = signer.SignResponseWithHMAC(res, sigre.HMACSigningKey{
 						Metadata: sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
 						Secret:   loadCavageFixtureHMACSecret(t, fixture.HMACSecretFile),
-					}, placement, opts)
+					}, opts)
 				} else {
 					err = signer.SignResponse(res, sigre.SigningKey{
 						Metadata:   sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: fixture.algorithmID(t)},
 						PrivateKey: loadCavageFixturePrivateKey(t, fixture.SigningKeyFile),
-					}, placement, opts)
+					}, opts)
 				}
 				generatedHeader = res.Header.Get(fixture.SignatureHeader)
 			}
@@ -151,10 +151,10 @@ func TestCavageConformanceFixtureCoverage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("fixture %q has invalid URL: %v", fixture.ID, err)
 			}
-			if signedHeaders[sigre.RequestTarget] && strings.HasPrefix(u.Path, "/") && u.Path != "/" && u.RawPath == "" && u.EscapedPath() == u.Path && !u.ForceQuery {
+			if signedHeaders[sigre.CavageRequestTarget] && strings.HasPrefix(u.Path, "/") && u.Path != "/" && u.RawPath == "" && u.EscapedPath() == u.Path && !u.ForceQuery {
 				normalPath = true
 			}
-			if signedHeaders[sigre.RequestTarget] && strings.Contains(fixture.Message.RequestTarget, "%2F") {
+			if signedHeaders[sigre.CavageRequestTarget] && strings.Contains(fixture.Message.RequestTarget, "%2F") {
 				escapedRequestTarget = true
 			}
 		}

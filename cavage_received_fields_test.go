@@ -540,7 +540,7 @@ func TestCavageVerifierReceivedManagedSnapshotIsImmutable(t *testing.T) {
 		req.Host = "changed.example"
 		req.ContentLength = 99
 		req.Header.Set("X-Test", "changed")
-		req.Header.Set(Signature, "malformed")
+		req.Header.Set(HeaderSignature, "malformed")
 		req.TransferEncoding[0] = "identity"
 		req.TransferEncoding = append(req.TransferEncoding, "changed")
 		req.Trailer["x-zeta"] = []string{"changed"}
@@ -620,7 +620,7 @@ func TestCavageVerifierReceivedManagedSnapshotIsImmutable(t *testing.T) {
 		res.Header["Host"] = []string{"changed-map.example"}
 		res.ContentLength = 99
 		res.Header.Set("X-Test", "changed")
-		res.Header.Set(Signature, "malformed")
+		res.Header.Set(HeaderSignature, "malformed")
 		res.TransferEncoding[0] = "identity"
 		res.TransferEncoding = append(res.TransferEncoding, "changed")
 		res.Trailer["x-zeta"] = []string{"changed"}

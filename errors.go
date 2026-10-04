@@ -5,24 +5,40 @@ import (
 	"fmt"
 )
 
+// Use [errors.Is] to match errors against these sentinels. An error usually
+// matches exactly one sentinel. Signing options that select a strict, legacy,
+// or hs2019-with-SHA-256 representation incompatible with the trusted algorithm
+// produce errors matching both [ErrInvalidSigningOptions] and
+// [ErrInvalidSignatureAlgorithm]. The same applies when a signing algorithm
+// label is incompatible with the chosen pseudo-headers. Failures in the
+// cryptographic signing operation itself do not match any of these sentinels.
+//
+// Underlying errors included only as message text cannot be inspected with
+// [errors.Is] or [errors.As]. The message text following a sentinel is not part
+// of the compatibility guarantee; callers must not use it to classify errors.
 var (
 	// ErrInvalidHTTPMessage is returned when a request, response, or parsed
 	// signature is nil, incomplete, or not valid for the requested operation.
 	ErrInvalidHTTPMessage = errors.New("invalid HTTP message")
-	// ErrMissingSignature is returned when no Cavage signature candidate is found
-	// in the request sources selected by RequestSignatureSource or in a response
-	// Signature field.
+	// ErrMissingSignature is returned when no signature is found in the sources
+	// selected for parsing. In the Cavage format, it is returned when no signature
+	// candidate is found in the request sources selected by RequestSignatureSource
+	// or in a response Signature field.
 	ErrMissingSignature = errors.New("missing signature")
 	// ErrSignatureSourceConflict is returned when the selected request sources or
 	// a response Signature field contain more than one Cavage signature candidate.
 	ErrSignatureSourceConflict = errors.New("conflicting signature sources")
-	// ErrInvalidSignatureParameters is returned when the Cavage signature
-	// parameters are malformed, duplicated, incomplete, or contain invalid Base64.
+	// ErrInvalidSignatureParameters is returned when signature parameters are
+	// invalid or required parameters are missing. In the Cavage format, it is
+	// returned when the parameters are malformed, duplicated, incomplete, or
+	// contain invalid Base64.
 	ErrInvalidSignatureParameters = errors.New("invalid signature parameters")
-	// ErrInvalidSignatureAlgorithm is returned when a wire algorithm representation
-	// is invalid or disabled, a trusted AlgorithmID is disallowed, an algorithm
-	// is incompatible with the chosen pseudo-headers, or RequireAlgorithm is set
-	// and the algorithm parameter is omitted.
+	// ErrInvalidSignatureAlgorithm is returned when a signature algorithm or its
+	// representation is invalid or not permitted. In the Cavage format, it is
+	// returned when a wire algorithm representation is invalid or disabled, a
+	// trusted AlgorithmID is disallowed, an algorithm is incompatible with the
+	// chosen pseudo-headers, or RequireAlgorithm is set and the algorithm parameter
+	// is omitted.
 	ErrInvalidSignatureAlgorithm = errors.New("invalid signature algorithm")
 	// ErrUnsupportedKeyFormat is returned when a recognized key has an invalid format or length.
 	ErrUnsupportedKeyFormat = errors.New("unsupported key format")
@@ -74,6 +90,8 @@ var (
 )
 
 // Error wraps an internal error with package context.
+// When an exported function or method reports an operation failure, the
+// returned non-nil error is always an *Error.
 type Error struct {
 	// Err is the wrapped error. Use [errors.Is] or [errors.As] to inspect it.
 	Err error

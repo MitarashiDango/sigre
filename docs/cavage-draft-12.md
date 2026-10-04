@@ -117,7 +117,11 @@ return verifier.Verify(signature, verificationKey)
 
 ## エラー処理
 
-公開メソッドは、原因をラップした`*Error`を返します。
+公開の関数・メソッドが処理の失敗を報告する場合、nilでないエラーは常に、原因をラップした`*sigre.Error`です。エラーの判別には`errors.Is`でセンチネルを照合してください。
+
+通常は1つのセンチネルに一致します。署名オプションで選んだstrict表現、legacy表現、またはhs2019とSHA-256を組み合わせる表現が信頼済みの方式に適合しない場合は、`ErrInvalidSigningOptions`と`ErrInvalidSignatureAlgorithm`の両方に一致します。署名時のアルゴリズムラベルが選択した疑似ヘッダーに適合しない場合も同様です。署名の暗号処理そのものが失敗した場合は、このパッケージのどのセンチネルにも一致しません。
+
+メッセージの文字列として含まれるだけの内部エラーは、`errors.Is`や`errors.As`では取り出せません。センチネルの後に続くメッセージの文言は互換性の対象ではないため、文字列でエラーを判別しないでください。
 
 ```go
 verifier, err := sigre.NewCavageVerifier(nil)

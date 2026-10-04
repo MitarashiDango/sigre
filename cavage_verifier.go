@@ -1,24 +1,13 @@
 package sigre
 
 import (
-	"crypto"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/hmac"
-	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
-	"math"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
-
-// maxCavageUnixSeconds is the largest Unix second for which time.Unix's
-// internal addition of the offset from year 1 to 1970 does not overflow int64.
-var maxCavageUnixSeconds = math.MaxInt64 + time.Time{}.Unix()
 
 type cavageVerifierIdentity struct {
 	// value keeps the struct's size nonzero, so distinct verifiers have distinct
@@ -109,7 +98,7 @@ func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, erro
 		host:      req.Host,
 		method:    req.Method,
 		resolveRequestTarget: func() (string, error) {
-			return receivedRequestTarget(req)
+			return receivedCavageRequestTarget(req)
 		},
 		header:           req.Header,
 		transferEncoding: req.TransferEncoding,
@@ -131,7 +120,7 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 	if res == nil {
 		return nil, wrapError(fmt.Errorf("%w: response is nil", ErrInvalidHTTPMessage))
 	}
-	candidate, err := signatureHeaderCandidate(res.Header)
+	candidate, err := cavageSignatureHeaderCandidate(res.Header)
 	if err != nil {
 		return nil, wrapError(err)
 	}
@@ -146,7 +135,7 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 	if res.Request != nil {
 		snapshot.method = associatedRequestMethod(res.Request)
 		snapshot.resolveRequestTarget = func() (string, error) {
-			return associatedRequestTarget(res.Request)
+			return associatedCavageRequestTarget(res.Request)
 		}
 	}
 	signature, err := v.parse(candidate, snapshot)
@@ -175,7 +164,7 @@ func (v *CavageVerifier) Verify(signature *CavageSignature, key VerificationKey)
 	if err := validateVerificationPublicKey(publicKey, algorithm.keyKind); err != nil {
 		return wrapError(err)
 	}
-	if err := v.validateTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
+	if err := v.validateCavageTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
 		return wrapError(err)
 	}
 	return wrapError(verifyAsymmetric(publicKey, algorithm, signature.signature, signature.signingString))
@@ -197,7 +186,7 @@ func (v *CavageVerifier) VerifyHMAC(signature *CavageSignature, key HMACVerifica
 	if algorithm.keyKind != algorithmKeyHMAC {
 		return wrapError(fmt.Errorf("%w: asymmetric AlgorithmID must be used with Verify", ErrAlgorithmMismatch))
 	}
-	if err := v.validateTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
+	if err := v.validateCavageTrustedAlgorithm(signature, key.Metadata.Algorithm); err != nil {
 		return wrapError(err)
 	}
 	return wrapError(verifyHMAC(key.Secret, signature.signature, signature.signingString, algorithm.hash))
@@ -397,7 +386,7 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 	if err != nil {
 		return nil, err
 	}
-	if err := v.checkCavageSignedHeaderPolicy(params, headers); err != nil {
+	if err := v.checkCavageParameterPolicy(params, headers); err != nil {
 		return nil, err
 	}
 	parsedDate, err := v.parseCavageDateForPolicy(message.header)
@@ -413,7 +402,7 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 		return nil, err
 	}
 
-	buf, err := generateSignatureStringBuffer(
+	buf, err := generateCavageSigningString(
 		headers,
 		message.method,
 		requestTarget,
@@ -446,7 +435,7 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 	}, nil
 }
 
-func (v *CavageVerifier) checkCavageSignedHeaderPolicy(params *cavageParams, headers []string) error {
+func (v *CavageVerifier) checkCavageParameterPolicy(params *cavageParams, headers []string) error {
 	if v.config.requireExplicitHeaders && !params.HeadersPresent {
 		return fmt.Errorf("%w: headers parameter is required", ErrRequiredHeaderMissing)
 	}
@@ -467,7 +456,7 @@ func (v *CavageVerifier) checkCavageSignedHeaderPolicy(params *cavageParams, hea
 		return fmt.Errorf("%w: %s requires an expires parameter", ErrInvalidExpirationTime, CavageExpires)
 	}
 
-	return v.validateWireAlgorithmBeforeKey(params, headers)
+	return v.validateCavageAlgorithmLabelPolicy(params, headers)
 }
 
 func (v *CavageVerifier) parseCavageDateForPolicy(header http.Header) (time.Time, error) {
@@ -553,7 +542,7 @@ func requireCavageHeaders(signed, required []string) error {
 	return nil
 }
 
-func (v *CavageVerifier) validateWireAlgorithmBeforeKey(params *cavageParams, headers []string) error {
+func (v *CavageVerifier) validateCavageAlgorithmLabelPolicy(params *cavageParams, headers []string) error {
 	if !params.AlgorithmPresent {
 		if v.config.requireAlgorithm {
 			return fmt.Errorf("%w: algorithm parameter is required", ErrInvalidSignatureAlgorithm)
@@ -574,7 +563,7 @@ func (v *CavageVerifier) validateWireAlgorithmBeforeKey(params *cavageParams, he
 		}
 		return fmt.Errorf("%w: hs2019 has no permitted trusted algorithm", ErrInvalidSignatureAlgorithm)
 	default:
-		if legacyID, ok := legacyAlgorithmID(label); ok {
+		if legacyID, ok := legacyCavageAlgorithmID(label); ok {
 			if _, ok := v.config.allowedLegacyAlgorithms[legacyID]; !ok {
 				return fmt.Errorf("%w: deprecated algorithm %q is not enabled", ErrInvalidSignatureAlgorithm, label)
 			}
@@ -650,82 +639,6 @@ func cavageTrailerDeclaration(trailer http.Header) string {
 	return strings.Join(keys, ",")
 }
 
-func parseCavageCreated(value string) (time.Time, error) {
-	if !isSignedDecimalInteger(value) {
-		return time.Time{}, fmt.Errorf("%w: created must be -?[0-9]+", ErrInvalidCreationTime)
-	}
-	seconds, err := strconv.ParseInt(value, 10, 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("%w: created is outside the int64 range", ErrInvalidCreationTime)
-	}
-	if seconds > maxCavageUnixSeconds {
-		return time.Time{}, fmt.Errorf("%w: created is outside the time.Time range", ErrInvalidCreationTime)
-	}
-	return time.Unix(seconds, 0), nil
-}
-
-func parseCavageExpires(value string) (time.Time, error) {
-	if value == "" {
-		return time.Time{}, fmt.Errorf("%w: expires is empty", ErrInvalidExpirationTime)
-	}
-	whole, fraction, hasFraction := strings.Cut(value, ".")
-	if !isSignedDecimalInteger(whole) || hasFraction && (fraction == "" || !allDecimalDigits(fraction)) {
-		return time.Time{}, fmt.Errorf("%w: expires must be -?[0-9]+ or -?[0-9]+\\.[0-9]+", ErrInvalidExpirationTime)
-	}
-	fraction = strings.TrimRight(fraction, "0")
-	if len(fraction) > 9 {
-		return time.Time{}, fmt.Errorf("%w: expires must have at most 9 fractional digits after trailing zeros are removed", ErrInvalidExpirationTime)
-	}
-	seconds, err := strconv.ParseInt(whole, 10, 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("%w: expires is outside the int64 range", ErrInvalidExpirationTime)
-	}
-	var nanoseconds int64
-	if hasFraction {
-		padded := fraction + strings.Repeat("0", 9-len(fraction))
-		nanoseconds, _ = strconv.ParseInt(padded, 10, 32)
-		if whole[0] == '-' {
-			nanoseconds = -nanoseconds
-		}
-	}
-
-	if seconds > maxCavageUnixSeconds || seconds == math.MinInt64 && nanoseconds < 0 {
-		return time.Time{}, fmt.Errorf("%w: expires is outside the time.Time range", ErrInvalidExpirationTime)
-	}
-	return time.Unix(seconds, nanoseconds), nil
-}
-
-func isSignedDecimalInteger(value string) bool {
-	if value == "" {
-		return false
-	}
-	if value[0] == '-' {
-		value = value[1:]
-	}
-	return value != "" && allDecimalDigits(value)
-}
-
-func allDecimalDigits(value string) bool {
-	for i := 0; i < len(value); i++ {
-		if value[i] < '0' || value[i] > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-// timeAfterDuration reports whether value is strictly later than base plus
-// duration. If Add clamps the seconds at time.Time's upper limit, no
-// representable value can exceed the true boundary. All callers provide a
-// non-negative duration validated by NewCavageVerifier.
-func timeAfterDuration(value, base time.Time, duration time.Duration) bool {
-	boundary := base.Add(duration)
-	if boundary.Sub(base) < duration {
-		return false
-	}
-	return value.After(boundary)
-}
-
 func (v *CavageVerifier) currentTime() time.Time {
 	if v.config.now == nil {
 		return time.Now().UTC()
@@ -747,7 +660,7 @@ func validateVerificationMetadata(signature *CavageSignature, metadata TrustedKe
 	return algorithm, nil
 }
 
-func (v *CavageVerifier) validateTrustedAlgorithm(signature *CavageSignature, id AlgorithmID) error {
+func (v *CavageVerifier) validateCavageTrustedAlgorithm(signature *CavageSignature, id AlgorithmID) error {
 	if !v.isAlgorithmAllowed(id) {
 		return fmt.Errorf("%w: trusted AlgorithmID %d is not permitted", ErrInvalidSignatureAlgorithm, id)
 	}
@@ -761,7 +674,7 @@ func (v *CavageVerifier) validateTrustedAlgorithm(signature *CavageSignature, id
 		}
 		return fmt.Errorf("%w: algorithm %q does not identify trusted AlgorithmID %d", ErrAlgorithmMismatch, label, id)
 	}
-	if legacyID, ok := legacyAlgorithmID(label); ok {
+	if legacyID, ok := legacyCavageAlgorithmID(label); ok {
 		if legacyID != id {
 			return fmt.Errorf("%w: algorithm %q identifies AlgorithmID %d, trusted metadata specifies %d", ErrAlgorithmMismatch, label, legacyID, id)
 		}
@@ -777,120 +690,4 @@ func (v *CavageVerifier) validateTrustedAlgorithm(signature *CavageSignature, id
 func (v *CavageVerifier) isAlgorithmAllowed(id AlgorithmID) bool {
 	_, ok := v.config.allowedAlgorithms[id]
 	return ok
-}
-
-func normalizeEd25519PublicKey(key crypto.PublicKey) crypto.PublicKey {
-	publicKey, ok := key.(*ed25519.PublicKey)
-	if !ok {
-		return key
-	}
-	if publicKey == nil {
-		return ed25519.PublicKey(nil)
-	}
-	return *publicKey
-}
-
-func isMissingPublicKey(key crypto.PublicKey) bool {
-	if key == nil {
-		return true
-	}
-	switch publicKey := key.(type) {
-	case *rsa.PublicKey:
-		return publicKey == nil
-	case *ecdsa.PublicKey:
-		return publicKey == nil
-	case ed25519.PublicKey:
-		return len(publicKey) == 0
-	default:
-		return false
-	}
-}
-
-func validateVerificationPublicKey(key crypto.PublicKey, expected algorithmKeyKind) error {
-	switch expected {
-	case algorithmKeyRSA:
-		publicKey, ok := key.(*rsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("%w: AlgorithmID requires RSA, public key is %T", ErrAlgorithmMismatch, key)
-		}
-		if publicKey.N == nil || publicKey.N.Sign() <= 0 || publicKey.N.Bit(0) == 0 || publicKey.E < 2 || publicKey.E&1 == 0 || publicKey.E > math.MaxInt32 {
-			return fmt.Errorf("%w: invalid RSA public key", ErrUnsupportedKeyFormat)
-		}
-	case algorithmKeyECDSA:
-		publicKey, ok := key.(*ecdsa.PublicKey)
-		if !ok {
-			return fmt.Errorf("%w: AlgorithmID requires ECDSA, public key is %T", ErrAlgorithmMismatch, key)
-		}
-		// Intentionally inspect the deprecated X and Y fields: VerifyASN1 and
-		// PublicKey.Bytes can panic when key fields are nil.
-		if publicKey.Curve == nil || publicKey.X == nil || publicKey.Y == nil {
-			return fmt.Errorf("%w: invalid ECDSA public key", ErrUnsupportedKeyFormat)
-		}
-		if _, err := publicKey.Bytes(); err != nil {
-			return fmt.Errorf("%w: invalid ECDSA public key", ErrUnsupportedKeyFormat)
-		}
-	case algorithmKeyEd25519:
-		publicKey, ok := key.(ed25519.PublicKey)
-		if !ok {
-			return fmt.Errorf("%w: AlgorithmID requires Ed25519, public key is %T", ErrAlgorithmMismatch, key)
-		}
-		if len(publicKey) != ed25519.PublicKeySize {
-			return fmt.Errorf("%w: invalid Ed25519 public key length %d", ErrUnsupportedKeyFormat, len(publicKey))
-		}
-	default:
-		return fmt.Errorf("%w: asymmetric verification received a non-public-key AlgorithmID", ErrAlgorithmMismatch)
-	}
-	return nil
-}
-
-func verifyAsymmetric(key crypto.PublicKey, algorithm algorithmDefinition, sig, data []byte) error {
-	switch algorithm.keyKind {
-	case algorithmKeyRSA:
-		return verifyRSA(key.(*rsa.PublicKey), sig, data, algorithm.hash)
-	case algorithmKeyECDSA:
-		return verifyECDSA(key.(*ecdsa.PublicKey), sig, data, algorithm.hash)
-	case algorithmKeyEd25519:
-		return verifyEd25519(key.(ed25519.PublicKey), sig, data)
-	}
-	return fmt.Errorf("%w: unsupported asymmetric AlgorithmID %d", ErrAlgorithmMismatch, algorithm.id)
-}
-
-func verifyRSA(publicKey *rsa.PublicKey, sig, data []byte, hashID crypto.Hash) error {
-	digest, err := digestSigningString(hashID, data)
-	if err != nil {
-		return err
-	}
-	if err := rsa.VerifyPKCS1v15(publicKey, hashID, digest, sig); err != nil {
-		return fmt.Errorf("%w: RSA PKCS #1 v1.5 verification failed: %v", ErrVerification, err)
-	}
-	return nil
-}
-
-func verifyECDSA(publicKey *ecdsa.PublicKey, sig, data []byte, hashID crypto.Hash) error {
-	digest, err := digestSigningString(hashID, data)
-	if err != nil {
-		return err
-	}
-	if !ecdsa.VerifyASN1(publicKey, digest, sig) {
-		return fmt.Errorf("%w: ECDSA verification failed", ErrVerification)
-	}
-	return nil
-}
-
-func verifyEd25519(publicKey ed25519.PublicKey, sig, data []byte) error {
-	if !ed25519.Verify(publicKey, data, sig) {
-		return fmt.Errorf("%w: Ed25519 verification failed", ErrVerification)
-	}
-	return nil
-}
-
-func verifyHMAC(secret, sig, data []byte, hashID crypto.Hash) error {
-	mac, err := computeHMAC(hashID, secret, data)
-	if err != nil {
-		return err
-	}
-	if !hmac.Equal(sig, mac) {
-		return fmt.Errorf("%w: HMAC verification failed", ErrVerification)
-	}
-	return nil
 }

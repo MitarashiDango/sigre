@@ -14,12 +14,12 @@ type cavageSignatureCandidate struct {
 func requestCavageSignatureCandidate(h http.Header, source CavageRequestSignatureSource) (cavageSignatureCandidate, error) {
 	switch source {
 	case CavageRequestSignatureSourceSignature:
-		return signatureHeaderCandidate(h)
+		return cavageSignatureHeaderCandidate(h)
 	case CavageRequestSignatureSourceAuthorization:
-		return authorizationSignatureCandidate(h)
+		return cavageAuthorizationSignatureCandidate(h)
 	case CavageRequestSignatureSourceSignatureOrAuthorization:
-		signature, signatureErr := signatureHeaderCandidate(h)
-		authorization, authorizationErr := authorizationSignatureCandidate(h)
+		signature, signatureErr := cavageSignatureHeaderCandidate(h)
+		authorization, authorizationErr := cavageAuthorizationSignatureCandidate(h)
 		if signatureErr != nil || authorizationErr != nil || signature.placement != 0 && authorization.placement != 0 {
 			return cavageSignatureCandidate{}, fmt.Errorf("%w: multiple selected Cavage signature values are present", ErrSignatureSourceConflict)
 		}
@@ -32,7 +32,7 @@ func requestCavageSignatureCandidate(h http.Header, source CavageRequestSignatur
 	}
 }
 
-func signatureHeaderCandidate(h http.Header) (cavageSignatureCandidate, error) {
+func cavageSignatureHeaderCandidate(h http.Header) (cavageSignatureCandidate, error) {
 	values := h.Values(HeaderSignature)
 	if len(values) > 1 {
 		return cavageSignatureCandidate{}, fmt.Errorf("%w: multiple Signature field values are present", ErrSignatureSourceConflict)
@@ -43,7 +43,7 @@ func signatureHeaderCandidate(h http.Header) (cavageSignatureCandidate, error) {
 	return cavageSignatureCandidate{value: values[0], placement: CavageSignaturePlacementSignature}, nil
 }
 
-func authorizationSignatureCandidate(h http.Header) (cavageSignatureCandidate, error) {
+func cavageAuthorizationSignatureCandidate(h http.Header) (cavageSignatureCandidate, error) {
 	var candidate cavageSignatureCandidate
 	for _, value := range h.Values(HeaderAuthorization) {
 		params, ok := cavageAuthorizationParams(value)

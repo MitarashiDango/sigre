@@ -118,15 +118,15 @@ func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
 				Host:   tt.url.Host,
 				Header: make(http.Header),
 			}
-			gotTarget, err := outgoingRequestTarget(req)
+			gotTarget, err := outgoingCavageRequestTarget(req)
 			if err != nil {
-				t.Fatalf("outgoingRequestTarget() failed: %v", err)
+				t.Fatalf("outgoingCavageRequestTarget() failed: %v", err)
 			}
 			if gotTarget != tt.want {
-				t.Fatalf("outgoingRequestTarget() = %q, want %q", gotTarget, tt.want)
+				t.Fatalf("outgoingCavageRequestTarget() = %q, want %q", gotTarget, tt.want)
 			}
 			if gotTarget != tt.url.RequestURI() {
-				t.Fatalf("outgoingRequestTarget() = %q, net/url URL.RequestURI() = %q", gotTarget, tt.url.RequestURI())
+				t.Fatalf("outgoingCavageRequestTarget() = %q, net/url URL.RequestURI() = %q", gotTarget, tt.url.RequestURI())
 			}
 
 			signer := NewCavageSigner()
@@ -260,14 +260,14 @@ func TestRequestTargetResolversRejectUnresolvableInputs(t *testing.T) {
 		{
 			name: "received authority-form without CONNECT",
 			resolve: func() (string, error) {
-				return receivedRequestTarget(&http.Request{Method: http.MethodGet, RequestURI: "example.test:443"})
+				return receivedCavageRequestTarget(&http.Request{Method: http.MethodGet, RequestURI: "example.test:443"})
 			},
 			wantDetail: "authority-form",
 		},
 		{
 			name: "missing associated request",
 			resolve: func() (string, error) {
-				return associatedRequestTarget(nil)
+				return associatedCavageRequestTarget(nil)
 			},
 			wantDetail: "associated request",
 		},
@@ -401,9 +401,9 @@ func TestGenerateSignatureStringNormalHeaders(t *testing.T) {
 		"x-internal: a \t b\n" +
 		"x-unicode: \u00a0kept\u2003"
 
-	buf, err := generateSignatureStringBuffer(headers, "", "", header, "", "")
+	buf, err := generateCavageSigningString(headers, "", "", header, "", "")
 	if err != nil {
-		t.Fatalf("generateSignatureStringBuffer() failed: %v", err)
+		t.Fatalf("generateCavageSigningString() failed: %v", err)
 	}
 	if got := buf.String(); got != want {
 		t.Fatalf("signing string mismatch\ngot:  %q\nwant: %q", got, want)
@@ -428,9 +428,9 @@ func TestGenerateSignatureStringErrorSentinels(t *testing.T) {
 		{name: "empty expires", headerName: CavageExpires, wantError: ErrInvalidExpirationTime},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := generateSignatureStringBuffer([]string{tt.headerName}, tt.method, tt.requestTarget, nil, "", "")
+			_, err := generateCavageSigningString([]string{tt.headerName}, tt.method, tt.requestTarget, nil, "", "")
 			if !errors.Is(err, tt.wantError) {
-				t.Fatalf("generateSignatureStringBuffer() error = %v, want %v", err, tt.wantError)
+				t.Fatalf("generateCavageSigningString() error = %v, want %v", err, tt.wantError)
 			}
 		})
 	}
@@ -716,7 +716,7 @@ func TestCavageSignerRejectsCONNECTBeforeCryptographicWork(t *testing.T) {
 	}}
 
 	err = signer.signMessage(
-		requestSigningMessage(req, header),
+		cavageRequestSigningMessage(req, header),
 		TrustedKeyMetadata{KeyID: "connect-callback-key", Algorithm: AlgorithmHMACSHA256},
 		algorithm,
 		CavageSignaturePlacementSignature,
@@ -770,9 +770,9 @@ func TestGenerateSignatureStringRejectsForbiddenHeaderValueBytes(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(valueSet.name+"/"+tt.name, func(t *testing.T) {
 				header := http.Header{"X-Signed": valueSet.values(tt.b)}
-				_, err := generateSignatureStringBuffer([]string{"x-signed"}, "", "", header, "", "")
+				_, err := generateCavageSigningString([]string{"x-signed"}, "", "", header, "", "")
 				if !errors.Is(err, ErrInvalidHTTPMessage) {
-					t.Fatalf("generateSignatureStringBuffer() error = %v, want ErrInvalidHTTPMessage", err)
+					t.Fatalf("generateCavageSigningString() error = %v, want ErrInvalidHTTPMessage", err)
 				}
 			})
 		}
@@ -810,9 +810,9 @@ func TestGenerateSignatureStringRejectsForbiddenHeaderValueBytes(t *testing.T) {
 	for _, tt := range diagnosticTests {
 		t.Run("diagnostics/"+tt.name, func(t *testing.T) {
 			header := http.Header{"X-Signed": tt.values}
-			_, err := generateSignatureStringBuffer([]string{"x-signed"}, "", "", header, "", "")
+			_, err := generateCavageSigningString([]string{"x-signed"}, "", "", header, "", "")
 			if !errors.Is(err, ErrInvalidHTTPMessage) {
-				t.Fatalf("generateSignatureStringBuffer() error = %v, want ErrInvalidHTTPMessage", err)
+				t.Fatalf("generateCavageSigningString() error = %v, want ErrInvalidHTTPMessage", err)
 			}
 			for _, want := range []string{"x-signed", tt.wantValueIndex, tt.wantBytePosition} {
 				if !strings.Contains(err.Error(), want) {
@@ -2266,18 +2266,18 @@ func FuzzOutgoingRequestTarget(f *testing.F) {
 			RawQuery:   rawQuery,
 			ForceQuery: forceQuery,
 		}
-		got, err := outgoingRequestTarget(&http.Request{Method: method, URL: u})
+		got, err := outgoingCavageRequestTarget(&http.Request{Method: method, URL: u})
 		if method == http.MethodConnect {
 			if !errors.Is(err, ErrInvalidHTTPMessage) || got != "" {
-				t.Fatalf("outgoingRequestTarget() = %q, %v; want empty target and ErrInvalidHTTPMessage for CONNECT", got, err)
+				t.Fatalf("outgoingCavageRequestTarget() = %q, %v; want empty target and ErrInvalidHTTPMessage for CONNECT", got, err)
 			}
 			return
 		}
 		if err != nil {
-			t.Fatalf("outgoingRequestTarget() failed: %v", err)
+			t.Fatalf("outgoingCavageRequestTarget() failed: %v", err)
 		}
 		if want := u.RequestURI(); got != want {
-			t.Fatalf("outgoingRequestTarget() = %q, net/url URL.RequestURI() = %q", got, want)
+			t.Fatalf("outgoingCavageRequestTarget() = %q, net/url URL.RequestURI() = %q", got, want)
 		}
 	})
 }

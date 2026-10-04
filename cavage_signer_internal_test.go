@@ -34,7 +34,7 @@ func TestSigningTimestampsPreservesExpiration(t *testing.T) {
 				t.Fatalf("formatCavageExpires() = %q, want %q", formatted, tt.wantExpires)
 			}
 
-			created, expires := signingTimestamps(tt.now, []string{CavageCreated, CavageExpires}, tt.expiresAfter)
+			created, expires := cavageSigningTimestamps(tt.now, []string{CavageCreated, CavageExpires}, tt.expiresAfter)
 			if created != tt.wantCreated {
 				t.Fatalf("created = %q, want %q", created, tt.wantCreated)
 			}

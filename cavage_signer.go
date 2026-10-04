@@ -2,36 +2,12 @@ package sigre
 
 import (
 	"crypto"
-	"crypto/ecdsa"
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
 	"net/http"
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 )
-
-// SigningKey contains trusted metadata and an asymmetric private key.
-// Metadata.Algorithm determines the key kind, hash, and RSA padding.
-type SigningKey struct {
-	// Metadata binds the wire keyId to the only algorithm used for signing.
-	Metadata TrustedKeyMetadata
-	// PrivateKey is an RSA, ECDSA, or Ed25519 private key matching Metadata.Algorithm.
-	PrivateKey crypto.PrivateKey
-}
-
-// HMACSigningKey contains trusted metadata and an HMAC shared secret.
-// Metadata.Algorithm determines the HMAC hash.
-type HMACSigningKey struct {
-	// Metadata binds the wire keyId to the only HMAC algorithm used for signing.
-	Metadata TrustedKeyMetadata
-	// Secret is the non-empty shared secret used for HMAC signing.
-	Secret []byte
-}
 
 // CavageSignaturePlacement identifies where a Cavage signature is written.
 // The zero value is invalid; every request signing call must choose a placement.
@@ -216,7 +192,7 @@ func (s *CavageSigner) signRequestWith(
 	if header == nil {
 		header = make(http.Header)
 	}
-	message := requestSigningMessage(req, header)
+	message := cavageRequestSigningMessage(req, header)
 	err := s.signMessage(message, metadata, algorithm, placement, opts, sign)
 	if err == nil {
 		req.Header = header
@@ -235,7 +211,7 @@ func (s *CavageSigner) signResponseWith(
 	if header == nil {
 		header = make(http.Header)
 	}
-	message := responseSigningMessage(res, header)
+	message := cavageResponseSigningMessage(res, header)
 	err := s.signMessage(message, metadata, algorithm, CavageSignaturePlacementSignature, opts, sign)
 	if err == nil {
 		res.Header = header
@@ -251,7 +227,7 @@ type cavageSigningMessage struct {
 	resolveFields        func([]string) (http.Header, error)
 }
 
-func requestSigningMessage(req *http.Request, header http.Header) cavageSigningMessage {
+func cavageRequestSigningMessage(req *http.Request, header http.Header) cavageSigningMessage {
 	method := req.Method
 	if method == "" {
 		// For client requests, net/http defines an empty method as GET.
@@ -262,7 +238,7 @@ func requestSigningMessage(req *http.Request, header http.Header) cavageSigningM
 		method:    method,
 		header:    header,
 		resolveRequestTarget: func() (string, error) {
-			return outgoingRequestTarget(req)
+			return outgoingCavageRequestTarget(req)
 		},
 		resolveFields: func(headers []string) (http.Header, error) {
 			return resolveOutgoingRequestFields(req, header, headers)
@@ -270,12 +246,12 @@ func requestSigningMessage(req *http.Request, header http.Header) cavageSigningM
 	}
 }
 
-func responseSigningMessage(res *http.Response, header http.Header) cavageSigningMessage {
+func cavageResponseSigningMessage(res *http.Response, header http.Header) cavageSigningMessage {
 	message := cavageSigningMessage{header: header}
 	if res.Request != nil {
 		message.method = associatedRequestMethod(res.Request)
 		message.resolveRequestTarget = func() (string, error) {
-			return associatedRequestTarget(res.Request)
+			return associatedCavageRequestTarget(res.Request)
 		}
 	}
 	message.resolveFields = func(headers []string) (http.Header, error) {
@@ -325,8 +301,8 @@ func (s *CavageSigner) signMessage(
 	}
 
 	now := s.currentTime()
-	created, expires := signingTimestamps(now, configuration.headers, configuration.expiresAfter)
-	buf, err := generateSignatureStringBuffer(
+	created, expires := cavageSigningTimestamps(now, configuration.headers, configuration.expiresAfter)
+	buf, err := generateCavageSigningString(
 		configuration.headers,
 		message.method,
 		requestTarget,
@@ -379,17 +355,6 @@ func validateSigningKey(key SigningKey) (algorithmDefinition, crypto.PrivateKey,
 	return algorithm, privateKey, nil
 }
 
-func normalizeEd25519PrivateKey(key crypto.PrivateKey) crypto.PrivateKey {
-	privateKey, ok := key.(*ed25519.PrivateKey)
-	if !ok {
-		return key
-	}
-	if privateKey == nil {
-		return ed25519.PrivateKey(nil)
-	}
-	return *privateKey
-}
-
 func validateHMACSigningKey(key HMACSigningKey) (algorithmDefinition, error) {
 	algorithm, err := validateSigningMetadata(key.Metadata)
 	if err != nil {
@@ -411,52 +376,6 @@ func validateSigningMetadata(metadata TrustedKeyMetadata) (algorithmDefinition, 
 	return algorithmDefinitionFor(metadata.Algorithm)
 }
 
-func validatePrivateKey(key crypto.PrivateKey, expected algorithmKeyKind) error {
-	switch expected {
-	case algorithmKeyRSA:
-		privateKey, ok := key.(*rsa.PrivateKey)
-		if !ok {
-			return fmt.Errorf("%w: AlgorithmID requires RSA, private key is %T", ErrAlgorithmMismatch, key)
-		}
-		if privateKey == nil {
-			return ErrMissingPrivateKey
-		}
-		if privateKey.N == nil || privateKey.D == nil {
-			return fmt.Errorf("%w: invalid RSA private key", ErrUnsupportedKeyFormat)
-		}
-	case algorithmKeyECDSA:
-		privateKey, ok := key.(*ecdsa.PrivateKey)
-		if !ok {
-			return fmt.Errorf("%w: AlgorithmID requires ECDSA, private key is %T", ErrAlgorithmMismatch, key)
-		}
-		if privateKey == nil {
-			return ErrMissingPrivateKey
-		}
-		// Intentionally inspect the deprecated X, Y, and D fields: SignASN1 and
-		// PrivateKey.Bytes can panic when key fields are nil.
-		if privateKey.Curve == nil || privateKey.X == nil || privateKey.Y == nil || privateKey.D == nil {
-			return fmt.Errorf("%w: invalid ECDSA private key", ErrUnsupportedKeyFormat)
-		}
-		if _, err := privateKey.Bytes(); err != nil {
-			return fmt.Errorf("%w: invalid ECDSA private key", ErrUnsupportedKeyFormat)
-		}
-	case algorithmKeyEd25519:
-		privateKey, ok := key.(ed25519.PrivateKey)
-		if !ok {
-			return fmt.Errorf("%w: AlgorithmID requires Ed25519, private key is %T", ErrAlgorithmMismatch, key)
-		}
-		if len(privateKey) == 0 {
-			return ErrMissingPrivateKey
-		}
-		if len(privateKey) != ed25519.PrivateKeySize {
-			return fmt.Errorf("%w: invalid Ed25519 private key length %d", ErrUnsupportedKeyFormat, len(privateKey))
-		}
-	default:
-		return fmt.Errorf("%w: SigningKey received a non-asymmetric AlgorithmID", ErrAlgorithmMismatch)
-	}
-	return nil
-}
-
 func resolveCavageSigningConfiguration(
 	isRequest bool,
 	algorithm AlgorithmID,
@@ -467,25 +386,25 @@ func resolveCavageSigningConfiguration(
 		options = *opts
 	}
 	if options.ExpiresAfter < 0 {
-		return cavageSigningConfiguration{}, invalidSigningOptions("ExpiresAfter must not be negative")
+		return cavageSigningConfiguration{}, invalidCavageSigningOptions("ExpiresAfter must not be negative")
 	}
 
 	compatibility := CavageSigningCompatibility{}
 	if options.Compatibility != nil {
 		compatibility = *options.Compatibility
 	}
-	wireAlgorithm, err := resolveSigningAlgorithmField(algorithm, compatibility)
+	wireAlgorithm, err := resolveCavageSigningAlgorithmField(algorithm, compatibility)
 	if err != nil {
 		return cavageSigningConfiguration{}, err
 	}
-	headers, headersPresent, err := resolveSigningHeaders(isRequest, options.AdditionalHeaders, compatibility)
+	headers, headersPresent, err := resolveCavageSigningHeaders(isRequest, options.AdditionalHeaders, compatibility)
 	if err != nil {
 		return cavageSigningConfiguration{}, err
 	}
 
 	if compatibility.AlgorithmField == CavageAlgorithmFieldLegacy {
 		if compatibility.ExactHeaders == nil {
-			return cavageSigningConfiguration{}, invalidSigningOptions("CavageAlgorithmFieldLegacy requires ExactHeaders")
+			return cavageSigningConfiguration{}, invalidCavageSigningOptions("CavageAlgorithmFieldLegacy requires ExactHeaders")
 		}
 		required := []string{"date"}
 		if isRequest {
@@ -493,20 +412,20 @@ func resolveCavageSigningConfiguration(
 		}
 		for _, name := range required {
 			if !slices.Contains(headers, name) {
-				return cavageSigningConfiguration{}, invalidSigningOptions("CavageAlgorithmFieldLegacy requires %q in ExactHeaders", name)
+				return cavageSigningConfiguration{}, invalidCavageSigningOptions("CavageAlgorithmFieldLegacy requires %q in ExactHeaders", name)
 			}
 		}
 	}
 	if err := validateCavagePseudoHeadersForAlgorithmLabel(wireAlgorithm, headers); err != nil {
-		return cavageSigningConfiguration{}, invalidSigningAlgorithmOptions(err)
+		return cavageSigningConfiguration{}, invalidCavageSigningAlgorithmOptions(err)
 	}
 
 	hasExpires := slices.Contains(headers, CavageExpires)
 	if hasExpires && options.ExpiresAfter == 0 {
-		return cavageSigningConfiguration{}, invalidSigningOptions("%s requires a positive ExpiresAfter", CavageExpires)
+		return cavageSigningConfiguration{}, invalidCavageSigningOptions("%s requires a positive ExpiresAfter", CavageExpires)
 	}
 	if !hasExpires && options.ExpiresAfter > 0 {
-		return cavageSigningConfiguration{}, invalidSigningOptions("ExpiresAfter requires %s in the effective signed-header list", CavageExpires)
+		return cavageSigningConfiguration{}, invalidCavageSigningOptions("ExpiresAfter requires %s in the effective signed-header list", CavageExpires)
 	}
 
 	return cavageSigningConfiguration{
@@ -517,17 +436,17 @@ func resolveCavageSigningConfiguration(
 	}, nil
 }
 
-func resolveSigningAlgorithmField(id AlgorithmID, compatibility CavageSigningCompatibility) (string, error) {
+func resolveCavageSigningAlgorithmField(id AlgorithmID, compatibility CavageSigningCompatibility) (string, error) {
 	if compatibility.Extension != nil {
 		if compatibility.AlgorithmField != CavageAlgorithmFieldStrict {
-			return "", invalidSigningOptions("Extension and a non-strict AlgorithmField cannot be combined")
+			return "", invalidCavageSigningOptions("Extension and a non-strict AlgorithmField cannot be combined")
 		}
 		extension := compatibility.Extension
 		if err := validateCavageExtensionAlgorithm(extension.Label, extension.Algorithm); err != nil {
-			return "", invalidSigningOptions("Extension label %q: %v", extension.Label, err)
+			return "", invalidCavageSigningOptions("Extension label %q: %v", extension.Label, err)
 		}
 		if extension.Algorithm != id {
-			return "", invalidSigningOptions("Extension.Algorithm %d does not match SigningKey AlgorithmID %d", extension.Algorithm, id)
+			return "", invalidCavageSigningOptions("Extension.Algorithm %d does not match SigningKey AlgorithmID %d", extension.Algorithm, id)
 		}
 		return extension.Label, nil
 	}
@@ -535,46 +454,46 @@ func resolveSigningAlgorithmField(id AlgorithmID, compatibility CavageSigningCom
 	switch compatibility.AlgorithmField {
 	case CavageAlgorithmFieldStrict:
 		if !isStrictCavageAlgorithm(id) {
-			return "", invalidSigningAlgorithmOptions(fmt.Errorf("%w: AlgorithmID %d is not active in strict mode", ErrInvalidSignatureAlgorithm, id))
+			return "", invalidCavageSigningAlgorithmOptions(fmt.Errorf("%w: AlgorithmID %d is not active in strict mode", ErrInvalidSignatureAlgorithm, id))
 		}
 		return hs2019, nil
 	case CavageAlgorithmFieldOmitted:
 		if _, err := algorithmDefinitionFor(id); err != nil {
-			return "", invalidSigningOptions("invalid AlgorithmID: %v", err)
+			return "", invalidCavageSigningOptions("invalid AlgorithmID: %v", err)
 		}
 		return "", nil
 	case CavageAlgorithmFieldLegacy:
-		label, ok := legacyAlgorithmLabel(id)
+		label, ok := legacyCavageAlgorithmLabel(id)
 		if !ok {
-			return "", invalidSigningAlgorithmOptions(fmt.Errorf("%w: AlgorithmID %d has no deprecated label", ErrInvalidSignatureAlgorithm, id))
+			return "", invalidCavageSigningAlgorithmOptions(fmt.Errorf("%w: AlgorithmID %d has no deprecated label", ErrInvalidSignatureAlgorithm, id))
 		}
 		return label, nil
 	case CavageAlgorithmFieldHS2019WithSHA256:
 		if id != AlgorithmRSAPKCS1v15SHA256 {
-			return "", invalidSigningAlgorithmOptions(fmt.Errorf("%w: hs2019 with SHA-256 is only defined for RSA PKCS #1 v1.5", ErrInvalidSignatureAlgorithm))
+			return "", invalidCavageSigningAlgorithmOptions(fmt.Errorf("%w: hs2019 with SHA-256 is only defined for RSA PKCS #1 v1.5", ErrInvalidSignatureAlgorithm))
 		}
 		return hs2019, nil
 	default:
-		return "", invalidSigningOptions("unknown AlgorithmField value %d", compatibility.AlgorithmField)
+		return "", invalidCavageSigningOptions("unknown AlgorithmField value %d", compatibility.AlgorithmField)
 	}
 }
 
-func resolveSigningHeaders(
+func resolveCavageSigningHeaders(
 	isRequest bool,
 	additional []string,
 	compatibility CavageSigningCompatibility,
 ) ([]string, bool, error) {
 	if compatibility.ExactHeaders != nil {
 		if len(compatibility.ExactHeaders) == 0 {
-			return nil, false, invalidSigningOptions("ExactHeaders must not be empty")
+			return nil, false, invalidCavageSigningOptions("ExactHeaders must not be empty")
 		}
 		if len(additional) > 0 {
-			return nil, false, invalidSigningOptions("AdditionalHeaders and ExactHeaders cannot be combined")
+			return nil, false, invalidCavageSigningOptions("AdditionalHeaders and ExactHeaders cannot be combined")
 		}
 		if compatibility.OmitHeaders {
-			return nil, false, invalidSigningOptions("ExactHeaders and OmitHeaders cannot be combined")
+			return nil, false, invalidCavageSigningOptions("ExactHeaders and OmitHeaders cannot be combined")
 		}
-		headers, err := normalizeUniqueSigningHeaders(compatibility.ExactHeaders, nil)
+		headers, err := normalizeUniqueCavageSigningHeaders(compatibility.ExactHeaders, nil)
 		if err != nil {
 			return nil, false, err
 		}
@@ -583,7 +502,7 @@ func resolveSigningHeaders(
 
 	if compatibility.OmitHeaders {
 		if len(additional) > 0 {
-			return nil, false, invalidSigningOptions("AdditionalHeaders and OmitHeaders cannot be combined")
+			return nil, false, invalidCavageSigningOptions("AdditionalHeaders and OmitHeaders cannot be combined")
 		}
 		return []string{CavageCreated}, false, nil
 	}
@@ -597,14 +516,14 @@ func resolveSigningHeaders(
 	if len(additional) == 0 {
 		return headers, headersPresent, nil
 	}
-	normalized, err := normalizeUniqueSigningHeaders(additional, headers)
+	normalized, err := normalizeUniqueCavageSigningHeaders(additional, headers)
 	if err != nil {
 		return nil, false, err
 	}
 	return append(headers, normalized...), true, nil
 }
 
-func normalizeUniqueSigningHeaders(headers, existing []string) ([]string, error) {
+func normalizeUniqueCavageSigningHeaders(headers, existing []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(existing)+len(headers))
 	for _, name := range existing {
 		seen[name] = struct{}{}
@@ -613,10 +532,10 @@ func normalizeUniqueSigningHeaders(headers, existing []string) ([]string, error)
 	for _, configuredName := range headers {
 		name, err := normalizeCavageSignedHeaderName(configuredName)
 		if err != nil {
-			return nil, invalidSigningOptions("invalid signed header %q: %v", configuredName, err)
+			return nil, invalidCavageSigningOptions("invalid signed header %q: %v", configuredName, err)
 		}
 		if _, duplicate := seen[name]; duplicate {
-			return nil, invalidSigningOptions("duplicate signed header %q", configuredName)
+			return nil, invalidCavageSigningOptions("duplicate signed header %q", configuredName)
 		}
 		seen[name] = struct{}{}
 		normalized = append(normalized, name)
@@ -660,59 +579,10 @@ func (s *CavageSigner) currentTime() time.Time {
 	return s.Now().UTC()
 }
 
-func signingTimestamps(now time.Time, headers []string, expiresAfter time.Duration) (created, expires string) {
-	if slices.Contains(headers, CavageCreated) {
-		created = strconv.FormatInt(now.Unix(), 10)
-	}
-	if slices.Contains(headers, CavageExpires) {
-		deadline := now.Add(expiresAfter)
-		expires = formatCavageExpires(deadline)
-	}
-	return created, expires
-}
-
-func formatCavageExpires(deadline time.Time) string {
-	seconds := deadline.Unix()
-	nanoseconds := int64(deadline.Nanosecond())
-	if nanoseconds == 0 {
-		return strconv.FormatInt(seconds, 10)
-	}
-
-	prefix := ""
-	if seconds < 0 {
-		prefix = "-"
-		seconds = -(seconds + 1)
-		nanoseconds = int64(time.Second) - nanoseconds
-	}
-	fraction := strconv.FormatInt(int64(time.Second)+nanoseconds, 10)[1:]
-	fraction = strings.TrimRight(fraction, "0")
-	return prefix + strconv.FormatInt(seconds, 10) + "." + fraction
-}
-
-func signAsymmetric(key crypto.PrivateKey, algorithm algorithmDefinition, data []byte) ([]byte, error) {
-	switch algorithm.keyKind {
-	case algorithmKeyRSA:
-		digest, err := digestSigningString(algorithm.hash, data)
-		if err != nil {
-			return nil, err
-		}
-		return rsa.SignPKCS1v15(rand.Reader, key.(*rsa.PrivateKey), algorithm.hash, digest)
-	case algorithmKeyECDSA:
-		digest, err := digestSigningString(algorithm.hash, data)
-		if err != nil {
-			return nil, err
-		}
-		return ecdsa.SignASN1(rand.Reader, key.(*ecdsa.PrivateKey), digest)
-	case algorithmKeyEd25519:
-		return ed25519.Sign(key.(ed25519.PrivateKey), data), nil
-	}
-	return nil, fmt.Errorf("%w: unsupported asymmetric AlgorithmID %d", ErrAlgorithmMismatch, algorithm.id)
-}
-
-func invalidSigningOptions(format string, args ...any) error {
+func invalidCavageSigningOptions(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidSigningOptions, fmt.Sprintf(format, args...))
 }
 
-func invalidSigningAlgorithmOptions(err error) error {
+func invalidCavageSigningAlgorithmOptions(err error) error {
 	return fmt.Errorf("%w: %w", ErrInvalidSigningOptions, err)
 }

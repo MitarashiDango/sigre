@@ -1,6 +1,7 @@
 package sigre
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
@@ -12,6 +13,112 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestCavageSignerOutgoingFieldMapKeys(t *testing.T) {
+	key := HMACSigningKey{
+		Metadata: TrustedKeyMetadata{KeyID: "outgoing-map-key", Algorithm: AlgorithmHMACSHA512},
+		Secret:   signingStringTestSecret,
+	}
+	tests := []struct {
+		name          string
+		response      bool
+		header        http.Header
+		signedHeaders []string
+		wantErr       error
+	}{
+		{
+			name:          "request canonical and noncanonical signed keys",
+			header:        http.Header{"X-Test": {"one"}, "x-test": {"two"}},
+			signedHeaders: []string{"x-test"},
+			wantErr:       ErrInvalidHTTPMessage,
+		},
+		{
+			name:          "request only noncanonical signed key",
+			header:        http.Header{"x-test": {"two"}},
+			signedHeaders: []string{"x-test"},
+			wantErr:       ErrInvalidHTTPMessage,
+		},
+		{
+			name:          "response canonical and noncanonical signed keys",
+			response:      true,
+			header:        http.Header{"X-Test": {"one"}, "x-test": {"two"}},
+			signedHeaders: []string{"x-test"},
+			wantErr:       ErrInvalidHTTPMessage,
+		},
+		{
+			name:          "request signed noncanonical Bearer authorization",
+			header:        http.Header{"authorization": {"Bearer x"}},
+			signedHeaders: []string{"authorization"},
+			wantErr:       ErrInvalidHTTPMessage,
+		},
+		{
+			name:          "response only noncanonical host key",
+			response:      true,
+			header:        http.Header{"host": {"example.test"}},
+			signedHeaders: []string{"host"},
+			wantErr:       ErrInvalidHTTPMessage,
+		},
+		{
+			name:   "unsigned noncanonical keys are accepted",
+			header: http.Header{"X-Unrelated": {"one"}, "x-unrelated": {"two"}},
+		},
+		{
+			name:          "invalid field name is ignored",
+			header:        http.Header{"Hoſt": {"ignored.example"}},
+			signedHeaders: []string{"host"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			header := tt.header.Clone()
+			before := header.Clone()
+			opts := &CavageSigningOptions{AdditionalHeaders: tt.signedHeaders}
+			signer := NewCavageSigner()
+			req := outgoingTestRequest(http.MethodGet)
+			var err error
+			if tt.response {
+				res := outgoingTestResponse()
+				res.Header = header
+				err = signer.SignResponseWithHMAC(res, key, opts)
+			} else {
+				req.Header = header
+				err = signer.SignRequestWithHMAC(req, key, CavageSignaturePlacementSignature, opts)
+			}
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("signing error = %v, want %v", err, tt.wantErr)
+				}
+				if !reflect.DeepEqual(header, before) {
+					t.Errorf("Header changed after failed signing\ngot:  %#v\nwant: %#v", header, before)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("signing failed: %v", err)
+			}
+			wire := writeOutgoingRequest(t, req)
+			if strings.Contains(wire, "Hoſt") {
+				t.Fatal("Request.Write() sent an invalid field name")
+			}
+			received, err := http.ReadRequest(bufio.NewReader(strings.NewReader(wire)))
+			if err != nil {
+				t.Fatalf("http.ReadRequest() failed: %v", err)
+			}
+			defer received.Body.Close()
+			verifier, err := NewCavageVerifier(nil)
+			if err != nil {
+				t.Fatalf("NewCavageVerifier() failed: %v", err)
+			}
+			signature, err := verifier.ParseRequest(received)
+			if err != nil {
+				t.Fatalf("ParseRequest() failed: %v", err)
+			}
+			if err := verifier.VerifyHMAC(signature, HMACVerificationKey{Metadata: key.Metadata, Secret: key.Secret}); err != nil {
+				t.Fatalf("VerifyHMAC() after Request.Write() failed: %v", err)
+			}
+		})
+	}
+}
 
 func TestCavageRequestSignerUsesOutgoingHost(t *testing.T) {
 	tests := []struct {

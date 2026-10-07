@@ -82,6 +82,9 @@ type CavageExtensionAlgorithm struct {
 }
 
 // CavageSigner creates HTTP signatures following draft-cavage-http-signatures-12.
+// Signing reads Header values using canonical map keys. It rejects map keys that
+// differ only in case from canonical keys for signed fields or Signature, and for
+// Authorization when a value uses the Signature scheme.
 type CavageSigner struct {
 	// Now overrides the time source used for (created) and (expires). Uses time.Now when nil.
 	Now func() time.Time
@@ -287,6 +290,9 @@ func (s *CavageSigner) signMessage(
 	}
 	if err := ensureCavageSignatureAbsent(message.header); err != nil {
 		return err
+	}
+	if err := rejectNonCanonicalOutgoingFieldKeys(message.header, configuration.headers); err != nil {
+		return fmt.Errorf("failed to create signing string: %w", err)
 	}
 	signingHeader, err := message.resolveFields(configuration.headers)
 	if err != nil {
@@ -559,6 +565,22 @@ func ensureCavageSignatureAbsent(header http.Header) error {
 	}
 	if candidate.placement != 0 {
 		return fmt.Errorf("%w: message already contains a Cavage signature", ErrInvalidSignaturePlacement)
+	}
+	for key, values := range header {
+		canonicalName := http.CanonicalHeaderKey(key)
+		if key == canonicalName {
+			continue
+		}
+		switch canonicalName {
+		case HeaderSignature:
+			return fmt.Errorf("%w: message already contains a Cavage signature under non-canonical map key %q", ErrInvalidSignaturePlacement, key)
+		case HeaderAuthorization:
+			for _, value := range values {
+				if _, ok := cavageAuthorizationParams(value); ok {
+					return fmt.Errorf("%w: message already contains a Cavage signature under non-canonical map key %q", ErrInvalidSignaturePlacement, key)
+				}
+			}
+		}
 	}
 	return nil
 }

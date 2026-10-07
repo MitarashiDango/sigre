@@ -1,6 +1,7 @@
 package sigre_test
 
 import (
+	"bufio"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -1170,15 +1171,76 @@ func TestCavageSignerPlacement(t *testing.T) {
 	})
 
 	t.Run("existing signature source is not overwritten", func(t *testing.T) {
-		for _, setup := range []func(*http.Request){
-			func(req *http.Request) { req.Header.Set(sigre.HeaderSignature, `keyId="existing"`) },
-			func(req *http.Request) { req.Header.Set(sigre.HeaderAuthorization, `Signature keyId="existing"`) },
+		for _, placement := range []sigre.CavageSignaturePlacement{
+			sigre.CavageSignaturePlacementSignature,
+			sigre.CavageSignaturePlacementAuthorization,
+		} {
+			for name, setup := range map[string]func(*http.Request){
+				"canonical Signature": func(req *http.Request) { req.Header.Set(sigre.HeaderSignature, `keyId="existing"`) },
+				"canonical Authorization": func(req *http.Request) {
+					req.Header.Set(sigre.HeaderAuthorization, `Signature keyId="existing"`)
+				},
+				"noncanonical signature": func(req *http.Request) { req.Header["signature"] = []string{`keyId="existing"`} },
+				"noncanonical authorization": func(req *http.Request) {
+					req.Header["authorization"] = []string{`Signature keyId="existing"`}
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					req := newSignerPolicyRequest(t)
+					setup(req)
+					before := req.Header.Clone()
+					err := signer.SignRequestWithHMAC(req, key, placement, nil)
+					if !errors.Is(err, sigre.ErrInvalidSignaturePlacement) {
+						t.Errorf("placement %d: error = %v, want ErrInvalidSignaturePlacement", placement, err)
+					}
+					if !reflect.DeepEqual(req.Header, before) {
+						t.Errorf("Header changed after failed signing\ngot:  %#v\nwant: %#v", req.Header, before)
+					}
+				})
+			}
+		}
+	})
+
+	t.Run("response noncanonical signature is not overwritten", func(t *testing.T) {
+		res := newSignerPolicyResponse()
+		res.Header["signature"] = []string{`keyId="existing"`}
+		before := res.Header.Clone()
+		err := signer.SignResponseWithHMAC(res, key, nil)
+		if !errors.Is(err, sigre.ErrInvalidSignaturePlacement) {
+			t.Errorf("error = %v, want ErrInvalidSignaturePlacement", err)
+		}
+		if !reflect.DeepEqual(res.Header, before) {
+			t.Errorf("Header changed after failed signing\ngot:  %#v\nwant: %#v", res.Header, before)
+		}
+	})
+
+	t.Run("noncanonical Bearer authorization is accepted", func(t *testing.T) {
+		for _, placement := range []sigre.CavageSignaturePlacement{
+			sigre.CavageSignaturePlacementSignature,
+			sigre.CavageSignaturePlacementAuthorization,
 		} {
 			req := newSignerPolicyRequest(t)
-			setup(req)
-			err := signer.SignRequestWithHMAC(req, key, sigre.CavageSignaturePlacementSignature, nil)
-			if !errors.Is(err, sigre.ErrInvalidSignaturePlacement) {
-				t.Fatalf("error = %v, want ErrInvalidSignaturePlacement", err)
+			req.Header["authorization"] = []string{"Bearer x"}
+			if err := signer.SignRequestWithHMAC(req, key, placement, nil); err != nil {
+				t.Fatalf("placement %d: signing failed: %v", placement, err)
+			}
+			if !reflect.DeepEqual(req.Header["authorization"], []string{"Bearer x"}) {
+				t.Fatalf("noncanonical authorization changed: %#v", req.Header["authorization"])
+			}
+			var wire strings.Builder
+			if err := req.Write(&wire); err != nil {
+				t.Fatalf("Request.Write() failed: %v", err)
+			}
+			received, err := http.ReadRequest(bufio.NewReader(strings.NewReader(wire.String())))
+			if err != nil {
+				t.Fatalf("http.ReadRequest() failed: %v", err)
+			}
+			defer received.Body.Close()
+			verifier, signature := parseSignerPolicyRequest(t, received, testFixedTime, &sigre.CavageVerificationOptions{
+				RequestSignatureSource: sigre.CavageRequestSignatureSourceSignatureOrAuthorization,
+			})
+			if err := verifier.VerifyHMAC(signature, fixedHMACVerificationKey("placement-key", sigre.AlgorithmHMACSHA512, secret)); err != nil {
+				t.Fatalf("placement %d: VerifyHMAC() after Request.Write() failed: %v", placement, err)
 			}
 		}
 	})

@@ -22,6 +22,20 @@ type outgoingTransferFields struct {
 	trailer          outgoingHTTPField
 }
 
+// rejectNonCanonicalOutgoingFieldKeys rejects alternate spellings of signed
+// fields because Request.Write and Response.Write send them, while the signing
+// string reads only canonical map keys. Invalid field names are excluded because
+// net/http drops them when writing headers.
+func rejectNonCanonicalOutgoingFieldKeys(header http.Header, signedHeaders []string) error {
+	for key := range header {
+		canonicalName := http.CanonicalHeaderKey(key)
+		if key != canonicalName && slices.Contains(signedHeaders, strings.ToLower(key)) {
+			return fmt.Errorf("%w: non-canonical %s map key is ambiguous for outgoing signing", ErrInvalidHTTPMessage, canonicalName)
+		}
+	}
+	return nil
+}
+
 func resolveOutgoingRequestFields(req *http.Request, header http.Header, signedHeaders []string) (http.Header, error) {
 	resolved := header
 	transferFieldsNeeded := slices.Contains(signedHeaders, "content-length") ||
@@ -110,12 +124,6 @@ func resolveOutgoingField(
 	normalize func(string) (string, error),
 ) error {
 	canonicalName := http.CanonicalHeaderKey(name)
-	for key := range original {
-		if strings.EqualFold(key, canonicalName) && key != canonicalName {
-			return fmt.Errorf("%w: non-canonical %s map key is ambiguous for outgoing signing", ErrInvalidHTTPMessage, canonicalName)
-		}
-	}
-
 	headerValues, headerPresent := original[canonicalName]
 	if !field.known {
 		return fmt.Errorf("%w: outgoing %s cannot be determined without reading Body; use nil or http.NoBody for a known empty Body, or set a positive ContentLength or explicit TransferEncoding", ErrInvalidHTTPMessage, canonicalName)

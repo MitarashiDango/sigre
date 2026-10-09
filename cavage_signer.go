@@ -16,24 +16,34 @@ type CavageSignaturePlacement uint8
 const (
 	// CavageSignaturePlacementSignature writes the signature to the Signature header.
 	CavageSignaturePlacementSignature CavageSignaturePlacement = iota + 1
-	// CavageSignaturePlacementAuthorization writes a request signature as Authorization: Signature.
+	// CavageSignaturePlacementAuthorization writes a request signature as
+	// Authorization: Signature, replacing any existing values under the canonical
+	// Authorization map key.
 	// It is invalid when authorization is among the signed fields.
 	CavageSignaturePlacementAuthorization
 )
 
 // CavageSigningOptions configures how a Cavage HTTP signature is created.
 // Passing nil is equivalent to the strict zero value. The strict zero value
-// accepts AlgorithmRSAPKCS1v15SHA512, AlgorithmECDSAASN1SHA512, AlgorithmEd25519,
-// or AlgorithmHMACSHA512; emits hs2019; signs (request-target) and (created) for
+// accepts [AlgorithmRSAPKCS1v15SHA512], [AlgorithmECDSAASN1SHA512], [AlgorithmEd25519],
+// or [AlgorithmHMACSHA512]; emits hs2019; signs (request-target) and (created) for
 // a request; and omits the response headers parameter so that its effective
 // value is (created). SHA-256 algorithms require an explicit Compatibility
 // setting. Signing never calculates a Digest field from a message body.
+// A response with non-empty AdditionalHeaders emits an explicit headers parameter.
+// Invalid or conflicting options cause signing to fail with [ErrInvalidSigningOptions].
 type CavageSigningOptions struct {
-	// AdditionalHeaders appends fields to the strict request or response defaults.
+	// AdditionalHeaders appends fields, in order, to the strict request or
+	// response defaults. Names are case-insensitive and are emitted in lower
+	// case; pseudo-headers such as [CavageExpires] may be listed. A name that is
+	// not a valid field name or is already in the list is rejected. It cannot be
+	// combined with [CavageSigningCompatibility.ExactHeaders] or
+	// [CavageSigningCompatibility.OmitHeaders].
 	AdditionalHeaders []string
 	// ExpiresAfter sets expires to the current time plus this duration. Whole-second
 	// deadlines use integer notation, and subsecond deadlines use decimal notation.
-	// A positive value is valid only when (expires) is in the effective signed-header list.
+	// A positive value requires (expires) in the effective signed-header list, and
+	// (expires) in that list requires a positive value. A negative value is invalid.
 	ExpiresAfter time.Duration
 
 	// Compatibility explicitly selects non-default wire representations or headers.
@@ -46,34 +56,53 @@ type CavageSigningCompatibility struct {
 	// It never selects the cryptographic algorithm.
 	AlgorithmField CavageAlgorithmFieldMode
 	// ExactHeaders, when non-nil, completely replaces the effective signed-header
-	// list and causes an explicit headers parameter to be emitted.
+	// list and causes an explicit headers parameter to be emitted. Names follow
+	// the [CavageSigningOptions.AdditionalHeaders] rules. It must not be empty and
+	// cannot be combined with AdditionalHeaders or [CavageSigningCompatibility.OmitHeaders].
 	ExactHeaders []string
-	// OmitHeaders explicitly omits the headers parameter. Its effective signed-header
-	// list is (created). A response already has the same wire form in strict mode;
-	// setting this field records that the omission is an interoperability choice.
+	// OmitHeaders explicitly omits the headers parameter, so the effective
+	// signed-header list is (created). For a response this matches the strict
+	// default. It cannot be combined with [CavageSigningOptions.AdditionalHeaders]
+	// or [CavageSigningCompatibility.ExactHeaders].
 	OmitHeaders bool
-	// Extension binds an unregistered wire label to one trusted AlgorithmID.
+	// Extension binds an unregistered wire label to one trusted [AlgorithmID].
+	// It cannot be combined with a non-strict [CavageSigningCompatibility.AlgorithmField].
 	Extension *CavageExtensionAlgorithm
 }
 
 // CavageAlgorithmFieldMode identifies how the algorithm parameter is represented.
 // The zero value is the strict draft-12 representation.
+// If the selected mode does not support the signing key's [AlgorithmID], the
+// error matches both [ErrInvalidSigningOptions] and [ErrInvalidSignatureAlgorithm].
 type CavageAlgorithmFieldMode uint8
 
 const (
-	// CavageAlgorithmFieldStrict emits hs2019 for active SHA-512 and Ed25519 algorithms.
+	// CavageAlgorithmFieldStrict emits hs2019. It accepts only
+	// [AlgorithmRSAPKCS1v15SHA512], [AlgorithmECDSAASN1SHA512], [AlgorithmEd25519],
+	// and [AlgorithmHMACSHA512].
 	CavageAlgorithmFieldStrict CavageAlgorithmFieldMode = iota
-	// CavageAlgorithmFieldOmitted omits the algorithm parameter.
+	// CavageAlgorithmFieldOmitted omits the algorithm parameter for any supported [AlgorithmID].
 	CavageAlgorithmFieldOmitted
-	// CavageAlgorithmFieldLegacy emits a deprecated SHA-256 algorithm label. It requires
-	// ExactHeaders containing date and, for requests, (request-target).
+	// CavageAlgorithmFieldLegacy emits the deprecated label rsa-sha256,
+	// ecdsa-sha256, or hmac-sha256 for the matching SHA-256 [AlgorithmID]. It
+	// requires [CavageSigningCompatibility.ExactHeaders] containing date and,
+	// for requests, (request-target), and it cannot sign (created) or (expires).
 	CavageAlgorithmFieldLegacy
-	// CavageAlgorithmFieldHS2019WithSHA256 emits the Fediverse hs2019 representation
-	// for RSA PKCS #1 v1.5 with SHA-256.
+	// CavageAlgorithmFieldHS2019WithSHA256 emits hs2019 for
+	// [AlgorithmRSAPKCS1v15SHA256], as some Fediverse implementations do. It
+	// accepts no other [AlgorithmID].
 	CavageAlgorithmFieldHS2019WithSHA256
 )
 
-// CavageExtensionAlgorithm binds one unregistered wire label to one AlgorithmID.
+// CavageExtensionAlgorithm binds one unregistered wire label to one [AlgorithmID].
+// Signing fails with [ErrInvalidSigningOptions] if Label is empty, contains a
+// byte that cannot appear in an HTTP field value, or is a draft-12 label
+// (hs2019, rsa-sha1, rsa-sha256, ecdsa-sha256, or hmac-sha256), or if Algorithm
+// differs from the signing key's AlgorithmID.
+//
+// Labels starting with rsa, hmac, or ecdsa cannot sign (created) or (expires),
+// just like the deprecated labels. The request defaults include (created), so
+// use [CavageSigningCompatibility.ExactHeaders] to exclude it for such a label.
 type CavageExtensionAlgorithm struct {
 	// Label is the exact unregistered algorithm parameter value to emit.
 	Label string
@@ -82,9 +111,35 @@ type CavageExtensionAlgorithm struct {
 }
 
 // CavageSigner creates HTTP signatures following draft-cavage-http-signatures-12.
-// Signing reads Header values using canonical map keys. It rejects map keys that
-// differ only in case from canonical keys for signed fields or Signature, and for
-// Authorization when a value uses the Signature scheme.
+// The zero value is ready to use and reads the clock with [time.Now].
+//
+// Signed fields are read from Header using canonical map keys. Because net/http
+// sends every map-key spelling, a signed field appearing under a non-canonical
+// spelling is rejected with [ErrInvalidHTTPMessage]. Multiple values of a field
+// are joined with ", " after leading and trailing spaces and tabs are removed.
+// A signed field absent from the message causes [ErrSignedHeaderMissing], and a
+// value containing an ASCII control character other than horizontal tab causes
+// [ErrInvalidHTTPMessage].
+//
+// The host, content-length, transfer-encoding, and trailer fields of a request,
+// and the content-length, transfer-encoding, and trailer fields of a response,
+// are signed with the values that [http.Request.Write] or [http.Response.Write]
+// will send rather than with Header values. If Header also contains one of these
+// signed fields, it must hold exactly one value matching the value that will be
+// sent, after trimming leading and trailing spaces and tabs and applying the
+// same host normalization. Otherwise signing fails with [ErrInvalidHTTPMessage].
+// Signing never reads Body.
+// When a signed value depends on whether Body is empty, signing fails with
+// [ErrInvalidHTTPMessage]; use nil or [http.NoBody] for an empty Body, or set a
+// positive ContentLength or an explicit TransferEncoding. The host field of a
+// response is read from Header like any other field.
+//
+// A message that already contains a Cavage signature in Signature, or in an
+// Authorization value using the Signature scheme, is rejected with
+// [ErrInvalidSignaturePlacement] regardless of the map-key spelling. When
+// signing fails, the message is not modified. When it succeeds, only the field
+// selected by the placement is written, and a nil Header is replaced with a new
+// one.
 type CavageSigner struct {
 	// Now overrides the time source used for (created) and (expires). Uses time.Now when nil.
 	Now func() time.Time
@@ -99,6 +154,12 @@ func NewCavageSigner() *CavageSigner {
 // result to placement. Authorization placement is invalid when authorization is
 // among the effective signed fields. Passing nil opts is equivalent to a
 // zero-value [CavageSigningOptions].
+//
+// (request-target) uses the lower-case form of req.Method (GET when empty) and
+// the escaped path and raw query of req.URL, using "/" for an empty path and
+// keeping a "?" required by ForceQuery. When (request-target) is signed, a
+// CONNECT request or a request with an opaque URL is rejected with
+// [ErrInvalidHTTPMessage].
 func (s *CavageSigner) SignRequest(
 	req *http.Request,
 	key SigningKey,
@@ -121,6 +182,19 @@ func (s *CavageSigner) SignRequest(
 // SignResponse signs res with the algorithm bound to key.Metadata and writes
 // the result to the Signature header. Passing nil opts is equivalent to a
 // zero-value [CavageSigningOptions].
+//
+// (request-target) is taken from res.Request, with its method in lower case.
+// A request received by a net/http server, which has a non-empty RequestURI,
+// uses that RequestURI as received when it starts with "/" or equals "*".
+// For an absolute-form target with a non-opaque URL, it uses the escaped path
+// and raw query of the parsed URL; an HTTP or HTTPS OPTIONS target with no path
+// or query uses "*".
+// A request with an empty RequestURI uses the rules described for
+// [CavageSigner.SignRequest].
+// When (request-target) is signed, signing fails with [ErrInvalidHTTPMessage]
+// if res.Request is nil or is a CONNECT request, or if a received request has
+// an empty method or a target that defines no path, such as the authority
+// form or an opaque URL.
 func (s *CavageSigner) SignResponse(
 	res *http.Response,
 	key SigningKey,
@@ -139,10 +213,8 @@ func (s *CavageSigner) SignResponse(
 	return wrapError(err)
 }
 
-// SignRequestWithHMAC signs req with the HMAC algorithm bound to key.Metadata
-// and writes the result to placement. Authorization placement is invalid when
-// authorization is among the effective signed fields. Passing nil opts is
-// equivalent to a zero-value [CavageSigningOptions].
+// SignRequestWithHMAC is like [CavageSigner.SignRequest] but signs with the HMAC
+// algorithm and shared secret in key.
 func (s *CavageSigner) SignRequestWithHMAC(
 	req *http.Request,
 	key HMACSigningKey,
@@ -162,9 +234,8 @@ func (s *CavageSigner) SignRequestWithHMAC(
 	return wrapError(err)
 }
 
-// SignResponseWithHMAC signs res with the HMAC algorithm bound to key.Metadata
-// and writes the result to the Signature header. Passing nil opts is equivalent
-// to a zero-value [CavageSigningOptions].
+// SignResponseWithHMAC is like [CavageSigner.SignResponse] but signs with the HMAC
+// algorithm and shared secret in key.
 func (s *CavageSigner) SignResponseWithHMAC(
 	res *http.Response,
 	key HMACSigningKey,

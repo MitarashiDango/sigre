@@ -1097,3 +1097,39 @@ func TestCavageVerifierConcurrentUse(t *testing.T) {
 		}
 	}
 }
+
+func TestCavageVerifierRejectsUnsupportedTrustedAlgorithm(t *testing.T) {
+	params := verifierPolicyParameters("hs2019", "x-test", "")
+	verifier, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	t.Run("Verify", func(t *testing.T) {
+		key := fixedPublicVerificationKey(verifierPolicyKeyID, 255, fixedEd25519PrivateKey(t).Public())
+		assertPackageError(t, verifier.Verify(signature, key), sigre.ErrInvalidKeyMetadata)
+	})
+	t.Run("VerifyHMAC", func(t *testing.T) {
+		key := fixedHMACVerificationKey(verifierPolicyKeyID, 255, []byte(testHMACSecret))
+		assertPackageError(t, verifier.VerifyHMAC(signature, key), sigre.ErrInvalidKeyMetadata)
+	})
+}
+
+func TestCavageVerifierVerifyHMACRejectsNonHMACAlgorithm(t *testing.T) {
+	params := verifierPolicyParameters("hs2019", "x-test", "")
+	verifier, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	key := fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmEd25519, []byte(testHMACSecret))
+	assertPackageError(t, verifier.VerifyHMAC(signature, key), sigre.ErrAlgorithmMismatch)
+}
+
+func TestCavageVerifierReportsUnsafeTrustedKeyIDAsMismatch(t *testing.T) {
+	params := verifierPolicyParameters("hs2019", "x-test", "")
+	verifier, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	key := fixedPublicVerificationKey(verifierPolicyKeyID+"\n", sigre.AlgorithmEd25519, fixedEd25519PrivateKey(t).Public())
+	assertPackageError(t, verifier.Verify(signature, key), sigre.ErrKeyIDMismatch)
+}

@@ -17,8 +17,11 @@ import (
 // [errors.Is] or [errors.As]. The message text following a sentinel is not part
 // of the compatibility guarantee; callers must not use it to classify errors.
 var (
-	// ErrInvalidHTTPMessage is returned when a request, response, or parsed
-	// signature is nil, incomplete, or not valid for the requested operation.
+	// ErrInvalidHTTPMessage is returned when an HTTP message is nil or incomplete,
+	// a field value contains a forbidden control character, a signed field's value
+	// cannot be determined or conflicts with what net/http sends, or
+	// (request-target) cannot be derived. It is also returned when a
+	// [CavageSignature] is nil or was not parsed by the verifier using it.
 	ErrInvalidHTTPMessage = errors.New("invalid HTTP message")
 	// ErrMissingSignature is returned when no signature is found in the sources
 	// selected for parsing. In the Cavage format, it is returned when no signature
@@ -75,7 +78,9 @@ var (
 	ErrKeyIDMismatch = errors.New("signature keyId does not match trusted key metadata")
 	// ErrInvalidKeyMetadata is returned when trusted key metadata is incomplete or unsupported.
 	ErrInvalidKeyMetadata = errors.New("invalid trusted key metadata")
-	// ErrInvalidVerificationOptions is returned when verification options contain an invalid value or conflicting values.
+	// ErrInvalidVerificationOptions is returned when verification options contain
+	// an invalid value or conflicting values, or when a [CavageVerifier] was not
+	// created by [NewCavageVerifier].
 	ErrInvalidVerificationOptions = errors.New("invalid verification options")
 	// ErrInvalidDate is returned when MaxDateAge is positive and the signed Date
 	// field is missing, has multiple values, is malformed, or differs from the
@@ -89,9 +94,9 @@ var (
 	ErrInvalidSigningOptions = errors.New("invalid signing options")
 )
 
-// Error wraps an internal error with package context.
-// When an exported function or method reports an operation failure, the
-// returned non-nil error is always an *Error.
+// Error is the type of every non-nil error returned when an exported function
+// or method reports an operation failure. Use [errors.Is] to match the error
+// against the package sentinels and [errors.As] to obtain the *Error.
 type Error struct {
 	// Err is the wrapped error. Use [errors.Is] or [errors.As] to inspect it.
 	Err error

@@ -1133,3 +1133,243 @@ func TestCavageVerifierReportsUnsafeTrustedKeyIDAsMismatch(t *testing.T) {
 	key := fixedPublicVerificationKey(verifierPolicyKeyID+"\n", sigre.AlgorithmEd25519, fixedEd25519PrivateKey(t).Public())
 	assertPackageError(t, verifier.Verify(signature, key), sigre.ErrKeyIDMismatch)
 }
+
+func TestCavageVerifierVerifyHMACRejectsUnconstructedVerifier(t *testing.T) {
+	params := verifierPolicyParameters("hs2019", "x-test", "")
+	_, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	for _, test := range []struct {
+		name     string
+		verifier *sigre.CavageVerifier
+	}{
+		{name: "zero value", verifier: &sigre.CavageVerifier{}},
+		{name: "nil"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.verifier.VerifyHMAC(signature, sigre.HMACVerificationKey{})
+			assertPackageError(t, err, sigre.ErrInvalidVerificationOptions)
+		})
+	}
+}
+
+func TestCavageVerifierVerifyHMACRejectsSignatureNotParsedByVerifier(t *testing.T) {
+	params := verifierPolicyParameters("hs2019", "x-test", "")
+	_, otherSignature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), nil)
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	verifier, err := sigre.NewCavageVerifier(nil)
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	for _, test := range []struct {
+		name      string
+		signature *sigre.CavageSignature
+	}{
+		{name: "nil"},
+		{name: "zero value", signature: &sigre.CavageSignature{}},
+		{name: "parsed by another verifier", signature: otherSignature},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := verifier.VerifyHMAC(test.signature, sigre.HMACVerificationKey{})
+			assertPackageError(t, err, sigre.ErrInvalidHTTPMessage)
+		})
+	}
+}
+
+func TestCavageVerifierVerifyDoesNotCallNow(t *testing.T) {
+	calls := 0
+	params := verifierPolicyParameters("hs2019", "(created)", ",created=100")
+	verifier, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+		Now: func() time.Time { calls++; return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	before := calls
+	key := fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmEd25519, fixedEd25519PublicKey(t))
+	assertPackageError(t, verifier.Verify(signature, key), sigre.ErrVerification)
+	if calls != before {
+		t.Fatalf("Verify() called Now %d times, want 0", calls-before)
+	}
+}
+
+func TestCavageVerifierMaxSignatureAgeRequiresSignedCreated(t *testing.T) {
+	params := verifierPolicyParameters("hs2019", "x-test", ",created=100")
+	_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+		MaxSignatureAge: time.Second,
+		Now:             func() time.Time { return time.Unix(100, 0) },
+	})
+	assertPackageError(t, err, sigre.ErrRequiredHeaderMissing)
+}
+
+func TestCavageVerifierMaxDateAgeRequiresSignedDate(t *testing.T) {
+	params := verifierPolicyParameters("hs2019", "x-test", "")
+	_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+		MaxDateAge: time.Second,
+		Now:        func() time.Time { return time.Unix(100, 0) },
+	})
+	assertPackageError(t, err, sigre.ErrRequiredHeaderMissing)
+}
+
+func TestCavageVerifierMaxDateAgeAcceptsObsoleteHTTPTimeFormats(t *testing.T) {
+	now := time.Date(2024, time.June, 8, 12, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name   string
+		format string
+	}{
+		{name: "RFC850", format: time.RFC850},
+		{name: "ANSI C", format: time.ANSIC},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := rawVerifierPolicyRequest(verifierPolicyParameters("hs2019", "date", ""))
+			req.Header.Set("Date", now.Format(test.format))
+			_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{
+				MaxDateAge: time.Second,
+				Now:        func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatalf("ParseRequest() rejected a valid Date: %v", err)
+			}
+		})
+	}
+}
+
+func TestCavageVerifierMaxDateAgeEnforcesFutureBoundary(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		now     time.Time
+		wantErr error
+	}{
+		{name: "exact limit is accepted", now: time.Unix(99, 0)},
+		{name: "one nanosecond beyond limit is rejected", now: time.Unix(98, 999_999_999), wantErr: sigre.ErrInvalidDate},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			params := verifierPolicyParameters("hs2019", "date", "")
+			_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+				MaxDateAge: time.Second,
+				Now:        func() time.Time { return test.now },
+			})
+			if test.wantErr != nil {
+				assertPackageError(t, err, test.wantErr)
+			} else if err != nil {
+				t.Fatalf("ParseRequest() rejected the exact Date boundary: %v", err)
+			}
+		})
+	}
+}
+
+func TestNewCavageVerifierRejectsUnsafeExtensionLabels(t *testing.T) {
+	_, err := sigre.NewCavageVerifier(&sigre.CavageVerificationOptions{
+		Compatibility: &sigre.CavageVerificationCompatibility{
+			ExtensionAlgorithms: map[string]sigre.AlgorithmID{"vendor\nlabel": sigre.AlgorithmEd25519},
+		},
+	})
+	assertPackageError(t, err, sigre.ErrInvalidVerificationOptions)
+}
+
+func TestCavageVerifierRejectsSignedTimestampsWithFamilyExtensionLabels(t *testing.T) {
+	for _, label := range []string{"rsa-custom", "hmac-custom", "ecdsa-custom"} {
+		for _, header := range []string{sigre.CavageCreated, sigre.CavageExpires} {
+			t.Run(label+"/"+header, func(t *testing.T) {
+				params := verifierPolicyParameters(label, header, ",created=100,expires=101")
+				_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+					Now: func() time.Time { return time.Unix(100, 0) },
+					Compatibility: &sigre.CavageVerificationCompatibility{
+						ExtensionAlgorithms: map[string]sigre.AlgorithmID{label: sigre.AlgorithmHMACSHA512},
+					},
+				})
+				assertPackageError(t, err, sigre.ErrInvalidSignatureAlgorithm)
+			})
+		}
+	}
+}
+
+func TestCavageVerifierParseRequestRejectsUnresolvableRequestTarget(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		method     string
+		requestURI string
+		url        *url.URL
+	}{
+		{name: "empty method", requestURI: "/policy", url: &url.URL{Path: "/policy"}},
+		{name: "opaque absolute-form URL", method: http.MethodGet, requestURI: "example.com:80", url: &url.URL{Scheme: "example.com", Opaque: "80"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := rawVerifierPolicyRequest(verifierPolicyParameters("hs2019", "(request-target)", ""))
+			req.Method = test.method
+			req.RequestURI = test.requestURI
+			req.URL = test.url
+			_, _, err := parseVerifierPolicyRequest(req, nil)
+			assertPackageError(t, err, sigre.ErrInvalidHTTPMessage)
+		})
+	}
+}
+
+func TestCavageVerifierParseResponseRejectsSignedRequestTargetWithoutRequest(t *testing.T) {
+	verifier, err := sigre.NewCavageVerifier(nil)
+	if err != nil {
+		t.Fatalf("NewCavageVerifier() failed: %v", err)
+	}
+	res := &http.Response{Header: http.Header{
+		"Signature": {verifierPolicyParameters("hs2019", "(request-target)", "")},
+	}}
+	_, err = verifier.ParseResponse(res)
+	assertPackageError(t, err, sigre.ErrInvalidHTTPMessage)
+}
+
+func TestCavageVerifierParseDoesNotCallNowWhenMessageChecksFail(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		headers string
+		prepare func(*http.Request)
+		wantErr error
+	}{
+		{name: "missing signed field", headers: "x-missing", wantErr: sigre.ErrSignedHeaderMissing},
+		{name: "unresolvable request-target", headers: "(request-target)", prepare: func(req *http.Request) { req.Method = "" }, wantErr: sigre.ErrInvalidHTTPMessage},
+		{name: "forbidden control character", headers: "x-test", prepare: func(req *http.Request) { req.Header.Set("X-Test", "value\x00") }, wantErr: sigre.ErrInvalidHTTPMessage},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := rawVerifierPolicyRequest(verifierPolicyParameters("hs2019", test.headers, ",created=100"))
+			if test.prepare != nil {
+				test.prepare(req)
+			}
+			calls := 0
+			_, _, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{
+				Now: func() time.Time { calls++; return time.Unix(100, 0) },
+			})
+			assertPackageError(t, err, test.wantErr)
+			if calls != 0 {
+				t.Fatalf("ParseRequest() called Now %d times, want 0", calls)
+			}
+		})
+	}
+}
+
+func TestCavageVerifierParseRequestRejectsUppercaseLegacyAlgorithmLabel(t *testing.T) {
+	params := verifierPolicyParameters("RSA-SHA256", "x-test", "")
+	_, _, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+		AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
+		Compatibility: &sigre.CavageVerificationCompatibility{
+			AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
+		},
+	})
+	assertPackageError(t, err, sigre.ErrInvalidSignatureAlgorithm)
+}
+
+func TestCavageVerifierVerifyHMACRejectsAlgorithmLabelMismatch(t *testing.T) {
+	params := verifierPolicyParameters("hmac-sha256", "x-test", "")
+	verifier, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+		AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256, sigre.AlgorithmHMACSHA512},
+		Compatibility: &sigre.CavageVerificationCompatibility{
+			AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	key := fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
+	assertPackageError(t, verifier.VerifyHMAC(signature, key), sigre.ErrAlgorithmMismatch)
+}

@@ -36,15 +36,18 @@ type cavageVerificationConfig struct {
 // snapshots. Construct it with [NewCavageVerifier]; its zero value is invalid.
 // A constructed verifier is immutable and may be used concurrently. It does
 // not parse or verify RFC 9421 HTTP Message Signatures.
+// Methods on a verifier not created by [NewCavageVerifier], including a zero
+// value or nil, fail with [ErrInvalidVerificationOptions].
 type CavageVerifier struct {
 	identity *cavageVerifierIdentity
 	config   cavageVerificationConfig
 }
 
-// CavageSignature is an immutable snapshot returned by ParseRequest or
-// ParseResponse. It owns the parsed parameters, signature bytes, effective
-// signed fields, and signing string.
-// A snapshot can be verified only by the CavageVerifier that parsed it.
+// CavageSignature is an immutable snapshot returned by [CavageVerifier.ParseRequest]
+// or [CavageVerifier.ParseResponse]. It holds copies of the parsed parameters and
+// of the signed message content, so changing the HTTP message after parsing does
+// not affect verification. A snapshot can be verified only by the [CavageVerifier]
+// that parsed it; any other snapshot is rejected with [ErrInvalidHTTPMessage].
 type CavageSignature struct {
 	origin           *cavageVerifierIdentity
 	keyID            string
@@ -61,8 +64,10 @@ type CavageSignature struct {
 	signingString    []byte
 }
 
-// NewCavageVerifier validates and copies opts. Passing nil selects the strict
-// zero-value policy. The constructor does not call opts.Now.
+// NewCavageVerifier validates and copies opts, so later changes to opts do not
+// affect the verifier. Passing nil selects the strict zero-value policy. Invalid
+// or conflicting options cause [ErrInvalidVerificationOptions]. The constructor
+// does not call opts.Now.
 func NewCavageVerifier(opts *CavageVerificationOptions) (*CavageVerifier, error) {
 	config, err := newCavageVerificationConfig(opts)
 	if err != nil {
@@ -74,9 +79,35 @@ func NewCavageVerifier(opts *CavageVerificationOptions) (*CavageVerifier, error)
 	}, nil
 }
 
-// ParseRequest parses the configured request signature source and returns an
-// immutable snapshot. The request is not modified. The default source is only
-// the Signature field; RFC 9421 Signature-Input is always ignored.
+// ParseRequest parses the signature selected by
+// [CavageVerificationOptions.RequestSignatureSource] from a request received by
+// a net/http server and returns an immutable snapshot. The default source is only
+// the Signature field; RFC 9421 Signature-Input is always ignored. The request is
+// not modified and Body is not read. If the selected sources contain no Cavage
+// signature candidate, ParseRequest fails with [ErrMissingSignature]; if they
+// contain more than one, it fails with [ErrSignatureSourceConflict].
+//
+// ParseRequest enforces every policy in [CavageVerificationOptions] that does not
+// depend on the trusted key: parameter syntax, the algorithm label, required
+// signed fields, and the created, expires, and Date time limits. [CavageVerifier.Verify]
+// and [CavageVerifier.VerifyHMAC] then check the key binding and the
+// cryptographic signature.
+//
+// Signed fields are read as net/http stores a received request: host from
+// req.Host, transfer-encoding from req.TransferEncoding, trailer from the keys
+// of req.Trailer when net/http has moved the declaration there, and every other
+// field, including content-length, from Header using canonical map keys.
+//
+// (request-target) uses the lower-case req.Method and req.RequestURI. A target
+// that starts with "/" or equals "*" is used as received. An absolute-form target
+// uses the escaped path and raw query of a non-opaque req.URL, using "/" for an
+// empty path and keeping a "?" required by ForceQuery. An HTTP or HTTPS OPTIONS
+// target with no path or query uses "*". When (request-target) is signed, an
+// empty method or RequestURI, a CONNECT request, or a target that defines no
+// path, such as the authority form or an opaque URL, causes [ErrInvalidHTTPMessage].
+// To verify a request built with [http.NewRequest] instead of received by a
+// server, set RequestURI to req.URL.RequestURI() first.
+//
 // If trailer is signed, call ParseRequest before Body reaches EOF because
 // net/http then merges received fields and the declaration cannot be recovered.
 func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, error) {
@@ -108,9 +139,17 @@ func (v *CavageVerifier) ParseRequest(req *http.Request) (*CavageSignature, erro
 	return signature, wrapError(err)
 }
 
-// ParseResponse parses only the response Signature field and returns an
-// immutable snapshot. Authorization and Signature-Input are ignored, and the
-// response is not modified.
+// ParseResponse parses the response Signature field and returns an immutable
+// snapshot. Authorization and Signature-Input are ignored, the response is not
+// modified, and Body is not read. Missing and conflicting signatures and the
+// verifier policies are handled as described for [CavageVerifier.ParseRequest].
+// Signed fields, including host, are read from Header, except transfer-encoding
+// and trailer, which are read from res.TransferEncoding and res.Trailer as
+// described for [CavageVerifier.ParseRequest]. (request-target) is resolved from
+// res.Request by the rules described for [CavageSigner.SignResponse].
+// If res.Request is nil and (request-target) is signed, ParseResponse fails with
+// [ErrInvalidHTTPMessage].
+//
 // If trailer is signed, call ParseResponse before Body reaches EOF because
 // net/http then merges received fields and the declaration cannot be recovered.
 func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, error) {
@@ -142,10 +181,25 @@ func (v *CavageVerifier) ParseResponse(res *http.Response) (*CavageSignature, er
 	return signature, wrapError(err)
 }
 
-// Verify checks snapshot with an asymmetric trusted key. The received KeyID
-// and algorithm label are attacker-controlled inputs; callers must resolve the
-// KeyID to trusted metadata before calling Verify. Verification does not read
-// the original HTTP message and does not compare a Digest field with a body.
+// Verify checks signature with an asymmetric trusted key. The KeyID and
+// algorithm label of signature are attacker-controlled; resolve KeyID to trusted
+// metadata before calling Verify. Verify fails with [ErrInvalidHTTPMessage] if
+// signature was not parsed by v, [ErrKeyIDMismatch] if key.Metadata.KeyID
+// differs from the received keyId, [ErrInvalidSignatureAlgorithm] if
+// key.Metadata.Algorithm is not allowed by [CavageVerificationOptions.AllowedAlgorithms],
+// [ErrAlgorithmMismatch] if a received algorithm label identifies a different
+// algorithm, and [ErrVerification] if the signature does not match. Errors in
+// key itself are described for [VerificationKey].
+//
+// A received hs2019 label identifies any of the four strict algorithms in
+// [CavageVerificationOptions], and also [AlgorithmRSAPKCS1v15SHA256] when
+// [CavageVerificationCompatibility.AllowHS2019WithSHA256] is set. A deprecated
+// label identifies its SHA-256 algorithm, an extension label identifies the
+// [AlgorithmID] mapped by [CavageVerificationCompatibility.ExtensionAlgorithms],
+// and an omitted algorithm parameter accepts any allowed algorithm.
+//
+// Verify does not read the original HTTP message, does not compare a Digest
+// field with a body, and does not call the verifier's clock.
 func (v *CavageVerifier) Verify(signature *CavageSignature, key VerificationKey) error {
 	if err := v.validateSignature(signature); err != nil {
 		return wrapError(err)
@@ -170,8 +224,9 @@ func (v *CavageVerifier) Verify(signature *CavageSignature, key VerificationKey)
 	return wrapError(verifyAsymmetric(publicKey, algorithm, signature.signature, signature.signingString))
 }
 
-// VerifyHMAC checks snapshot with trusted HMAC metadata and a shared secret.
-// It does not read the original HTTP message and never calls the verifier clock.
+// VerifyHMAC is like [CavageVerifier.Verify] but checks signature with trusted
+// HMAC metadata and a shared secret. Errors in key itself are described for
+// [HMACVerificationKey].
 func (v *CavageVerifier) VerifyHMAC(signature *CavageSignature, key HMACVerificationKey) error {
 	if err := v.validateSignature(signature); err != nil {
 		return wrapError(err)
@@ -226,6 +281,7 @@ func (s *CavageSignature) Created() (time.Time, bool) {
 }
 
 // Expires returns the parsed expires time and whether the parameter was present.
+// Fractional seconds are preserved.
 func (s *CavageSignature) Expires() (time.Time, bool) {
 	if s == nil {
 		return time.Time{}, false
@@ -233,8 +289,9 @@ func (s *CavageSignature) Expires() (time.Time, bool) {
 	return s.expires, s.expiresPresent
 }
 
-// SignedHeaders returns a copy of the effective signed-header list. If the
-// headers parameter was omitted, the returned list contains only (created).
+// SignedHeaders returns a copy of the effective signed-header list, with names
+// normalized to lower case. If the headers parameter was omitted, the returned
+// list contains only (created).
 func (s *CavageSignature) SignedHeaders() []string {
 	if s == nil {
 		return nil

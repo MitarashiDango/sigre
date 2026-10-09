@@ -12,44 +12,66 @@ import (
 // TrustedKeyMetadata binds an opaque wire keyId to one trusted algorithm.
 // The caller supplies this metadata from trusted configuration for signing
 // or verification; it must not be derived from a received algorithm parameter.
+// An empty KeyID or an unsupported Algorithm is rejected with
+// [ErrInvalidKeyMetadata].
 type TrustedKeyMetadata struct {
 	// KeyID is serialized or compared byte-for-byte without normalization.
+	// Signing also rejects a KeyID containing a byte that cannot appear in an
+	// HTTP field value.
 	KeyID string
 	// Algorithm uniquely fixes the key kind, hash, and RSA padding where applicable.
 	Algorithm AlgorithmID
 }
 
 // VerificationKey contains trusted metadata and an asymmetric public key.
+// An HMAC [AlgorithmID] causes [ErrAlgorithmMismatch]; use [HMACVerificationKey]
+// for HMAC verification.
 type VerificationKey struct {
 	// Metadata binds the received keyId to the only permitted verification algorithm.
 	Metadata TrustedKeyMetadata
-	// PublicKey is an RSA, ECDSA, or Ed25519 public key matching Metadata.Algorithm.
+	// PublicKey is a *[rsa.PublicKey], *[ecdsa.PublicKey], or [ed25519.PublicKey]
+	// matching Metadata.Algorithm; *[ed25519.PublicKey] is also accepted. A nil
+	// key or a zero-length Ed25519 key causes [ErrMissingPublicKey], a key of
+	// another kind causes [ErrAlgorithmMismatch], and a malformed key or an ECDSA
+	// key on a curve that crypto/ecdsa does not support causes [ErrUnsupportedKeyFormat].
 	PublicKey crypto.PublicKey
 }
 
 // HMACVerificationKey contains trusted metadata and an HMAC shared secret.
+// A non-HMAC [AlgorithmID] causes [ErrAlgorithmMismatch].
 type HMACVerificationKey struct {
 	// Metadata binds the received keyId to the only permitted HMAC algorithm.
 	Metadata TrustedKeyMetadata
 	// Secret is the non-empty shared secret used for HMAC verification.
+	// An empty Secret causes [ErrMissingSharedSecret].
 	Secret []byte
 }
 
 // SigningKey contains trusted metadata and an asymmetric private key.
 // Metadata.Algorithm determines the key kind, hash, and RSA padding.
+// An HMAC [AlgorithmID] causes [ErrAlgorithmMismatch]; use [HMACSigningKey]
+// for HMAC signing.
 type SigningKey struct {
 	// Metadata binds the wire keyId to the only algorithm used for signing.
 	Metadata TrustedKeyMetadata
-	// PrivateKey is an RSA, ECDSA, or Ed25519 private key matching Metadata.Algorithm.
+	// PrivateKey is a *[rsa.PrivateKey], *[ecdsa.PrivateKey], or [ed25519.PrivateKey]
+	// matching Metadata.Algorithm; *[ed25519.PrivateKey] is also accepted. An ECDSA
+	// key may use any curve that crypto/ecdsa supports, independent of the hash
+	// selected by Metadata.Algorithm. A nil key or a zero-length Ed25519 key causes
+	// [ErrMissingPrivateKey], a key of another kind causes [ErrAlgorithmMismatch],
+	// and a malformed key or an ECDSA key on a curve that crypto/ecdsa does not
+	// support causes [ErrUnsupportedKeyFormat].
 	PrivateKey crypto.PrivateKey
 }
 
 // HMACSigningKey contains trusted metadata and an HMAC shared secret.
 // Metadata.Algorithm determines the HMAC hash.
+// A non-HMAC [AlgorithmID] causes [ErrAlgorithmMismatch].
 type HMACSigningKey struct {
 	// Metadata binds the wire keyId to the only HMAC algorithm used for signing.
 	Metadata TrustedKeyMetadata
 	// Secret is the non-empty shared secret used for HMAC signing.
+	// An empty Secret causes [ErrMissingSharedSecret].
 	Secret []byte
 }
 

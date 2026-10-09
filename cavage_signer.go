@@ -183,18 +183,11 @@ func (s *CavageSigner) SignRequest(
 // the result to the Signature header. Passing nil opts is equivalent to a
 // zero-value [CavageSigningOptions].
 //
-// (request-target) is taken from res.Request, with its method in lower case.
-// A request received by a net/http server, which has a non-empty RequestURI,
-// uses that RequestURI as received when it starts with "/" or equals "*".
-// For an absolute-form target with a non-opaque URL, it uses the escaped path
-// and raw query of the parsed URL; an HTTP or HTTPS OPTIONS target with no path
-// or query uses "*".
-// A request with an empty RequestURI uses the rules described for
-// [CavageSigner.SignRequest].
-// When (request-target) is signed, signing fails with [ErrInvalidHTTPMessage]
-// if res.Request is nil or is a CONNECT request, or if a received request has
-// an empty method or a target that defines no path, such as the authority
-// form or an opaque URL.
+// (request-target) is taken from res.Request, with its method in lower case. A
+// request received by a net/http server, which has a non-empty RequestURI,
+// uses the rules described for [CavageVerifier.ParseRequest]; any other request
+// uses the rules described for [CavageSigner.SignRequest]. When (request-target)
+// is signed and res.Request is nil, signing fails with [ErrInvalidHTTPMessage].
 func (s *CavageSigner) SignResponse(
 	res *http.Response,
 	key SigningKey,

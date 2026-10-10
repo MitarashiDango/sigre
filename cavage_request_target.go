@@ -30,8 +30,6 @@ func invalidCavageCONNECTRequestTarget() error {
 	return fmt.Errorf("%w: CONNECT request-target does not define the :path required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
 }
 
-// outgoingCavageRequestTarget resolves the :path-equivalent value that is signed
-// for a request sent from its URL.
 func outgoingCavageRequestTarget(req *http.Request) (string, error) {
 	if req == nil {
 		return "", fmt.Errorf("%w: %s is included, but request-target is missing", ErrInvalidHTTPMessage, CavageRequestTarget)
@@ -42,8 +40,9 @@ func outgoingCavageRequestTarget(req *http.Request) (string, error) {
 	return cavageRequestTargetFromURL(req.URL)
 }
 
-// receivedCavageRequestTarget resolves the :path-equivalent value from the raw
-// request-target and parsed URL retained by net/http.
+// receivedCavageRequestTarget returns "*" for an absolute-form HTTP or HTTPS
+// OPTIONS target with an empty path and no query, because RFC 9112 Section 3.2.4
+// has the last proxy forward such a target to the origin server as "*".
 func receivedCavageRequestTarget(req *http.Request) (string, error) {
 	if req == nil {
 		return "", fmt.Errorf("%w: request-target is required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)
@@ -81,8 +80,8 @@ func associatedRequestMethod(req *http.Request) string {
 	return req.Method
 }
 
-// associatedCavageRequestTarget distinguishes a received server-side request from
-// a client-side request associated with a response.
+// associatedCavageRequestTarget relies on net/http setting RequestURI only on
+// requests received by a server; setting it on a client request is an error.
 func associatedCavageRequestTarget(req *http.Request) (string, error) {
 	if req == nil {
 		return "", fmt.Errorf("%w: associated request is required by %s", ErrInvalidHTTPMessage, CavageRequestTarget)

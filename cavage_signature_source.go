@@ -69,6 +69,8 @@ func cavageAuthorizationParams(value string) (string, bool) {
 	if pos == 0 || !strings.EqualFold(value[:pos], HeaderSignature) {
 		return "", false
 	}
+	// A bare Signature scheme is still a candidate, so it is reported as invalid
+	// parameters instead of a missing signature, and it counts toward source conflicts.
 	if pos == len(value) {
 		return "", true
 	}

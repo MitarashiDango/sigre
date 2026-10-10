@@ -60,8 +60,8 @@ func serializeCavageParams(p *cavageParams) (string, error) {
 	return sb.String(), nil
 }
 
-// appendCavageToken writes an unquoted parameter value. The value must be a
-// non-empty token so that the serialized parameter can be parsed again.
+// The value must be a non-empty token because it is written without quotes
+// and must parse again.
 func appendCavageToken(sb *strings.Builder, name, value string) error {
 	if value == "" {
 		return fmt.Errorf("'%s' must be a non-empty token", name)
@@ -111,6 +111,11 @@ func validateCavageQuotedStringValue(name, value string) error {
 
 // parseCavageParams parses a Cavage HTTP Signature parameter string as defined in
 // draft-cavage-http-signatures-12 Section 2.1.
+// As Section 2.2 requires, unrecognized or malformed parameters are ignored,
+// and a duplicated recognized parameter is an error. This applies after
+// nextCavageAuthParam splits the input; it rejects invalid quoting and forbidden
+// bytes. Parameter names are matched case-insensitively, as auth-param names
+// are in RFC 9110 Section 11.2.
 func parseCavageParams(input string) (*cavageParams, error) {
 	p := &cavageParams{}
 	seen := make(map[string]bool, 6)

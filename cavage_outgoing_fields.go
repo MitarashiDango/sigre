@@ -149,6 +149,8 @@ func resolveOutgoingField(
 				return err
 			}
 		}
+		// Request.Write and Response.Write do not send these Header entries, so
+		// a differing value is one the caller expects but net/http will not send.
 		if headerValue != field.value {
 			return fmt.Errorf("%w: %s in Header conflicts with the outgoing field", ErrInvalidHTTPMessage, canonicalName)
 		}
@@ -275,6 +277,7 @@ func outgoingRequestTransferFields(req *http.Request, includeTrailer bool) (outg
 	return fields, nil
 }
 
+// requestMethodUsuallyLacksBody matches net/http's requestMethodUsuallyLacksBody.
 func requestMethodUsuallyLacksBody(method string) bool {
 	switch method {
 	case "GET", "HEAD", "DELETE", "OPTIONS", "PROPFIND", "SEARCH":
@@ -356,6 +359,8 @@ func outgoingResponseTransferState(res *http.Response, contentLength int64, body
 	return fields, nil
 }
 
+// outgoingContentLengthField follows net/http's
+// transferWriter.shouldSendContentLength.
 func outgoingContentLengthField(method string, contentLength int64, transferEncoding []string) outgoingHTTPField {
 	field := outgoingHTTPField{known: true}
 	if outgoingIsChunked(transferEncoding) || contentLength < 0 {
@@ -403,10 +408,13 @@ func combineOutgoingHTTPField(first, second outgoingHTTPField) outgoingHTTPField
 	return outgoingHTTPField{known: false}
 }
 
+// outgoingIsChunked matches net/http's chunked, which checks only the first
+// transfer coding.
 func outgoingIsChunked(transferEncoding []string) bool {
 	return len(transferEncoding) > 0 && transferEncoding[0] == "chunked"
 }
 
+// outgoingIsIdentity matches net/http's isIdentity.
 func outgoingIsIdentity(transferEncoding []string) bool {
 	return len(transferEncoding) == 1 && transferEncoding[0] == "identity"
 }

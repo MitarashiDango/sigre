@@ -108,6 +108,8 @@ func formatCavageExpires(deadline time.Time) string {
 	}
 
 	prefix := ""
+	// Keep this branch: a CavageSigner.Now that returns a time before 1970 can
+	// give a negative deadline with a fractional part.
 	if seconds < 0 {
 		prefix = "-"
 		seconds = -(seconds + 1)

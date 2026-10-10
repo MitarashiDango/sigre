@@ -9,6 +9,9 @@ import (
 // hs2019 is listed as active in draft-cavage-http-signatures-12 Appendix E.2.
 const hs2019 = "hs2019"
 
+// These are the default allowed algorithms and the ones hs2019 permits
+// without AllowHS2019WithSHA256. Draft-12 Appendix E.2 defines hs2019 with
+// SHA-512; Ed25519 uses no separate hash. Strict signing uses the same set.
 var defaultCavageVerificationAlgorithms = []AlgorithmID{
 	AlgorithmRSAPKCS1v15SHA512,
 	AlgorithmECDSAASN1SHA512,
@@ -34,6 +37,8 @@ func isLegacyCavageAlgorithm(id AlgorithmID) bool {
 	return ok
 }
 
+// rsa-sha1 is unsupported, but draft-12 Appendix E.2 registers it, so an
+// extension label must not reuse it.
 func isReservedCavageAlgorithmLabel(label string) bool {
 	if label == hs2019 || label == "rsa-sha1" {
 		return true

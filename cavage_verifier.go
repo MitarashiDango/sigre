@@ -420,6 +420,7 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidSignatureParameters, err)
 	}
+	// parseCavageParams validates the encoding but keeps the text form.
 	decodedSignature, err := base64.StdEncoding.Strict().DecodeString(params.Signature)
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid signature Base64: %v", ErrInvalidSignatureParameters, err)
@@ -471,6 +472,8 @@ func (v *CavageVerifier) parse(candidate cavageSignatureCandidate, message cavag
 		return nil, fmt.Errorf("%w: failed to create signing string: %v", ErrInvalidHTTPMessage, err)
 	}
 
+	// Check time last, so that Now is called only after every check that does
+	// not depend on the current time has passed.
 	if err := v.checkCavageTimePolicy(params, created, expires, parsedDate); err != nil {
 		return nil, err
 	}
@@ -638,6 +641,13 @@ func (v *CavageVerifier) hs2019Permits(id AlgorithmID) bool {
 	return isStrictCavageAlgorithm(id) || id == AlgorithmRSAPKCS1v15SHA256 && v.config.allowHS2019WithSHA256
 }
 
+// net/http's HTTP/1 reader removes Host from a received request's Header and
+// uses Request.Host instead. It removes Transfer-Encoding from received
+// headers, records chunked encoding in TransferEncoding, and ignores
+// Transfer-Encoding in HTTP/1.0. It moves the Trailer declaration into the
+// Trailer keys only for chunked messages; otherwise Trailer stays in Header.
+// Its HTTP/2 support moves the declaration into the Trailer keys without
+// chunked encoding.
 func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []string) (http.Header, error) {
 	owned := make(http.Header)
 	for _, name := range signedHeaders {
@@ -678,6 +688,8 @@ func snapshotCavageSignedFields(message cavageMessageSnapshot, signedHeaders []s
 	return owned, nil
 }
 
+// After Body reaches EOF, net/http merges the received trailer fields into
+// Trailer, so its keys no longer show only the declaration.
 func cavageTrailerValuesReceived(trailer http.Header) bool {
 	for _, values := range trailer {
 		if values != nil {
@@ -687,6 +699,9 @@ func cavageTrailerValuesReceived(trailer http.Header) bool {
 	return false
 }
 
+// The map keys do not keep the original order. Request.Write and Response.Write
+// send the declaration as sorted canonical keys joined by ",", so that form is
+// reconstructed here.
 func cavageTrailerDeclaration(trailer http.Header) string {
 	keys := make([]string, 0, len(trailer))
 	for key := range trailer {

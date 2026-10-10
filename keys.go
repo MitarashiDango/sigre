@@ -166,6 +166,11 @@ func validateVerificationPublicKey(key crypto.PublicKey, expected algorithmKeyKi
 		if !ok {
 			return fmt.Errorf("%w: AlgorithmID requires RSA, public key is %T", ErrAlgorithmMismatch, key)
 		}
+		// Check the structural errors that crypto/rsa reports during verification,
+		// so a malformed key is reported as ErrUnsupportedKeyFormat instead of
+		// ErrVerification. Also reject a negative N, which crypto/rsa would accept as
+		// its absolute value. Do not check the key size:
+		// GODEBUG=rsa1024min=0 must keep working.
 		if publicKey.N == nil || publicKey.N.Sign() <= 0 || publicKey.N.Bit(0) == 0 || publicKey.E < 2 || publicKey.E&1 == 0 || publicKey.E > math.MaxInt32 {
 			return fmt.Errorf("%w: invalid RSA public key", ErrUnsupportedKeyFormat)
 		}

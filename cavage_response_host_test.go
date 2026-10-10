@@ -147,7 +147,8 @@ func TestCavageResponseUsesOwnHost(t *testing.T) {
 				t.Error("signing modified fields other than Signature")
 			}
 
-			// Verify an independently calculated signature over the fixed string.
+			// Use an independently calculated signature so that this check does not
+			// depend on the signer.
 			res.Header.Set(HeaderSignature, fixedCavageHMACHeader(t, tt.want, "host"))
 			assertResponseHostInputUnchanged(t, res)
 			verifyCavageResponseHMAC(t, res)

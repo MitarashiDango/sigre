@@ -41,6 +41,7 @@ func computeHMAC(hashID crypto.Hash, secret, data []byte) ([]byte, error) {
 	return mac.Sum(nil), nil
 }
 
+// The caller has already checked the key type against algorithm.keyKind.
 func signAsymmetric(key crypto.PrivateKey, algorithm algorithmDefinition, data []byte) ([]byte, error) {
 	switch algorithm.keyKind {
 	case algorithmKeyRSA:
@@ -61,6 +62,7 @@ func signAsymmetric(key crypto.PrivateKey, algorithm algorithmDefinition, data [
 	return nil, fmt.Errorf("%w: unsupported asymmetric AlgorithmID %d", ErrAlgorithmMismatch, algorithm.id)
 }
 
+// The caller has already checked the key type against algorithm.keyKind.
 func verifyAsymmetric(key crypto.PublicKey, algorithm algorithmDefinition, sig, data []byte) error {
 	switch algorithm.keyKind {
 	case algorithmKeyRSA:

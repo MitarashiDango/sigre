@@ -17,6 +17,9 @@ const (
 )
 
 func normalizeCavageSignedHeaderName(name string) (string, error) {
+	// Reject non-ASCII bytes before strings.ToLower, which maps some non-ASCII
+	// letters, such as U+212A KELVIN SIGN and U+0130, to ASCII letters. Otherwise
+	// a non-ASCII name could alias a field or pseudo-header name.
 	for i := 0; i < len(name); i++ {
 		if name[i] >= 0x80 {
 			return "", fmt.Errorf("invalid HTTP field-name in signed headers: %q", name)

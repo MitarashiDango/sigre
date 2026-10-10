@@ -472,6 +472,10 @@ func resolveCavageSigningConfiguration(
 		return cavageSigningConfiguration{}, err
 	}
 
+	// Section 2.3 says (request-target) and date SHOULD be signed when the label
+	// starts with rsa, hmac, or ecdsa, and those labels forbid (created). Every
+	// list built without ExactHeaders contains (created), so the caller must
+	// choose the list with ExactHeaders.
 	if compatibility.AlgorithmField == CavageAlgorithmFieldLegacy {
 		if compatibility.ExactHeaders == nil {
 			return cavageSigningConfiguration{}, invalidCavageSigningOptions("CavageAlgorithmFieldLegacy requires ExactHeaders")

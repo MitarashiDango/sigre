@@ -1,6 +1,7 @@
 package sigre_test
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
@@ -1372,4 +1373,337 @@ func TestCavageVerifierVerifyHMACRejectsAlgorithmLabelMismatch(t *testing.T) {
 	}
 	key := fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
 	assertPackageError(t, verifier.VerifyHMAC(signature, key), sigre.ErrAlgorithmMismatch)
+}
+
+func TestCavageVerifierOmittedAlgorithmRejectsDisallowedTrustedAlgorithms(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		hmac bool
+	}{
+		{name: "RSA SHA256"},
+		{name: "HMAC SHA256", hmac: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			params := verifierPolicyParameters("", "x-test", "")
+			verifier, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+				AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA512, sigre.AlgorithmHMACSHA512},
+				Now:               func() time.Time { return testFixedTime },
+			})
+			if err != nil {
+				t.Fatalf("ParseRequest() failed: %v", err)
+			}
+			if test.hmac {
+				err = verifier.VerifyHMAC(signature, fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA256, []byte(testHMACSecret)))
+			} else {
+				err = verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA256, fixedRSAPublicKey(t)))
+			}
+			assertPackageError(t, err, sigre.ErrInvalidSignatureAlgorithm)
+		})
+	}
+}
+
+func TestCavageVerifierLegacyRSAEnforcesRequiredHeaders(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		required []string
+		wantErr  error
+	}{
+		{name: "signed fields satisfy requirements", required: []string{"date", "host", "digest"}},
+		{name: "unsigned field is rejected", required: []string{"x-extra"}, wantErr: sigre.ErrRequiredHeaderMissing},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := newSignerPolicyRequest(t)
+			signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+			key := fixedSigningKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA256, fixedRSAPrivateKey(t))
+			err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, &sigre.CavageSigningOptions{
+				Compatibility: &sigre.CavageSigningCompatibility{
+					AlgorithmField: sigre.CavageAlgorithmFieldLegacy,
+					ExactHeaders:   []string{sigre.CavageRequestTarget, "host", "date", "digest"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("SignRequest() failed: %v", err)
+			}
+			verifier, signature, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{
+				RequiredHeaders:   test.required,
+				AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256, sigre.AlgorithmRSAPKCS1v15SHA512},
+				Compatibility:     &sigre.CavageVerificationCompatibility{AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256}},
+				Now:               func() time.Time { return testFixedTime },
+			})
+			if test.wantErr != nil {
+				assertPackageError(t, err, test.wantErr)
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRequest() failed: %v", err)
+			}
+			if err := verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, key.Metadata.Algorithm, fixedRSAPublicKey(t))); err != nil {
+				t.Fatalf("Verify() failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestCavageVerifierExtensionEd25519EnforcesMaxSignatureAge(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		age     time.Duration
+		wantErr error
+	}{
+		{name: "within limit is accepted", age: 30 * time.Second},
+		{name: "at limit is accepted", age: time.Minute},
+		{name: "beyond limit is rejected", age: 61 * time.Second, wantErr: sigre.ErrInvalidCreationTime},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := newSignerPolicyRequest(t)
+			signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+			key := fixedSigningKey(verifierPolicyKeyID, sigre.AlgorithmEd25519, fixedEd25519PrivateKey(t))
+			err := signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, &sigre.CavageSigningOptions{
+				Compatibility: &sigre.CavageSigningCompatibility{
+					ExactHeaders: []string{sigre.CavageRequestTarget, sigre.CavageCreated, "date", "host"},
+					Extension:    &sigre.CavageExtensionAlgorithm{Label: "ed25519", Algorithm: sigre.AlgorithmEd25519},
+				},
+			})
+			if err != nil {
+				t.Fatalf("SignRequest() failed: %v", err)
+			}
+			verifier, signature, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{
+				AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmEd25519},
+				MaxSignatureAge:   time.Minute,
+				Compatibility:     &sigre.CavageVerificationCompatibility{ExtensionAlgorithms: map[string]sigre.AlgorithmID{"ed25519": sigre.AlgorithmEd25519}},
+				Now:               func() time.Time { return testFixedTime.Add(test.age) },
+			})
+			if test.wantErr != nil {
+				assertPackageError(t, err, test.wantErr)
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRequest() failed: %v", err)
+			}
+			if err := verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmEd25519, fixedEd25519PublicKey(t))); err != nil {
+				t.Fatalf("Verify() failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestCavageVerifierExtensionEd25519EnforcesExpiration(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		age     time.Duration
+		skew    time.Duration
+		missing bool
+		wantErr error
+	}{
+		{name: "before expiration is accepted", age: 30 * time.Second},
+		{name: "after expiration is rejected", age: 61 * time.Second, wantErr: sigre.ErrSignatureExpired},
+		{name: "within expired skew is accepted", age: 61 * time.Second, skew: 2 * time.Second},
+		{name: "missing signed expires is rejected", missing: true, wantErr: sigre.ErrInvalidExpirationTime},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := newSignerPolicyRequest(t)
+			signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+			err := signer.SignRequest(req, fixedSigningKey(verifierPolicyKeyID, sigre.AlgorithmEd25519, fixedEd25519PrivateKey(t)), sigre.CavageSignaturePlacementSignature, &sigre.CavageSigningOptions{
+				ExpiresAfter: time.Minute,
+				Compatibility: &sigre.CavageSigningCompatibility{
+					ExactHeaders: []string{sigre.CavageRequestTarget, sigre.CavageCreated, sigre.CavageExpires, "host"},
+					Extension:    &sigre.CavageExtensionAlgorithm{Label: "ed25519", Algorithm: sigre.AlgorithmEd25519},
+				},
+			})
+			if err != nil {
+				t.Fatalf("SignRequest() failed: %v", err)
+			}
+			if test.missing {
+				req.Header.Set(sigre.HeaderSignature, verifierPolicyParameters("ed25519", "(expires)", ""))
+			}
+			verifier, signature, err := parseVerifierPolicyRequest(req, &sigre.CavageVerificationOptions{
+				AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmEd25519},
+				Compatibility: &sigre.CavageVerificationCompatibility{
+					ExtensionAlgorithms: map[string]sigre.AlgorithmID{"ed25519": sigre.AlgorithmEd25519},
+					AllowedExpiredSkew:  test.skew,
+				},
+				Now: func() time.Time { return testFixedTime.Add(test.age) },
+			})
+			if test.wantErr != nil {
+				assertPackageError(t, err, test.wantErr)
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseRequest() failed: %v", err)
+			}
+			if err := verifier.Verify(signature, fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmEd25519, fixedEd25519PublicKey(t))); err != nil {
+				t.Fatalf("Verify() failed: %v", err)
+			}
+		})
+	}
+}
+
+func TestCavageVerifierLegacyRSARejectsEd25519PublicKey(t *testing.T) {
+	params := verifierPolicyParameters("rsa-sha256", "x-test", "")
+	verifier, signature, err := parseVerifierPolicyRequest(rawVerifierPolicyRequest(params), &sigre.CavageVerificationOptions{
+		AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256},
+		Compatibility:     &sigre.CavageVerificationCompatibility{AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256}},
+		Now:               func() time.Time { return testFixedTime },
+	})
+	if err != nil {
+		t.Fatalf("ParseRequest() failed: %v", err)
+	}
+	key := fixedPublicVerificationKey(verifierPolicyKeyID, sigre.AlgorithmRSAPKCS1v15SHA256, fixedEd25519PublicKey(t))
+	assertPackageError(t, verifier.Verify(signature, key), sigre.ErrAlgorithmMismatch)
+}
+
+func TestCavageVerifierLegacyHMACResponseRejectsChanges(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		differentSecret bool
+	}{
+		{name: "different secret", differentSecret: true},
+		{name: "tampered signed Date"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			res := newSignerPolicyResponse()
+			signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+			secret := []byte(testHMACSecret)
+			err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA256, secret), &sigre.CavageSigningOptions{
+				Compatibility: &sigre.CavageSigningCompatibility{
+					AlgorithmField: sigre.CavageAlgorithmFieldLegacy,
+					ExactHeaders:   []string{"date", "digest"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("SignResponseWithHMAC() failed: %v", err)
+			}
+			if test.differentSecret {
+				secret = []byte("wrong-secret")
+			} else {
+				res.Header.Set("Date", testFixedTime.Add(time.Minute).Format(http.TimeFormat))
+			}
+			verifier, signature := parseSignerPolicyResponse(t, res, testFixedTime, &sigre.CavageVerificationOptions{
+				AllowedAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256},
+				Compatibility:     &sigre.CavageVerificationCompatibility{AllowedLegacyAlgorithms: []sigre.AlgorithmID{sigre.AlgorithmHMACSHA256}},
+			})
+			assertPackageError(t, verifier.VerifyHMAC(signature, fixedHMACVerificationKey(verifierPolicyKeyID, sigre.AlgorithmHMACSHA256, secret)), sigre.ErrVerification)
+		})
+	}
+}
+
+func TestCavageVerifierChecksFixedCompatibilitySignatures(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		method    string
+		url       string
+		keyID     string
+		algorithm sigre.AlgorithmID
+		label     string
+		signature string
+		publicKey crypto.PublicKey
+		secret    []byte
+		date      string
+		wantErr   error
+	}{
+		{
+			name: "Legacy RSA SHA256 fixed signature is accepted", method: "POST", url: "https://example.com/foo?param=value&pet=dog",
+			keyID: "test-key-rsa", algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, label: "rsa-sha256",
+			signature: `keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
+			publicKey: fixedRSAPublicKey(t),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: nil,
+		},
+		{
+			name: "extension Ed25519 fixed signature is accepted", method: "GET", url: "https://example.com/",
+			keyID: "test-key-ed25519", algorithm: sigre.AlgorithmEd25519, label: "ed25519",
+			signature: `keyId="test-key-ed25519",signature="UMoMdVYlZBWj9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`,
+			publicKey: fixedEd25519PublicKey(t),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: nil,
+		},
+		{
+			name: "Legacy HMAC SHA256 fixed signature is accepted", method: "DELETE", url: "https://example.com/resource/123",
+			keyID: "test-key-hmac", algorithm: sigre.AlgorithmHMACSHA256, label: "hmac-sha256",
+			signature: `keyId="test-key-hmac",signature="Su9pRLxbHq1uWcYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`,
+			secret:    []byte(testHMACSecret),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: nil,
+		},
+		{
+			name: "Legacy RSA SHA256 tampered signature is rejected", method: "POST", url: "https://example.com/foo?param=value&pet=dog",
+			keyID: "test-key-rsa", algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, label: "rsa-sha256",
+			signature: `keyId="test-key-rsa",signature="AOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
+			publicKey: fixedRSAPublicKey(t),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: sigre.ErrVerification,
+		},
+		{
+			name: "extension Ed25519 tampered signature is rejected", method: "GET", url: "https://example.com/",
+			keyID: "test-key-ed25519", algorithm: sigre.AlgorithmEd25519, label: "ed25519",
+			signature: `keyId="test-key-ed25519",signature="AMoMdVYlZBWj9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`,
+			publicKey: fixedEd25519PublicKey(t),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: sigre.ErrVerification,
+		},
+		{
+			name: "Legacy HMAC SHA256 tampered signature is rejected", method: "DELETE", url: "https://example.com/resource/123",
+			keyID: "test-key-hmac", algorithm: sigre.AlgorithmHMACSHA256, label: "hmac-sha256",
+			signature: `keyId="test-key-hmac",signature="Au9pRLxbHq1uWcYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`,
+			secret:    []byte(testHMACSecret),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: sigre.ErrVerification,
+		},
+		{
+			name: "Legacy RSA SHA256 tampered Date is rejected", method: "POST", url: "https://example.com/foo?param=value&pet=dog",
+			keyID: "test-key-rsa", algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, label: "rsa-sha256",
+			signature: `keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
+			publicKey: fixedRSAPublicKey(t),
+			date:      "Sat, 08 Jun 2024 11:00:00 UTC", wantErr: sigre.ErrVerification,
+		},
+		{
+			name: "Legacy RSA SHA256 different public key is rejected", method: "POST", url: "https://example.com/foo?param=value&pet=dog",
+			keyID: "test-key-rsa", algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, label: "rsa-sha256",
+			signature: `keyId="test-key-rsa",signature="dOtpLN/dEThM4gw4WBel/t5AybfCgIerAzkHzj2S3rU6OH+ODDLxcwS0UcL0L6NOCnCgw/ndz67ATcpbkSwRZ0QDAn+fTCP4Xe8Yjal/GyC9FhglQ3wTxFp6rUp5bpT7Al3NrYeAMAcvHlMeHi3b64LovkCtPY8TAf+MbKOdtxFiU8F264O5eRZ0wkSp2cBX5JOrPGEWsLY/wO1n1nG02yBzswntBsSK2CCEDra4XjIKFfzooB3tUco4b+1mflALaHMezUP8sn/B48ShoCH4+vUxjcuuJaL162coMgbw+6T1oCOCdXLUSjveqPi8PCRPkO7OIELkTdKOf+VqE5nqlA==",algorithm="rsa-sha256",headers="(request-target) host date digest"`,
+			publicKey: loadTestPublicKeyFile(t, "testdata/cavage-draft-12/keys/rsa-public.pem"),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: sigre.ErrVerification,
+		},
+		{
+			name: "extension Ed25519 different public key is rejected", method: "GET", url: "https://example.com/",
+			keyID: "test-key-ed25519", algorithm: sigre.AlgorithmEd25519, label: "ed25519",
+			signature: `keyId="test-key-ed25519",signature="UMoMdVYlZBWj9umkv0oWSu5SDuOiZcE621beuDE7UmiGX9ttA/5drFgi5ZweInRDPj5fS70q8jQEgJni5ZGNAA==",algorithm="ed25519",headers="(request-target) host date"`,
+			publicKey: ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)).Public(),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: sigre.ErrVerification,
+		},
+		{
+			name: "Legacy HMAC SHA256 different secret is rejected", method: "DELETE", url: "https://example.com/resource/123",
+			keyID: "test-key-hmac", algorithm: sigre.AlgorithmHMACSHA256, label: "hmac-sha256",
+			signature: `keyId="test-key-hmac",signature="Su9pRLxbHq1uWcYC53G6vM07vvi57kexqkakgMi3pTs=",algorithm="hmac-sha256",headers="(request-target) date"`,
+			secret:    []byte("wrong-secret"),
+			date:      "Sat, 08 Jun 2024 10:30:00 UTC", wantErr: sigre.ErrVerification,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			req := newTestRequest(t, test.method, test.url, "")
+			req.Header.Set("Date", test.date)
+			req.Header.Set("Signature", test.signature)
+			req.Header.Set("Digest", "SHA-256=X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=")
+			opts := &sigre.CavageVerificationOptions{
+				AllowedAlgorithms: []sigre.AlgorithmID{test.algorithm},
+				Compatibility:     &sigre.CavageVerificationCompatibility{},
+				Now:               func() time.Time { return testFixedTime },
+			}
+			if test.label == "ed25519" {
+				opts.Compatibility.ExtensionAlgorithms = map[string]sigre.AlgorithmID{test.label: test.algorithm}
+			} else {
+				opts.Compatibility.AllowedLegacyAlgorithms = []sigre.AlgorithmID{test.algorithm}
+			}
+			verifier, signature, err := parseVerifierPolicyRequest(req, opts)
+			if err != nil {
+				t.Fatalf("ParseRequest() failed: %v", err)
+			}
+			if got := signature.KeyID(); got != test.keyID {
+				t.Fatalf("KeyID() = %q, want %q", got, test.keyID)
+			}
+			if test.algorithm == sigre.AlgorithmHMACSHA256 {
+				err = verifier.VerifyHMAC(signature, fixedHMACVerificationKey(test.keyID, test.algorithm, test.secret))
+			} else {
+				err = verifier.Verify(signature, fixedPublicVerificationKey(test.keyID, test.algorithm, test.publicKey))
+			}
+			if test.wantErr != nil {
+				assertPackageError(t, err, test.wantErr)
+			} else if err != nil {
+				t.Fatalf("verification failed: %v", err)
+			}
+		})
+	}
 }

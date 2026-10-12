@@ -1503,3 +1503,208 @@ func TestCavageSignerManagedHeadersAcceptTrimmedAndNormalizedMatchingValues(t *t
 	}
 	assertSignerPolicyHMAC(t, req.Header.Get(sigre.HeaderSignature), "host: xn--mnich-kva.example\ncontent-length: 4", key.Secret)
 }
+
+func TestCavageSignerLegacyRejectsTimestampHeaders(t *testing.T) {
+	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+	for _, test := range []struct {
+		name      string
+		header    string
+		expires   time.Duration
+		algorithm sigre.AlgorithmID
+	}{
+		{name: "RSA SHA256 with created", header: sigre.CavageCreated, algorithm: sigre.AlgorithmRSAPKCS1v15SHA256},
+		{name: "HMAC SHA256 with expires", header: sigre.CavageExpires, expires: time.Minute, algorithm: sigre.AlgorithmHMACSHA256},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			opts := &sigre.CavageSigningOptions{
+				ExpiresAfter: test.expires,
+				Compatibility: &sigre.CavageSigningCompatibility{
+					AlgorithmField: sigre.CavageAlgorithmFieldLegacy,
+					ExactHeaders:   []string{sigre.CavageRequestTarget, "date", test.header},
+				},
+			}
+			req := newSignerPolicyRequest(t)
+			var err error
+			if test.algorithm == sigre.AlgorithmHMACSHA256 {
+				err = signer.SignRequestWithHMAC(req, fixedHMACSigningKey("key", test.algorithm, []byte(testHMACSecret)), sigre.CavageSignaturePlacementSignature, opts)
+			} else {
+				err = signer.SignRequest(req, fixedSigningKey("key", test.algorithm, fixedRSAPrivateKey(t)), sigre.CavageSignaturePlacementSignature, opts)
+			}
+			assertPackageError(t, err, sigre.ErrInvalidSigningOptions)
+			assertPackageError(t, err, sigre.ErrInvalidSignatureAlgorithm)
+		})
+	}
+}
+
+func TestCavageSignerAuthorizationEscapesAndRestoresKeyID(t *testing.T) {
+	const keyID = "key\"quote\\slash"
+	req := newSignerPolicyRequest(t)
+	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+	err := signer.SignRequest(req, fixedSigningKey(keyID, sigre.AlgorithmRSAPKCS1v15SHA256, fixedRSAPrivateKey(t)), sigre.CavageSignaturePlacementAuthorization, &sigre.CavageSigningOptions{
+		Compatibility: &sigre.CavageSigningCompatibility{
+			AlgorithmField: sigre.CavageAlgorithmFieldOmitted,
+			ExactHeaders:   []string{"date"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SignRequest() failed: %v", err)
+	}
+	if value := req.Header.Get(sigre.HeaderAuthorization); !strings.Contains(value, `keyId="key\"quote\\slash"`) {
+		t.Fatalf("Authorization does not contain escaped KeyID: %s", value)
+	}
+	_, signature := parseSignerPolicyRequest(t, req, testFixedTime, &sigre.CavageVerificationOptions{
+		RequestSignatureSource: sigre.CavageRequestSignatureSourceAuthorization,
+	})
+	if got := signature.KeyID(); got != keyID {
+		t.Fatalf("KeyID() = %q, want %q", got, keyID)
+	}
+}
+
+func TestCavageSignerResponseRejectsMissingPrivateKey(t *testing.T) {
+	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+	err := signer.SignResponse(newSignerPolicyResponse(), fixedSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, nil), nil)
+	assertPackageError(t, err, sigre.ErrMissingPrivateKey)
+}
+
+func TestCavageSignerResponseHMACRejectsEmptySecret(t *testing.T) {
+	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+	err := signer.SignResponseWithHMAC(newSignerPolicyResponse(), fixedHMACSigningKey("key", sigre.AlgorithmHMACSHA512, nil), nil)
+	assertPackageError(t, err, sigre.ErrMissingSharedSecret)
+}
+
+func TestCavageSignerRejectsInvalidKeyID(t *testing.T) {
+	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+	privateKey := fixedRSAPrivateKey(t)
+	for _, path := range []struct {
+		name string
+		sign func(string) (http.Header, error)
+	}{
+		{name: "SignRequest", sign: func(keyID string) (http.Header, error) {
+			req := newSignerPolicyRequest(t)
+			err := signer.SignRequest(req, fixedSigningKey(keyID, sigre.AlgorithmRSAPKCS1v15SHA512, privateKey), sigre.CavageSignaturePlacementSignature, nil)
+			return req.Header, err
+		}},
+		{name: "SignResponse", sign: func(keyID string) (http.Header, error) {
+			res := newSignerPolicyResponse()
+			err := signer.SignResponse(res, fixedSigningKey(keyID, sigre.AlgorithmRSAPKCS1v15SHA512, privateKey), nil)
+			return res.Header, err
+		}},
+		{name: "SignRequestWithHMAC", sign: func(keyID string) (http.Header, error) {
+			req := newSignerPolicyRequest(t)
+			err := signer.SignRequestWithHMAC(req, fixedHMACSigningKey(keyID, sigre.AlgorithmHMACSHA512, []byte(testHMACSecret)), sigre.CavageSignaturePlacementSignature, nil)
+			return req.Header, err
+		}},
+		{name: "SignResponseWithHMAC", sign: func(keyID string) (http.Header, error) {
+			res := newSignerPolicyResponse()
+			err := signer.SignResponseWithHMAC(res, fixedHMACSigningKey(keyID, sigre.AlgorithmHMACSHA512, []byte(testHMACSecret)), nil)
+			return res.Header, err
+		}},
+	} {
+		for _, test := range []struct{ name, keyID string }{
+			{name: "empty"},
+			{name: "LF", keyID: "unsafe\nkey"},
+			{name: "CR", keyID: "unsafe\rkey"},
+			{name: "NUL", keyID: "unsafe\x00key"},
+			{name: "DEL", keyID: "unsafe\x7fkey"},
+		} {
+			t.Run(path.name+"/"+test.name, func(t *testing.T) {
+				header, err := path.sign(test.keyID)
+				assertPackageError(t, err, sigre.ErrInvalidKeyMetadata)
+				if header.Get(sigre.HeaderSignature) != "" || header.Get(sigre.HeaderAuthorization) != "" {
+					t.Fatal("signer wrote a signature after rejecting KeyID")
+				}
+			})
+		}
+	}
+}
+
+func TestCavageSignerCompatibilitySignaturesVerify(t *testing.T) {
+	rsaKey := fixedRSAPrivateKey(t)
+	edKey := fixedEd25519PrivateKey(t)
+	for _, test := range []struct {
+		name              string
+		algorithm         sigre.AlgorithmID
+		label             string
+		privateKey        crypto.PrivateKey
+		publicKey         crypto.PublicKey
+		response          bool
+		rootPath          bool
+		additionalAllowed []sigre.AlgorithmID
+	}{
+		{name: "request Legacy RSA SHA256 with root path", algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, label: "rsa-sha256", privateKey: rsaKey, publicKey: &rsaKey.PublicKey, rootPath: true},
+		{name: "request Legacy ECDSA SHA256", algorithm: sigre.AlgorithmECDSAASN1SHA256, label: "ecdsa-sha256", privateKey: fixedECDSAPrivateKey(t), publicKey: fixedECDSAPublicKey(t)},
+		{name: "request Legacy HMAC SHA256", algorithm: sigre.AlgorithmHMACSHA256, label: "hmac-sha256"},
+		{name: "request extension Ed25519", algorithm: sigre.AlgorithmEd25519, label: "ed25519", privateKey: edKey, publicKey: edKey.Public()},
+		{name: "request extension RSA SHA512 with multiple allowed algorithms", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, label: "rsa-sha512", privateKey: rsaKey, publicKey: &rsaKey.PublicKey, additionalAllowed: []sigre.AlgorithmID{sigre.AlgorithmRSAPKCS1v15SHA256}},
+		{name: "response Legacy RSA SHA256", algorithm: sigre.AlgorithmRSAPKCS1v15SHA256, label: "rsa-sha256", privateKey: rsaKey, publicKey: &rsaKey.PublicKey, response: true},
+		{name: "response extension RSA SHA512", algorithm: sigre.AlgorithmRSAPKCS1v15SHA512, label: "rsa-sha512", privateKey: rsaKey, publicKey: &rsaKey.PublicKey, response: true},
+		{name: "response Legacy HMAC SHA256", algorithm: sigre.AlgorithmHMACSHA256, label: "hmac-sha256", response: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"date", "digest"}}}
+			verification := &sigre.CavageVerificationOptions{
+				AllowedAlgorithms: append([]sigre.AlgorithmID{test.algorithm}, test.additionalAllowed...),
+				Compatibility:     &sigre.CavageVerificationCompatibility{},
+			}
+			if test.label == "rsa-sha512" || test.label == "ed25519" {
+				opts.Compatibility.Extension = &sigre.CavageExtensionAlgorithm{Label: test.label, Algorithm: test.algorithm}
+				verification.Compatibility.ExtensionAlgorithms = map[string]sigre.AlgorithmID{test.label: test.algorithm}
+			} else {
+				opts.Compatibility.AlgorithmField = sigre.CavageAlgorithmFieldLegacy
+				verification.Compatibility.AllowedLegacyAlgorithms = []sigre.AlgorithmID{test.algorithm}
+			}
+			signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
+			key := fixedSigningKey("compatibility-key", test.algorithm, test.privateKey)
+			hmacKey := fixedHMACSigningKey("compatibility-key", test.algorithm, []byte(testHMACSecret))
+			var verifier *sigre.CavageVerifier
+			var signature *sigre.CavageSignature
+			var err error
+			var header http.Header
+			if test.response {
+				res := newSignerPolicyResponse()
+				if test.algorithm == sigre.AlgorithmHMACSHA256 {
+					err = signer.SignResponseWithHMAC(res, hmacKey, opts)
+				} else {
+					err = signer.SignResponse(res, key, opts)
+				}
+				if err != nil {
+					t.Fatalf("response signing failed: %v", err)
+				}
+				verifier, signature = parseSignerPolicyResponse(t, res, testFixedTime, verification)
+				header = res.Header
+			} else {
+				opts.Compatibility.ExactHeaders = []string{sigre.CavageRequestTarget, "host", "date", "digest"}
+				req := newSignerPolicyRequest(t)
+				if test.rootPath {
+					req.URL.Path = "/"
+					req.URL.RawQuery = ""
+					req.RequestURI = req.URL.RequestURI()
+				}
+				if test.algorithm == sigre.AlgorithmHMACSHA256 {
+					err = signer.SignRequestWithHMAC(req, hmacKey, sigre.CavageSignaturePlacementSignature, opts)
+				} else {
+					err = signer.SignRequest(req, key, sigre.CavageSignaturePlacementSignature, opts)
+				}
+				if err != nil {
+					t.Fatalf("request signing failed: %v", err)
+				}
+				verifier, signature = parseSignerPolicyRequest(t, req, testFixedTime, verification)
+				header = req.Header
+			}
+			if got, _ := signerPolicyParameter(t, header.Get(sigre.HeaderSignature), "algorithm"); got != test.label {
+				t.Fatalf("algorithm = %q, want %q", got, test.label)
+			}
+			if got := signature.KeyID(); got != key.Metadata.KeyID {
+				t.Fatalf("KeyID() = %q, want %q", got, key.Metadata.KeyID)
+			}
+			if test.algorithm == sigre.AlgorithmHMACSHA256 {
+				err = verifier.VerifyHMAC(signature, fixedHMACVerificationKey(hmacKey.Metadata.KeyID, test.algorithm, hmacKey.Secret))
+			} else {
+				err = verifier.Verify(signature, fixedPublicVerificationKey(key.Metadata.KeyID, test.algorithm, test.publicKey))
+			}
+			if err != nil {
+				t.Fatalf("verification failed: %v", err)
+			}
+		})
+	}
+}

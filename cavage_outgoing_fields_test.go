@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-func TestCavageSignerOutgoingFieldMapKeys(t *testing.T) {
+func TestCavageSignerRequiresCanonicalMapKeysOnlyForSignedFields(t *testing.T) {
 	key := HMACSigningKey{
 		Metadata: TrustedKeyMetadata{KeyID: "outgoing-map-key", Algorithm: AlgorithmHMACSHA512},
 		Secret:   signingStringTestSecret,
@@ -253,7 +253,7 @@ func TestCavageRequestSignerRejectsOutgoingHostConflictWithoutMutation(t *testin
 	}
 }
 
-func TestCavageRequestSignerOutgoingHostRedundantHeaderPolicy(t *testing.T) {
+func TestCavageRequestSignerAcceptsRedundantHostOnlyUnderCanonicalKey(t *testing.T) {
 	t.Run("matching normalized canonical value is accepted", func(t *testing.T) {
 		req := &http.Request{
 			Method: "GET",
@@ -273,7 +273,7 @@ func TestCavageRequestSignerOutgoingHostRedundantHeaderPolicy(t *testing.T) {
 	})
 
 	for _, key := range []string{"host", "HOST", "hOsT"} {
-		t.Run("noncanonical map key "+key, func(t *testing.T) {
+		t.Run("noncanonical map key "+key+" is rejected", func(t *testing.T) {
 			req := &http.Request{
 				Method: "GET",
 				URL:    &url.URL{Scheme: "https", Host: "example.test", Path: "/"},
@@ -341,13 +341,13 @@ func TestCavageRequestSignerUsesOutgoingContentLength(t *testing.T) {
 		req  func() *http.Request
 	}{
 		{
-			name: "GET known zero omits field",
+			name: "GET known zero omits field and is rejected",
 			req: func() *http.Request {
 				return outgoingTestRequest("GET")
 			},
 		},
 		{
-			name: "chunked omits field",
+			name: "chunked omits field and is rejected",
 			req: func() *http.Request {
 				req := outgoingTestRequest("POST")
 				req.Body = io.NopCloser(strings.NewReader("abc"))
@@ -373,14 +373,14 @@ func TestCavageRequestSignerUsesOutgoingContentLength(t *testing.T) {
 	}
 }
 
-func TestCavageRequestSignerContentLengthHeaderConflictPolicy(t *testing.T) {
+func TestCavageRequestSignerAcceptsRedundantContentLengthOnlyWhenMatching(t *testing.T) {
 	tests := []struct {
 		name      string
 		header    string
 		wantError bool
 	}{
-		{name: "matching redundant value", header: "3"},
-		{name: "conflicting ignored value", header: "4", wantError: true},
+		{name: "matching redundant value is accepted", header: "3"},
+		{name: "conflicting ignored value is rejected", header: "4", wantError: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -458,7 +458,7 @@ func TestCavageRequestSignerUsesOutgoingTransferEncodingAndTrailer(t *testing.T)
 		}
 	})
 
-	t.Run("nil Body removes explicit chunked encoding", func(t *testing.T) {
+	t.Run("nil Body removes explicit chunked encoding and is rejected", func(t *testing.T) {
 		req := outgoingTestRequest("POST")
 		req.TransferEncoding = []string{"chunked"}
 		err := NewCavageSigner().SignRequestWithHMAC(
@@ -563,7 +563,7 @@ func TestCavageRequestSignerRejectsMissingInvalidOrIndeterminateTransferFields(t
 	})
 }
 
-func TestCavageRequestSignerManagedHeaderConflicts(t *testing.T) {
+func TestCavageRequestSignerRejectsManagedHeaderConflicts(t *testing.T) {
 	tests := []struct {
 		name       string
 		signedName string
@@ -572,7 +572,7 @@ func TestCavageRequestSignerManagedHeaderConflicts(t *testing.T) {
 		configure  func(*http.Request)
 	}{
 		{
-			name:       "Transfer-Encoding",
+			name:       "transfer-encoding",
 			signedName: "transfer-encoding",
 			headerName: "Transfer-Encoding",
 			header:     "identity",
@@ -582,7 +582,7 @@ func TestCavageRequestSignerManagedHeaderConflicts(t *testing.T) {
 			},
 		},
 		{
-			name:       "Trailer",
+			name:       "trailer",
 			signedName: "trailer",
 			headerName: "Trailer",
 			header:     "X-Other",
@@ -638,7 +638,7 @@ func TestCavageRequestSignerAcceptsMatchingTransferHeaders(t *testing.T) {
 	}
 }
 
-func TestCavageRequestSignerOnlyResolvesSelectedManagedFields(t *testing.T) {
+func TestCavageRequestSignerResolvesOnlySelectedManagedFields(t *testing.T) {
 	body := &outgoingCountingBody{reader: strings.NewReader("abc")}
 	req := outgoingTestRequest("GET")
 	req.Body = body
@@ -699,7 +699,7 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		assertOutgoingWireField(t, writeOutgoingResponse(t, wireRes), "Content-Length", []string{"0"})
 	})
 
-	t.Run("status without a body suppresses zero Content-Length", func(t *testing.T) {
+	t.Run("status without a body suppresses zero Content-Length and is rejected", func(t *testing.T) {
 		res := outgoingTestResponse()
 		res.Status = "204 No Content"
 		res.StatusCode = http.StatusNoContent
@@ -767,7 +767,7 @@ func TestCavageResponseSignerUsesOutgoingManagedFields(t *testing.T) {
 		}
 	})
 
-	t.Run("nil Body removes explicit chunked encoding", func(t *testing.T) {
+	t.Run("nil Body removes explicit chunked encoding and is rejected", func(t *testing.T) {
 		res := outgoingTestResponse()
 		res.Body = nil
 		res.TransferEncoding = []string{"chunked"}
@@ -867,7 +867,7 @@ func TestCavageResponseSignerRejectsManagedHeaderConflicts(t *testing.T) {
 		configure  func(*http.Response)
 	}{
 		{
-			name:       "Content-Length",
+			name:       "content-length",
 			signedName: "content-length",
 			headerName: "Content-Length",
 			header:     "4",
@@ -877,7 +877,7 @@ func TestCavageResponseSignerRejectsManagedHeaderConflicts(t *testing.T) {
 			},
 		},
 		{
-			name:       "Transfer-Encoding",
+			name:       "transfer-encoding",
 			signedName: "transfer-encoding",
 			headerName: "Transfer-Encoding",
 			header:     "identity",
@@ -887,7 +887,7 @@ func TestCavageResponseSignerRejectsManagedHeaderConflicts(t *testing.T) {
 			},
 		},
 		{
-			name:       "Trailer",
+			name:       "trailer",
 			signedName: "trailer",
 			headerName: "Trailer",
 			header:     "X-Other",
@@ -956,7 +956,7 @@ func TestCavageResponseSignerRejectsIndeterminateContentLengthWithoutBodyProbe(t
 	assertOutgoingWireField(t, writeOutgoingResponse(t, nonEmptyWire), "Content-Length", nil)
 }
 
-func TestCavageOutgoingResolverPreservesNilHeaderOnError(t *testing.T) {
+func TestCavageSignerPreservesNilHeaderOnOutgoingFieldError(t *testing.T) {
 	t.Run("request", func(t *testing.T) {
 		req := &http.Request{
 			Method: "GET",
@@ -1001,7 +1001,7 @@ func TestCavageOutgoingResolverPreservesNilHeaderOnError(t *testing.T) {
 	})
 }
 
-func TestCavageSignerAsymmetricUsesOutgoingFieldResolver(t *testing.T) {
+func TestCavageSignerSignsOutgoingContentLengthWithAsymmetricKey(t *testing.T) {
 	req, err := http.NewRequest("POST", "https://example.test/inbox", strings.NewReader("abc"))
 	if err != nil {
 		t.Fatalf("http.NewRequest() failed: %v", err)

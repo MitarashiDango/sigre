@@ -136,7 +136,7 @@ func assertSignerPolicyHMAC(t *testing.T, value, signingString string, secret []
 	}
 }
 
-func TestCavageSignerStrictZeroValueWireFormat(t *testing.T) {
+func TestCavageSignerUsesStrictDefaultsWithNilOrEmptyOptions(t *testing.T) {
 	secret := []byte(testHMACSecret)
 	now := time.Date(2026, 8, 4, 4, 0, 0, 0, time.UTC)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return now }}
@@ -206,7 +206,7 @@ func TestCavageSignerStrictZeroValueWireFormat(t *testing.T) {
 	})
 }
 
-func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
+func TestCavageSignerSignsWithStrictAlgorithms(t *testing.T) {
 	rsaPrivateKey := fixedRSAPrivateKey(t)
 	ecdsaPrivateKey := fixedECDSAPrivateKey(t)
 	ed25519PrivateKey := fixedEd25519PrivateKey(t)
@@ -299,7 +299,7 @@ func TestCavageSignerStrictAlgorithmsAcrossRequestAndResponse(t *testing.T) {
 	}
 }
 
-func TestCavageSignerECDSACurves(t *testing.T) {
+func TestCavageSignerAcceptsSupportedECDSACurves(t *testing.T) {
 	for _, curve := range []elliptic.Curve{elliptic.P224(), elliptic.P256(), elliptic.P384(), elliptic.P521()} {
 		t.Run(curve.Params().Name, func(t *testing.T) {
 			privateKey, err := ecdsa.GenerateKey(curve, rand.Reader)
@@ -320,7 +320,7 @@ func TestCavageSignerECDSACurves(t *testing.T) {
 	}
 }
 
-func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
+func TestCavageSignerRejectsInvalidKeys(t *testing.T) {
 	rsaPrivateKey := fixedRSAPrivateKey(t)
 	ecdsaPrivateKey := fixedECDSAPrivateKey(t)
 	secret := []byte(testHMACSecret)
@@ -398,20 +398,6 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 			wantErr: sigre.ErrAlgorithmMismatch,
 			run: func(req *http.Request) error {
 				return sigre.NewCavageSigner().SignRequestWithHMAC(req, fixedHMACSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, secret), sigre.CavageSignaturePlacementSignature, nil)
-			},
-		},
-		{
-			name:    "zero placement",
-			wantErr: sigre.ErrInvalidSignaturePlacement,
-			run: func(req *http.Request) error {
-				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPrivateKey), 0, nil)
-			},
-		},
-		{
-			name:    "unknown placement",
-			wantErr: sigre.ErrInvalidSignaturePlacement,
-			run: func(req *http.Request) error {
-				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPrivateKey), 99, nil)
 			},
 		},
 	}
@@ -540,7 +526,45 @@ func TestCavageSignerKeyAndPlacementValidation(t *testing.T) {
 	}
 }
 
-func TestCavageSignerSignedHeaderOptions(t *testing.T) {
+func TestCavageSignerRejectsInvalidPlacement(t *testing.T) {
+	rsaPrivateKey := fixedRSAPrivateKey(t)
+
+	tests := []struct {
+		name    string
+		wantErr error
+		run     func(*http.Request) error
+	}{
+		{
+			name:    "zero placement",
+			wantErr: sigre.ErrInvalidSignaturePlacement,
+			run: func(req *http.Request) error {
+				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPrivateKey), 0, nil)
+			},
+		},
+		{
+			name:    "unknown placement",
+			wantErr: sigre.ErrInvalidSignaturePlacement,
+			run: func(req *http.Request) error {
+				return sigre.NewCavageSigner().SignRequest(req, fixedSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, rsaPrivateKey), 99, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := newSignerPolicyRequest(t)
+			err := tt.run(req)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want errors.Is(_, %v)", err, tt.wantErr)
+			}
+			if req.Header.Get(sigre.HeaderSignature) != "" || strings.HasPrefix(req.Header.Get(sigre.HeaderAuthorization), "Signature ") {
+				t.Fatal("signer wrote a signature after rejecting the key or placement")
+			}
+		})
+	}
+}
+
+func TestCavageSignerUsesConfiguredSignedHeaders(t *testing.T) {
 	privateKey := fixedEd25519PrivateKey(t)
 	key := fixedSigningKey("header-key", sigre.AlgorithmEd25519, privateKey)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
@@ -620,17 +644,17 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 		name string
 		opts *sigre.CavageSigningOptions
 	}{
-		{name: "empty ExactHeaders", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{}}}},
-		{name: "AdditionalHeaders and ExactHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"x-extra"}, Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"date"}}}},
-		{name: "AdditionalHeaders and OmitHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"x-extra"}, Compatibility: &sigre.CavageSigningCompatibility{OmitHeaders: true}}},
-		{name: "ExactHeaders and OmitHeaders", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"date"}, OmitHeaders: true}}},
-		{name: "duplicate default", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{sigre.CavageCreated}}},
-		{name: "duplicate AdditionalHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"X-Extra", "x-extra"}}},
-		{name: "duplicate ExactHeaders", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"Date", "date"}}}},
-		{name: "non-ASCII field in AdditionalHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"\u212A-foo"}}},
-		{name: "non-ASCII pseudo-header in AdditionalHeaders", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"(exp\u0130res)"}, ExpiresAfter: time.Minute}},
-		{name: "non-ASCII field in ExactHeaders", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"\u212A-foo"}}}},
-		{name: "non-ASCII pseudo-header in ExactHeaders", opts: &sigre.CavageSigningOptions{ExpiresAfter: time.Minute, Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"(exp\u0130res)"}}}},
+		{name: "empty ExactHeaders is rejected", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{}}}},
+		{name: "combining AdditionalHeaders and ExactHeaders is rejected", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"x-extra"}, Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"date"}}}},
+		{name: "combining AdditionalHeaders and OmitHeaders is rejected", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"x-extra"}, Compatibility: &sigre.CavageSigningCompatibility{OmitHeaders: true}}},
+		{name: "combining ExactHeaders and OmitHeaders is rejected", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"date"}, OmitHeaders: true}}},
+		{name: "duplicate default is rejected", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{sigre.CavageCreated}}},
+		{name: "duplicate AdditionalHeaders is rejected", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"X-Extra", "x-extra"}}},
+		{name: "duplicate ExactHeaders is rejected", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"Date", "date"}}}},
+		{name: "non-ASCII field in AdditionalHeaders is rejected", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"\u212A-foo"}}},
+		{name: "non-ASCII pseudo-header in AdditionalHeaders is rejected", opts: &sigre.CavageSigningOptions{AdditionalHeaders: []string{"(exp\u0130res)"}, ExpiresAfter: time.Minute}},
+		{name: "non-ASCII field in ExactHeaders is rejected", opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"\u212A-foo"}}}},
+		{name: "non-ASCII pseudo-header in ExactHeaders is rejected", opts: &sigre.CavageSigningOptions{ExpiresAfter: time.Minute, Compatibility: &sigre.CavageSigningCompatibility{ExactHeaders: []string{"(exp\u0130res)"}}}},
 	}
 	for _, tt := range invalidOptions {
 		t.Run(tt.name, func(t *testing.T) {
@@ -666,7 +690,7 @@ func TestCavageSignerSignedHeaderOptions(t *testing.T) {
 	})
 }
 
-func TestCavageSignerMissingSignedFieldsWithoutMutation(t *testing.T) {
+func TestCavageSignerRejectsMissingSignedFieldsWithoutMutation(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	key := fixedHMACSigningKey("missing-field-key", sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
 	for _, name := range []string{"date", "digest"} {
@@ -701,7 +725,7 @@ func TestCavageSignerMissingSignedFieldsWithoutMutation(t *testing.T) {
 	}
 }
 
-func TestCavageSignerExpiresAfter(t *testing.T) {
+func TestCavageSignerSetsExpirationFromExpiresAfter(t *testing.T) {
 	privateKey := fixedEd25519PrivateKey(t)
 	key := fixedSigningKey("expires-key", sigre.AlgorithmEd25519, privateKey)
 	now := time.Unix(100, 900_000_000)
@@ -751,9 +775,9 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 			now     time.Time
 			wantErr error
 		}{
-			{name: "before expiration", now: time.Unix(100, 949_999_999)},
-			{name: "at expiration", now: time.Unix(100, 950_000_000)},
-			{name: "after expiration", now: time.Unix(100, 950_000_001), wantErr: sigre.ErrSignatureExpired},
+			{name: "accepted before expiration", now: time.Unix(100, 949_999_999)},
+			{name: "accepted at expiration", now: time.Unix(100, 950_000_000)},
+			{name: "rejected after expiration", now: time.Unix(100, 950_000_001), wantErr: sigre.ErrSignatureExpired},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
 				verifier, err := sigre.NewCavageVerifier(&sigre.CavageVerificationOptions{Now: func() time.Time { return tt.now }})
@@ -847,17 +871,17 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 		opts *sigre.CavageSigningOptions
 	}{
 		{
-			name: "expires header without duration",
+			name: "expires header without duration is rejected",
 			opts: &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
 				ExactHeaders: []string{sigre.CavageCreated, sigre.CavageExpires},
 			}},
 		},
 		{
-			name: "duration without expires header",
+			name: "duration without expires header is rejected",
 			opts: &sigre.CavageSigningOptions{ExpiresAfter: time.Second},
 		},
 		{
-			name: "negative duration",
+			name: "negative duration is rejected",
 			opts: &sigre.CavageSigningOptions{ExpiresAfter: -time.Nanosecond},
 		},
 	}
@@ -871,7 +895,7 @@ func TestCavageSignerExpiresAfter(t *testing.T) {
 	}
 }
 
-func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
+func TestCavageSignerUsesExplicitAlgorithmCompatibility(t *testing.T) {
 	rsaPrivateKey := fixedRSAPrivateKey(t)
 	ecdsaPrivateKey := fixedECDSAPrivateKey(t)
 	secret := []byte(testHMACSecret)
@@ -1073,12 +1097,12 @@ func TestCavageSignerAlgorithmFieldCompatibility(t *testing.T) {
 	})
 }
 
-func TestCavageSignerExtensionAlgorithm(t *testing.T) {
+func TestCavageSignerUsesExtensionAlgorithmBinding(t *testing.T) {
 	privateKey := fixedRSAPrivateKey(t)
 	key := fixedSigningKey("extension-key", sigre.AlgorithmRSAPKCS1v15SHA512, privateKey)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 
-	t.Run("exact label-to-AlgorithmID binding", func(t *testing.T) {
+	t.Run("configured label-to-AlgorithmID binding is used", func(t *testing.T) {
 		req := newSignerPolicyRequest(t)
 		opts := &sigre.CavageSigningOptions{Compatibility: &sigre.CavageSigningCompatibility{
 			Extension: &sigre.CavageExtensionAlgorithm{Label: "example-rsa512", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512},
@@ -1103,16 +1127,16 @@ func TestCavageSignerExtensionAlgorithm(t *testing.T) {
 		name          string
 		compatibility sigre.CavageSigningCompatibility
 	}{
-		{name: "empty label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "zero AlgorithmID", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: 0}}},
-		{name: "mismatched AlgorithmID", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmECDSAASN1SHA512}}},
-		{name: "known hs2019 label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "hs2019", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "known legacy label", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "known rsa-sha1 label without created or expires", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.CavageRequestTarget, "date"}, Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha1", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "known legacy label without created or expires", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.CavageRequestTarget, "date"}, Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "extension and omitted mode", compatibility: sigre.CavageSigningCompatibility{AlgorithmField: sigre.CavageAlgorithmFieldOmitted, Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "rsa prefix with created", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
-		{name: "ecdsa prefix with created", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "ecdsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "empty label is rejected", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "zero AlgorithmID is rejected", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: 0}}},
+		{name: "mismatched AlgorithmID is rejected", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmECDSAASN1SHA512}}},
+		{name: "known hs2019 label is rejected", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "hs2019", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "known legacy label is rejected", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "known rsa-sha1 label without created or expires is rejected", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.CavageRequestTarget, "date"}, Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha1", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "known legacy label without created or expires is rejected", compatibility: sigre.CavageSigningCompatibility{ExactHeaders: []string{sigre.CavageRequestTarget, "date"}, Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-sha256", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "combining extension and omitted mode is rejected", compatibility: sigre.CavageSigningCompatibility{AlgorithmField: sigre.CavageAlgorithmFieldOmitted, Extension: &sigre.CavageExtensionAlgorithm{Label: "example", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "rsa prefix with created is rejected", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "rsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
+		{name: "ecdsa prefix with created is rejected", compatibility: sigre.CavageSigningCompatibility{Extension: &sigre.CavageExtensionAlgorithm{Label: "ecdsa-custom", Algorithm: sigre.AlgorithmRSAPKCS1v15SHA512}}},
 	}
 	for _, tt := range invalid {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1139,7 +1163,7 @@ func TestCavageSignerExtensionAlgorithm(t *testing.T) {
 	})
 }
 
-func TestCavageSignerPlacement(t *testing.T) {
+func TestCavageSignerWritesSignatureToSelectedHeader(t *testing.T) {
 	secret := []byte(testHMACSecret)
 	key := fixedHMACSigningKey("placement-key", sigre.AlgorithmHMACSHA512, secret)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
@@ -1185,7 +1209,10 @@ func TestCavageSignerPlacement(t *testing.T) {
 					req.Header["authorization"] = []string{`Signature keyId="existing"`}
 				},
 			} {
-				t.Run(name, func(t *testing.T) {
+				t.Run(map[sigre.CavageSignaturePlacement]string{
+					sigre.CavageSignaturePlacementSignature:     "signature placement",
+					sigre.CavageSignaturePlacementAuthorization: "authorization placement",
+				}[placement]+"/"+name, func(t *testing.T) {
 					req := newSignerPolicyRequest(t)
 					setup(req)
 					before := req.Header.Clone()
@@ -1260,7 +1287,7 @@ func TestCavageSignerPlacement(t *testing.T) {
 	})
 }
 
-func TestCavageSignerZeroValueSignsRequestWithCurrentTime(t *testing.T) {
+func TestCavageSignerSignsRequestWithCurrentTimeFromZeroValue(t *testing.T) {
 	req := newSignerPolicyRequest(t)
 	privateKey := fixedEd25519PrivateKey(t)
 	key := fixedSigningKey("zero-value-key", sigre.AlgorithmEd25519, privateKey)
@@ -1282,7 +1309,7 @@ func TestCavageSignerZeroValueSignsRequestWithCurrentTime(t *testing.T) {
 	}
 }
 
-func TestCavageSignerAuthorizationPlacementReplacesExistingAuthorization(t *testing.T) {
+func TestCavageSignerReplacesExistingAuthorizationForAuthorizationPlacement(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	key := fixedHMACSigningKey("replacement-key", sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
 	for _, tt := range []struct {
@@ -1321,7 +1348,7 @@ func TestCavageSignerAuthorizationPlacementReplacesExistingAuthorization(t *test
 	}
 }
 
-func TestCavageSignerAdditionalHeadersPreservesOrderAndAcceptsPseudoHeaders(t *testing.T) {
+func TestCavageSignerPreservesAdditionalHeaderOrderIncludingPseudoHeaders(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	key := fixedHMACSigningKey("additional-key", sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
 	opts := &sigre.CavageSigningOptions{
@@ -1353,7 +1380,7 @@ func TestCavageSignerAdditionalHeadersPreservesOrderAndAcceptsPseudoHeaders(t *t
 	}
 }
 
-func TestCavageSignerIncompatibleAlgorithmModeMatchesBothSentinels(t *testing.T) {
+func TestCavageSignerReturnsBothSentinelsForIncompatibleAlgorithmMode(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	key := fixedHMACSigningKey("incompatible-key", sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
 	for _, tt := range []struct {
@@ -1376,7 +1403,7 @@ func TestCavageSignerIncompatibleAlgorithmModeMatchesBothSentinels(t *testing.T)
 	}
 }
 
-func TestCavageSignerOmittedAlgorithmAcceptsSupportedAlgorithms(t *testing.T) {
+func TestCavageSignerAcceptsSupportedAlgorithmsWithOmittedAlgorithmField(t *testing.T) {
 	rsaKey := fixedRSAPrivateKey(t)
 	ecdsaKey := fixedECDSAPrivateKey(t)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
@@ -1413,7 +1440,7 @@ func TestCavageSignerOmittedAlgorithmAcceptsSupportedAlgorithms(t *testing.T) {
 	}
 }
 
-func TestCavageSignerExtensionRejectsUnsafeAndReservedLabels(t *testing.T) {
+func TestCavageSignerRejectsUnsafeAndReservedExtensionLabels(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	key := fixedHMACSigningKey("extension-key", sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
 	for _, tt := range []struct {
@@ -1437,7 +1464,7 @@ func TestCavageSignerExtensionRejectsUnsafeAndReservedLabels(t *testing.T) {
 	}
 }
 
-func TestCavageSignerExtensionFamilyLabelsRequireExcludingTimestamps(t *testing.T) {
+func TestCavageSignerRequiresExcludingTimestampsForExtensionFamilyLabels(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	key := fixedHMACSigningKey("extension-key", sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
 	for _, tt := range []struct {
@@ -1478,7 +1505,7 @@ func TestCavageSignerExtensionFamilyLabelsRequireExcludingTimestamps(t *testing.
 	}
 }
 
-func TestCavageResponseSignerRequestTargetWithoutRequestIsRejected(t *testing.T) {
+func TestCavageResponseSignerRejectsRequestTargetWithoutRequest(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	res := newSignerPolicyResponse()
 	key := fixedHMACSigningKey("response-key", sigre.AlgorithmHMACSHA512, []byte(testHMACSecret))
@@ -1488,7 +1515,7 @@ func TestCavageResponseSignerRequestTargetWithoutRequestIsRejected(t *testing.T)
 	}
 }
 
-func TestCavageSignerManagedHeadersAcceptTrimmedAndNormalizedMatchingValues(t *testing.T) {
+func TestCavageSignerAcceptsMatchingManagedHeadersAfterTrimmingAndNormalization(t *testing.T) {
 	req := newSignerPolicyRequest(t)
 	req.Host = "münich.example"
 	req.Header.Set("Host", " \tmünich.example\t ")
@@ -1504,7 +1531,7 @@ func TestCavageSignerManagedHeadersAcceptTrimmedAndNormalizedMatchingValues(t *t
 	assertSignerPolicyHMAC(t, req.Header.Get(sigre.HeaderSignature), "host: xn--mnich-kva.example\ncontent-length: 4", key.Secret)
 }
 
-func TestCavageSignerLegacyRejectsTimestampHeaders(t *testing.T) {
+func TestCavageSignerRejectsTimestampHeadersWithLegacyAlgorithms(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	for _, test := range []struct {
 		name      string
@@ -1536,7 +1563,7 @@ func TestCavageSignerLegacyRejectsTimestampHeaders(t *testing.T) {
 	}
 }
 
-func TestCavageSignerAuthorizationEscapesAndRestoresKeyID(t *testing.T) {
+func TestCavageSignerPreservesKeyIDThroughAuthorizationRoundTrip(t *testing.T) {
 	const keyID = "key\"quote\\slash"
 	req := newSignerPolicyRequest(t)
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
@@ -1560,13 +1587,13 @@ func TestCavageSignerAuthorizationEscapesAndRestoresKeyID(t *testing.T) {
 	}
 }
 
-func TestCavageSignerResponseRejectsMissingPrivateKey(t *testing.T) {
+func TestCavageResponseSignerRejectsMissingPrivateKey(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	err := signer.SignResponse(newSignerPolicyResponse(), fixedSigningKey("key", sigre.AlgorithmRSAPKCS1v15SHA512, nil), nil)
 	assertPackageError(t, err, sigre.ErrMissingPrivateKey)
 }
 
-func TestCavageSignerResponseHMACRejectsEmptySecret(t *testing.T) {
+func TestCavageResponseSignerRejectsEmptyHMACSecret(t *testing.T) {
 	signer := &sigre.CavageSigner{Now: func() time.Time { return testFixedTime }}
 	err := signer.SignResponseWithHMAC(newSignerPolicyResponse(), fixedHMACSigningKey("key", sigre.AlgorithmHMACSHA512, nil), nil)
 	assertPackageError(t, err, sigre.ErrMissingSharedSecret)
@@ -1618,7 +1645,7 @@ func TestCavageSignerRejectsInvalidKeyID(t *testing.T) {
 	}
 }
 
-func TestCavageSignerCompatibilitySignaturesVerify(t *testing.T) {
+func TestCavageSignerProducesVerifiableCompatibilitySignatures(t *testing.T) {
 	rsaKey := fixedRSAPrivateKey(t)
 	edKey := fixedEd25519PrivateKey(t)
 	for _, test := range []struct {

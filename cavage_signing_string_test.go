@@ -35,7 +35,7 @@ func signingStringOptions(headers []string) *CavageSigningOptions {
 	}
 }
 
-func TestOutgoingRequestTargetMatchesHTTPWireForm(t *testing.T) {
+func TestOutgoingCavageRequestTargetMatchesHTTPWireForm(t *testing.T) {
 	tests := []struct {
 		name   string
 		method string
@@ -251,7 +251,7 @@ func TestCavageRequestSignerRejectsNilURLRequestTarget(t *testing.T) {
 	}
 }
 
-func TestRequestTargetResolversRejectUnresolvableInputs(t *testing.T) {
+func TestReceivedCavageRequestTargetRejectsAuthorityFormWithoutCONNECT(t *testing.T) {
 	tests := []struct {
 		name       string
 		resolve    func() (string, error)
@@ -264,6 +264,24 @@ func TestRequestTargetResolversRejectUnresolvableInputs(t *testing.T) {
 			},
 			wantDetail: "authority-form",
 		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target, err := tt.resolve()
+			if target != "" || !errors.Is(err, ErrInvalidHTTPMessage) || !strings.Contains(err.Error(), tt.wantDetail) {
+				t.Fatalf("resolver result = %q, %v; want empty target and ErrInvalidHTTPMessage containing %q", target, err, tt.wantDetail)
+			}
+		})
+	}
+}
+
+func TestAssociatedCavageRequestTargetRejectsMissingRequest(t *testing.T) {
+	tests := []struct {
+		name       string
+		resolve    func() (string, error)
+		wantDetail string
+	}{
 		{
 			name: "missing associated request",
 			resolve: func() (string, error) {
@@ -391,7 +409,7 @@ func TestCavageResponseSignerRejectsAssociatedCONNECTRequestTarget(t *testing.T)
 	}
 }
 
-func TestGenerateSignatureStringNormalHeaders(t *testing.T) {
+func TestGenerateCavageSigningStringCanonicalizesNormalHeaders(t *testing.T) {
 	header := signingStringTestHeaders()
 	headers := []string{"x-one", "x-multi", "x-zero", "x-empty", "x-internal", "x-unicode"}
 	want := "x-one: single\n" +
@@ -413,7 +431,7 @@ func TestGenerateSignatureStringNormalHeaders(t *testing.T) {
 	}
 }
 
-func TestGenerateSignatureStringErrorSentinels(t *testing.T) {
+func TestGenerateCavageSigningStringReturnsSentinelsForMissingComponents(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
 		headerName    string
@@ -436,7 +454,7 @@ func TestGenerateSignatureStringErrorSentinels(t *testing.T) {
 	}
 }
 
-func TestCavageSignedHeaderNamesAreCaseInsensitive(t *testing.T) {
+func TestCavageSignerAndVerifierTreatSignedHeaderNamesCaseInsensitively(t *testing.T) {
 	headers := []string{"(Request-Target)", "X-FOO"}
 	req := &http.Request{
 		Method: "GET",
@@ -473,7 +491,7 @@ func TestCavageSignedHeaderNamesAreCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestCavageSignerNormalHeaderCanonicalization(t *testing.T) {
+func TestCavageSignerCanonicalizesNormalHeaders(t *testing.T) {
 	want := "x-one: single\n" +
 		"x-multi: first, second\n" +
 		"x-zero: \n" +
@@ -639,7 +657,7 @@ func TestCavageSignerAllowsNonSelfReferentialPlacement(t *testing.T) {
 	})
 }
 
-func TestCavageSignerRejectsInvalidPlacementBeforeSigningWork(t *testing.T) {
+func TestSignMessageRejectsInvalidPlacementBeforeSigningWork(t *testing.T) {
 	algorithm, err := algorithmDefinitionFor(AlgorithmHMACSHA256)
 	if err != nil {
 		t.Fatalf("algorithmDefinitionFor() failed: %v", err)
@@ -695,7 +713,7 @@ func TestCavageSignerRejectsInvalidPlacementBeforeSigningWork(t *testing.T) {
 	}
 }
 
-func TestCavageSignerRejectsCONNECTBeforeCryptographicWork(t *testing.T) {
+func TestSignMessageRejectsCONNECTBeforeCryptographicWork(t *testing.T) {
 	algorithm, err := algorithmDefinitionFor(AlgorithmHMACSHA256)
 	if err != nil {
 		t.Fatalf("algorithmDefinitionFor() failed: %v", err)
@@ -737,7 +755,7 @@ func TestCavageSignerRejectsCONNECTBeforeCryptographicWork(t *testing.T) {
 	}
 }
 
-func TestGenerateSignatureStringRejectsForbiddenHeaderValueBytes(t *testing.T) {
+func TestGenerateCavageSigningStringRejectsForbiddenHeaderValueBytes(t *testing.T) {
 	tests := []struct {
 		name string
 		b    byte
@@ -912,7 +930,7 @@ func TestCavageSignerRejectsForbiddenHostWithoutMutation(t *testing.T) {
 	})
 }
 
-func TestCavageSignerNilHeaderContract(t *testing.T) {
+func TestCavageSignerAllocatesNilHeaderOnlyOnSuccess(t *testing.T) {
 	privateKey := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
 	asymmetricKey := SigningKey{
 		Metadata:   TrustedKeyMetadata{KeyID: "nil-header-asymmetric-key", Algorithm: AlgorithmEd25519},
@@ -980,7 +998,7 @@ func TestCavageSignerNilHeaderContract(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Run("Host signing failure", func(t *testing.T) {
+			t.Run("host signing failure preserves nil Header", func(t *testing.T) {
 				forbiddenHost := "signed\x00host"
 				if tt.isRequest {
 					forbiddenHost = "signed\rhost"
@@ -1197,7 +1215,7 @@ func TestCavageVerifierRejectsForbiddenSignedHeaderValues(t *testing.T) {
 	}
 }
 
-func TestCavageSignerNormalHeaderValuesMatchHTTPWireForm(t *testing.T) {
+func TestCavageSignerSignsNormalHeaderValuesMatchingHTTPWireForm(t *testing.T) {
 	const wantSigningString = "x-wire: first\tvalue, \u00a0second"
 
 	for _, messageType := range []string{"request", "response"} {
@@ -1324,7 +1342,7 @@ func TestCavageRequestVerifierUsesRequestURI(t *testing.T) {
 	}
 }
 
-func TestCavageRequestVerifierHandlesAbsoluteFormRequestTarget(t *testing.T) {
+func TestCavageRequestVerifierVerifiesNormalizedAbsoluteFormRequestTarget(t *testing.T) {
 	readAbsoluteRequest := func(t *testing.T, method, rawRequestTarget string) *http.Request {
 		t.Helper()
 		raw := method + " " + rawRequestTarget + " HTTP/1.1\r\n" +
@@ -1579,7 +1597,7 @@ func TestCavageResponseVerifierRejectsAssociatedCONNECTRequestTarget(t *testing.
 	}
 }
 
-func TestCavageCONNECTAllowedWithoutRequestTarget(t *testing.T) {
+func TestCavageSignerAndVerifierAcceptCONNECTWithoutRequestTarget(t *testing.T) {
 	const wantSigningString = "x-test: value"
 	opts := signingStringOptions([]string{"x-test"})
 
@@ -1665,7 +1683,7 @@ func TestCavageRequestVerifierDoesNotRebuildMissingRequestURI(t *testing.T) {
 	}
 }
 
-func TestCavageResponseRequestTargetUsesAssociatedRequestURI(t *testing.T) {
+func TestCavageSignerAndVerifierUseAssociatedRequestURIForResponseRequestTarget(t *testing.T) {
 	tests := []struct {
 		name                  string
 		method                string
@@ -1726,7 +1744,7 @@ func TestCavageResponseRequestTargetUsesAssociatedRequestURI(t *testing.T) {
 	}
 }
 
-func TestCavageResponseRequestTargetUsesReceivedAbsoluteForm(t *testing.T) {
+func TestCavageSignerAndVerifierUseReceivedAbsoluteFormForResponseRequestTarget(t *testing.T) {
 	const rawRequestTarget = "http://Proxy.Example/a%2Fb?b=2&a=%2F&a=0"
 	const wantSigningString = "(request-target): patch /a%2Fb?b=2&a=%2F&a=0"
 
@@ -1829,7 +1847,7 @@ func TestCavageResponseRequestTargetUsesReceivedAbsoluteForm(t *testing.T) {
 	})
 }
 
-func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
+func TestCavageSignerAndVerifierUseOutgoingURLForResponseRequestTarget(t *testing.T) {
 	tests := []struct {
 		name                  string
 		method                string
@@ -1903,7 +1921,7 @@ func TestCavageResponseRequestTargetUsesOutgoingURL(t *testing.T) {
 	}
 }
 
-func TestCavageResponseRequestTargetDefaultsEmptyOutgoingMethodToGET(t *testing.T) {
+func TestCavageSignerAndVerifierDefaultEmptyOutgoingMethodToGETForResponseRequestTarget(t *testing.T) {
 	const wantSigningString = "(request-target): get /resource?x=%2F"
 	mac := hmac.New(sha512.New, signingStringTestSecret)
 	mac.Write([]byte(wantSigningString))
@@ -1977,7 +1995,7 @@ func TestCavageResponseRequestTargetDefaultsEmptyOutgoingMethodToGET(t *testing.
 	}
 }
 
-func TestCavageResponseRequestTargetRejectsEmptyReceivedMethod(t *testing.T) {
+func TestCavageSignerAndVerifierRejectEmptyReceivedMethodForResponseRequestTarget(t *testing.T) {
 	req := &http.Request{
 		RequestURI: "/resource?x=%2F",
 		URL:        parseSigningStringTestURL(t, "https://example.test/resource?x=%2F"),
@@ -2051,7 +2069,10 @@ func TestCavageVerifierPreservesExpiresDecimalSignature(t *testing.T) {
 		},
 	} {
 		for _, value := range []string{"1.1234567890", "1.123456789"} {
-			t.Run(test.name+"/"+value, func(t *testing.T) {
+			t.Run(test.name+"/"+map[string]string{
+				"1.1234567890": "unchanged expires is accepted",
+				"1.123456789":  "trimmed expires is rejected",
+			}[value], func(t *testing.T) {
 				parameters := `keyId="test-key",algorithm="hs2019",headers="(expires)",expires=` + value +
 					`,signature="` + base64.StdEncoding.EncodeToString(test.signature) + `"`
 				header := http.Header{HeaderSignature: {parameters}}
@@ -2077,7 +2098,7 @@ func TestCavageVerifierPreservesExpiresDecimalSignature(t *testing.T) {
 	}
 }
 
-func TestCavageVerifierNormalHeaderCanonicalization(t *testing.T) {
+func TestCavageVerifierCanonicalizesNormalHeaders(t *testing.T) {
 	want := "x-one: single\n" +
 		"x-multi: first, second\n" +
 		"x-zero: \n" +

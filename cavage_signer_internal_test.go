@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-func TestSigningTimestampsPreservesExpiration(t *testing.T) {
+func TestCavageSigningTimestampsPreservesExpiration(t *testing.T) {
 	tests := []struct {
 		name         string
 		now          time.Time

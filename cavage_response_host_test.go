@@ -47,7 +47,7 @@ func TestCavageVerifierRejectsRawResponseMissingHost(t *testing.T) {
 	assertPackageError(t, err, ErrSignedHeaderMissing)
 }
 
-func TestCavageResponseMissingHostDoesNotUseRequestOrModifyInput(t *testing.T) {
+func TestCavageSignerAndVerifierRejectMissingResponseHostWithoutMutation(t *testing.T) {
 	privateKey := ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize))
 	tests := []struct {
 		name      string
@@ -112,7 +112,7 @@ func TestCavageResponseMissingHostDoesNotUseRequestOrModifyInput(t *testing.T) {
 	}
 }
 
-func TestCavageResponseUsesOwnHost(t *testing.T) {
+func TestCavageSignerAndVerifierUseResponseHost(t *testing.T) {
 	tests := []struct {
 		name        string
 		values      []string
@@ -156,7 +156,7 @@ func TestCavageResponseUsesOwnHost(t *testing.T) {
 	}
 }
 
-func TestCavageResponseRejectsForbiddenHostValues(t *testing.T) {
+func TestCavageSignerAndVerifierRejectForbiddenResponseHostValues(t *testing.T) {
 	for _, operation := range []string{"SignResponseWithHMAC", "ParseResponse"} {
 		t.Run(operation, func(t *testing.T) {
 			res := &http.Response{
@@ -189,7 +189,7 @@ func TestCavageResponseRejectsForbiddenHostValues(t *testing.T) {
 	}
 }
 
-func TestCavageResponseDoesNotResolveUnsignedHost(t *testing.T) {
+func TestCavageSignerAndVerifierDoNotResolveUnsignedResponseHost(t *testing.T) {
 	for _, tt := range []struct {
 		name   string
 		header http.Header
@@ -216,7 +216,7 @@ func TestCavageResponseDoesNotResolveUnsignedHost(t *testing.T) {
 	}
 }
 
-func TestCavageResponseHostMatchesHTTPWireForm(t *testing.T) {
+func TestCavageSignerAndVerifierUseResponseHostMatchingHTTPWireForm(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
 		value string

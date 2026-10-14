@@ -21,7 +21,7 @@ type cavageRFC9421CoexistFixture struct {
 	RFC9421SignatureInput string `json:"rfc_9421_signature_input"`
 }
 
-func TestCavageInteroperabilityFixtureCoverage(t *testing.T) {
+func TestCavageInteroperabilityFixturesCoverRequiredCases(t *testing.T) {
 	t.Parallel()
 
 	type expectation struct {
@@ -105,7 +105,7 @@ func TestCavageInteroperabilityFixtureCoverage(t *testing.T) {
 	}
 }
 
-func TestCavageInteroperabilityStrictAndExplicitVerification(t *testing.T) {
+func TestCavageVerifierRequiresExplicitCompatibilityForInteroperabilitySignatures(t *testing.T) {
 	t.Parallel()
 
 	for _, fixture := range loadCavageInteroperabilityFixtures(t) {
@@ -140,7 +140,7 @@ func TestCavageInteroperabilityStrictAndExplicitVerification(t *testing.T) {
 	}
 }
 
-func TestCavageInteroperabilitySignerMatchesFixedSignatures(t *testing.T) {
+func TestCavageSignerMatchesFixedInteroperabilitySignatures(t *testing.T) {
 	t.Parallel()
 
 	for _, fixture := range loadCavageInteroperabilityFixtures(t) {
@@ -198,7 +198,7 @@ func TestCavageInteroperabilitySignerMatchesFixedSignatures(t *testing.T) {
 	}
 }
 
-func TestCavageInteroperabilityExtensionMappingIsExact(t *testing.T) {
+func TestCavageVerifierRequiresExactExtensionMappingForInteroperabilitySignatures(t *testing.T) {
 	t.Parallel()
 
 	fixture := cavageInteroperabilityFixtureByID(t, loadCavageInteroperabilityFixtures(t), "extension-sigre-test-rsa-sha512")
@@ -214,7 +214,7 @@ func TestCavageInteroperabilityExtensionMappingIsExact(t *testing.T) {
 		wantErr error
 	}{
 		{
-			name:    "missing mapping",
+			name:    "missing mapping is rejected",
 			key:     key,
 			wantErr: sigre.ErrInvalidSignatureAlgorithm,
 		},
@@ -225,13 +225,13 @@ func TestCavageInteroperabilityExtensionMappingIsExact(t *testing.T) {
 			wantErr: sigre.ErrInvalidSignatureAlgorithm,
 		},
 		{
-			name:    "mapping identifies a different algorithm",
+			name:    "mapping identifies a different algorithm and is rejected",
 			key:     key,
 			mapping: map[string]sigre.AlgorithmID{fixture.WireAlgorithm: sigre.AlgorithmRSAPKCS1v15SHA256},
 			wantErr: sigre.ErrAlgorithmMismatch,
 		},
 		{
-			name: "trusted metadata differs from mapping",
+			name: "trusted metadata differs from mapping and is rejected",
 			key: sigre.VerificationKey{
 				Metadata:  sigre.TrustedKeyMetadata{KeyID: fixture.KeyID, Algorithm: sigre.AlgorithmRSAPKCS1v15SHA256},
 				PublicKey: publicKey,
@@ -240,7 +240,7 @@ func TestCavageInteroperabilityExtensionMappingIsExact(t *testing.T) {
 			wantErr: sigre.ErrAlgorithmMismatch,
 		},
 		{
-			name:    "exact label and trusted algorithm",
+			name:    "exact label and trusted algorithm are accepted",
 			key:     key,
 			mapping: map[string]sigre.AlgorithmID{fixture.WireAlgorithm: sigre.AlgorithmRSAPKCS1v15SHA512},
 		},
@@ -268,7 +268,7 @@ func TestCavageInteroperabilityExtensionMappingIsExact(t *testing.T) {
 	}
 }
 
-func TestCavageInteroperabilityUsesOnlyTrustedAlgorithmAndKeyType(t *testing.T) {
+func TestCavageVerifierUsesOnlyTrustedAlgorithmAndKeyTypeForInteroperabilitySignatures(t *testing.T) {
 	t.Parallel()
 
 	fixtures := loadCavageInteroperabilityFixtures(t)
@@ -320,7 +320,7 @@ func TestCavageInteroperabilityUsesOnlyTrustedAlgorithmAndKeyType(t *testing.T) 
 	}
 }
 
-func TestCavageInteroperabilityOCICallerPolicies(t *testing.T) {
+func TestCavageVerifierEnforcesCallerSelectedDateAgeForOCI(t *testing.T) {
 	t.Parallel()
 
 	fixture := cavageInteroperabilityFixtureByID(t, loadCavageInteroperabilityFixtures(t), "oci-authorization-get-rsa-sha256")
@@ -343,7 +343,7 @@ func TestCavageInteroperabilityOCICallerPolicies(t *testing.T) {
 	}
 }
 
-func TestCavageInteroperabilityAuthorizationCoexistsWithRFC9421(t *testing.T) {
+func TestCavageVerifierVerifiesAuthorizationAlongsideRFC9421Fields(t *testing.T) {
 	t.Parallel()
 
 	data, err := os.ReadFile(filepath.Join(cavageInteroperabilityFixtureDirectory, "rfc9421-coexist.json"))

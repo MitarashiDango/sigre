@@ -139,7 +139,7 @@ func TestCavageVerifierUsesParsedRequestHost(t *testing.T) {
 	}
 }
 
-func TestCavageVerifierRequestManagedFieldPriority(t *testing.T) {
+func TestCavageRequestVerifierUsesHostTransferEncodingAndTrailerInsteadOfHeader(t *testing.T) {
 	t.Run("missing dedicated Host does not use Header", func(t *testing.T) {
 		req := &http.Request{
 			Header: http.Header{
@@ -318,7 +318,7 @@ func TestCavageVerifierUsesParsedRequestContentLengthHeader(t *testing.T) {
 	})
 }
 
-func TestCavageVerifierParsedRequestNormalFieldOrder(t *testing.T) {
+func TestCavageVerifierPreservesParsedRequestNormalFieldValueOrder(t *testing.T) {
 	want := "x-order: first, second"
 	raw := "GET /headers HTTP/1.1\r\n" +
 		"Host: request.example\r\n" +
@@ -370,7 +370,7 @@ func TestCavageVerifierReconstructsParsedResponseTrailer(t *testing.T) {
 	verifyCavageResponseHMAC(t, res)
 }
 
-func TestCavageVerifierResponseManagedFieldPriority(t *testing.T) {
+func TestCavageResponseVerifierUsesTransferEncodingAndTrailerInsteadOfHeader(t *testing.T) {
 	t.Run("Transfer-Encoding slice overrides Header", func(t *testing.T) {
 		want := "transfer-encoding: chunked"
 		res := &http.Response{
@@ -462,7 +462,7 @@ func TestCavageVerifierUsesNonChunkedResponseTrailerHeader(t *testing.T) {
 	verifyCavageResponseHMAC(t, res)
 }
 
-func TestCavageVerifierParsedResponseNormalFieldOrder(t *testing.T) {
+func TestCavageVerifierPreservesParsedResponseNormalFieldValueOrder(t *testing.T) {
 	want := "x-order: first, second"
 	raw := "HTTP/1.1 204 No Content\r\n" +
 		"X-Order: first\r\n" +
@@ -476,7 +476,7 @@ func TestCavageVerifierParsedResponseNormalFieldOrder(t *testing.T) {
 	verifyCavageResponseHMAC(t, res)
 }
 
-func TestCavageVerifierReceivedManagedSnapshotIsImmutable(t *testing.T) {
+func TestCavageVerifierPreservesParsedManagedFieldsAfterMessageMutation(t *testing.T) {
 	t.Run("request", func(t *testing.T) {
 		want := "host: Request.Example:8443\n" +
 			"transfer-encoding: chunked\n" +
@@ -633,7 +633,7 @@ func TestCavageVerifierReceivedManagedSnapshotIsImmutable(t *testing.T) {
 	})
 }
 
-func TestCavageVerifierReceivedManagedFieldErrorDoesNotModifyInput(t *testing.T) {
+func TestCavageVerifierDoesNotModifyInputOnReceivedManagedFieldError(t *testing.T) {
 	t.Run("request", func(t *testing.T) {
 		body := &receivedCountingBody{}
 		req := &http.Request{

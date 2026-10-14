@@ -10,7 +10,7 @@ import (
 	"github.com/MitarashiDango/sigre"
 )
 
-func TestParseCavageParams(t *testing.T) {
+func TestParseCavageParamsChecksParameterSyntax(t *testing.T) {
 	testCases := []struct {
 		name          string
 		input         string
@@ -18,7 +18,7 @@ func TestParseCavageParams(t *testing.T) {
 		errorContains string
 	}{
 		{
-			name:  "all parameters",
+			name:  "all parameters are parsed",
 			input: `keyId="test-key-1",algorithm="rsa-sha256",created=1618952679,expires=1618952739,headers="(created) (expires) host date digest",signature="c2ln"`,
 			expected: &sigre.ExportForTesting_cavageParams{
 				KeyID:            "test-key-1",
@@ -34,7 +34,7 @@ func TestParseCavageParams(t *testing.T) {
 			},
 		},
 		{
-			name:  "case insensitive names token values and whitespace",
+			name:  "case insensitive names token values and whitespace are accepted",
 			input: "\tKEYID \t= token-key \t, ALGORITHM=hs2019, CREATED = 1618952679 , EXPIRES\t=\t1618952739, HEADERS = \"Host Date\" , SIGNATURE = c2ln\t",
 			expected: &sigre.ExportForTesting_cavageParams{
 				KeyID:            "token-key",
@@ -58,7 +58,7 @@ func TestParseCavageParams(t *testing.T) {
 			},
 		},
 		{
-			name:  "different parameter order",
+			name:  "different parameter order is accepted",
 			input: `signature=c2ln,headers=date,keyId=key-4`,
 			expected: &sigre.ExportForTesting_cavageParams{
 				KeyID:          "key-4",
@@ -187,52 +187,52 @@ func TestParseCavageParams(t *testing.T) {
 			errorContains: "missing required parameter: keyId",
 		},
 		{
-			name:          "missing keyId",
+			name:          "missing keyId is rejected",
 			input:         `algorithm=hs2019,signature=c2ln`,
 			errorContains: "missing required parameter: keyId",
 		},
 		{
-			name:          "empty keyId",
+			name:          "empty keyId is rejected",
 			input:         `keyId="",signature=c2ln`,
 			errorContains: "missing required parameter: keyId",
 		},
 		{
-			name:          "missing signature",
+			name:          "missing signature is rejected",
 			input:         `keyId=key-1`,
 			errorContains: "missing required parameter: signature",
 		},
 		{
-			name:          "empty signature",
+			name:          "empty signature is rejected",
 			input:         `keyId=key-1,signature=""`,
 			errorContains: "missing required parameter: signature",
 		},
 		{
-			name:          "invalid base64",
+			name:          "invalid base64 is rejected",
 			input:         `keyId=key-1,signature="not@base64"`,
 			errorContains: "invalid 'signature' value",
 		},
 		{
-			name:          "unclosed quoted-string",
+			name:          "unclosed quoted-string is rejected",
 			input:         `keyId="unterminated,signature=c2ln`,
 			errorContains: "unclosed quoted-string",
 		},
 		{
-			name:          "incomplete quoted-pair",
+			name:          "incomplete quoted-pair is rejected",
 			input:         `keyId="unterminated\`,
 			errorContains: "incomplete quoted-pair",
 		},
 		{
-			name:          "invalid quoted-pair",
+			name:          "invalid quoted-pair is rejected",
 			input:         "keyId=\"invalid\\\x01pair\",signature=c2ln",
 			errorContains: "invalid quoted-pair",
 		},
 		{
-			name:          "forbidden control byte",
+			name:          "forbidden control byte is rejected",
 			input:         "keyId=\"line\nbreak\",signature=c2ln",
 			errorContains: "forbidden control byte",
 		},
 		{
-			name:          "empty headers",
+			name:          "empty headers is rejected",
 			input:         `keyId=key-1,signature=c2ln,headers=""`,
 			errorContains: "must specify a non-empty value",
 		},
@@ -366,7 +366,7 @@ func TestCavageVerifierRejectsSemanticallyInvalidParameters(t *testing.T) {
 	}
 }
 
-func TestSerializeCavageParamsRoundTrip(t *testing.T) {
+func TestSerializeCavageParamsPreservesParametersThroughRoundTrip(t *testing.T) {
 	want := &sigre.ExportForTesting_cavageParams{
 		KeyID:            "key\"quote\\slash",
 		Signature:        "c2ln",
@@ -451,7 +451,7 @@ func TestSerializeCavageParamsRejectsUnsafeValues(t *testing.T) {
 	}
 }
 
-func TestParseCavageParamsAllocationsDoNotScaleWithIgnoredParameters(t *testing.T) {
+func TestParseCavageParamsUsesAtMost32AllocationsWithIgnoredParameters(t *testing.T) {
 	input := strings.Repeat("unknown=value,", 4096) + "keyId=key,signature=c2ln"
 	allocations := testing.AllocsPerRun(20, func() {
 		if _, err := sigre.ExportForTesting_parseCavageParams(input); err != nil {
@@ -463,7 +463,7 @@ func TestParseCavageParamsAllocationsDoNotScaleWithIgnoredParameters(t *testing.
 	}
 }
 
-func TestParseCavageParamsAllocationsDoNotScaleWithIgnoredQuotedPairs(t *testing.T) {
+func TestParseCavageParamsDoesNotScaleAllocationsWithIgnoredQuotedPairs(t *testing.T) {
 	const ignoredParameter = `unknown="a\"b",`
 	smallInput := ignoredParameter + "keyId=key,signature=c2ln"
 	largeInput := strings.Repeat(ignoredParameter, 4096) + "keyId=key,signature=c2ln"

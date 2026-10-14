@@ -19,7 +19,7 @@ func sourcePolicyRequest(header http.Header) *http.Request {
 	}
 }
 
-func TestCavageRequestSignatureSource(t *testing.T) {
+func TestCavageRequestVerifierUsesConfiguredSignatureSource(t *testing.T) {
 	tests := []struct {
 		name      string
 		source    sigre.CavageRequestSignatureSource
@@ -79,7 +79,7 @@ func TestCavageRequestSignatureSource(t *testing.T) {
 			wantErr: sigre.ErrSignatureSourceConflict,
 		},
 		{
-			name:    "selected source is missing",
+			name:    "selected source is missing and is rejected",
 			source:  sigre.CavageRequestSignatureSourceAuthorization,
 			header:  http.Header{"Signature": {sourcePolicyCavageParameters}, "X-Test": {"value"}},
 			wantErr: sigre.ErrMissingSignature,
@@ -107,7 +107,7 @@ func TestCavageRequestSignatureSource(t *testing.T) {
 	}
 }
 
-func TestCavageAuthorizationCoexistsWithRFC9421Fields(t *testing.T) {
+func TestCavageRequestVerifierParsesAuthorizationAlongsideRFC9421Fields(t *testing.T) {
 	header := http.Header{
 		"Authorization":   {"Signature " + sourcePolicyCavageParameters},
 		"Signature":       {"sig1=:YWJj:"},
@@ -129,7 +129,7 @@ func TestCavageAuthorizationCoexistsWithRFC9421Fields(t *testing.T) {
 	}
 }
 
-func TestCavageResponseAlwaysUsesSignature(t *testing.T) {
+func TestCavageResponseVerifierUsesOnlySignatureHeader(t *testing.T) {
 	verifier, err := sigre.NewCavageVerifier(&sigre.CavageVerificationOptions{
 		RequestSignatureSource: sigre.CavageRequestSignatureSourceAuthorization,
 	})
@@ -160,7 +160,7 @@ func TestCavageResponseAlwaysUsesSignature(t *testing.T) {
 	}
 }
 
-func TestCavageVerifierNilMessages(t *testing.T) {
+func TestCavageVerifierRejectsNilMessagesOrHeaders(t *testing.T) {
 	verifier, err := sigre.NewCavageVerifier(nil)
 	if err != nil {
 		t.Fatalf("NewCavageVerifier() failed: %v", err)

@@ -16,7 +16,7 @@ import (
 	"github.com/MitarashiDango/sigre"
 )
 
-func TestCavageConformanceFixedSignatureVerification(t *testing.T) {
+func TestCavageVerifierAcceptsFixedConformanceSignatures(t *testing.T) {
 	for _, fixture := range loadCavageConformanceFixtures(t) {
 		t.Run(fixture.ID, func(t *testing.T) {
 			verifier, err := sigre.NewCavageVerifier(&sigre.CavageVerificationOptions{
@@ -57,7 +57,7 @@ func TestCavageConformanceFixedSignatureVerification(t *testing.T) {
 	}
 }
 
-func TestCavageConformanceSignerUsesExpectedSigningString(t *testing.T) {
+func TestCavageSignerUsesExpectedConformanceSigningStrings(t *testing.T) {
 	for _, fixture := range loadCavageConformanceFixtures(t) {
 		t.Run(fixture.ID, func(t *testing.T) {
 			now := fixture.verificationTime(t)
@@ -130,7 +130,7 @@ func TestCavageConformanceSignerUsesExpectedSigningString(t *testing.T) {
 	}
 }
 
-func TestCavageConformanceFixtureCoverage(t *testing.T) {
+func TestCavageConformanceFixturesCoverRequiredCases(t *testing.T) {
 	fixtures := loadCavageConformanceFixtures(t)
 	cryptoPaths := make(map[string]bool, 4)
 	messageTypes := make(map[string]bool, 2)

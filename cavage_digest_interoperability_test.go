@@ -14,7 +14,7 @@ import (
 	"github.com/MitarashiDango/sigre"
 )
 
-func TestActivityPubRawBodyDigestBeforeProcessing(t *testing.T) {
+func TestCavageVerifierVerifiesActivityPubSignatureWithRetainedRawBody(t *testing.T) {
 	t.Parallel()
 
 	fixture := cavageInteroperabilityFixtureByID(
@@ -72,7 +72,7 @@ func TestActivityPubRawBodyDigestBeforeProcessing(t *testing.T) {
 	}
 }
 
-func TestActivityPubDigestRejectsChangedRawBodyEvenWhenSignatureIsValid(t *testing.T) {
+func TestCavageVerifierLeavesActivityPubBodyDigestCheckToCaller(t *testing.T) {
 	t.Parallel()
 
 	fixture := cavageInteroperabilityFixtureByID(
@@ -108,7 +108,7 @@ func TestActivityPubDigestRejectsChangedRawBodyEvenWhenSignatureIsValid(t *testi
 	}
 }
 
-func TestActivityPubDigestMustBeSignedByCallerPolicy(t *testing.T) {
+func TestCavageVerifierRequiresSignedActivityPubDigestOnlyWhenConfigured(t *testing.T) {
 	t.Parallel()
 
 	fixture := cavageInteroperabilityFixtureByID(
@@ -139,7 +139,7 @@ func TestActivityPubDigestMustBeSignedByCallerPolicy(t *testing.T) {
 	}
 }
 
-func TestActivityPubDigestHelperRejectsUnsupportedOrMalformedValues(t *testing.T) {
+func TestVerifyInteroperabilitySHA256DigestRejectsUnsupportedOrMalformedValues(t *testing.T) {
 	t.Parallel()
 
 	validDigest := sha256.Sum256([]byte("fixture"))
